@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LA Transit — 24h</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #cfe3ec;
+               font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; }
+  #c { display: block; width: 100vw; height: 100vh; cursor: grab; }
+  #c.drag { cursor: grabbing; }
+  #bar { position: fixed; left: 50%; transform: translateX(-50%); bottom: 14px;
+         background: rgba(20,20,25,.82); color: #fff; border-radius: 12px;
+         padding: 10px 16px; display: flex; align-items: center; gap: 12px;
+         backdrop-filter: blur(6px); box-shadow: 0 4px 18px rgba(0,0,0,.3); }
+  #bar button { background: #fff; color: #111; border: 0; border-radius: 8px;
+                width: 38px; height: 30px; font-size: 15px; cursor: pointer; }
+  #bar input[type=range] { width: min(46vw, 520px); }
+  #bar select { background: #333; color: #fff; border: 0; border-radius: 6px; padding: 4px; }
+  #stats { font-variant-numeric: tabular-nums; opacity: .85; font-size: 13px; min-width: 150px; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="bar">
+  <button id="play" title="play/pause">⏸</button>
+  <input id="scrub" type="range" min="0" max="86399" step="10" value="0">
+  <select id="speed">
+    <option value="30">30×</option>
+    <option value="60" selected>60×</option>
+    <option value="150">150×</option>
+    <option value="400">400×</option>
+  </select>
+  <span id="stats"></span>
+</div>
+<script>
+"use strict";
+const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+const DPR = Math.min(devicePixelRatio || 1, 2);
+let W = 0, H = 0;
+function resize() {
+  W = innerWidth; H = innerHeight;
+  cv.width = W * DPR; cv.height = H * DPR;
+}
+addEventListener("resize", () => { resize(); });
+resize();
+
+// ---- view (map px -> screen) ----
+const view = { x: 0, y: 0, k: 0.2 };   // screen = (map - x,y) * k
+function fitView(mw, mh) {
+  view.k = Math.min(W / mw, H / mh);
+  view.x = (mw - W / view.k) / 2;
+  view.y = (mh - H / view.k) / 2;
+}
+
+// ---- state ----
+let map = null, data = null;
+let shapes = [];        // {pts: Float32Array, cum: Float32Array}
+let trips = [];         // {r, p, times:Int32Array, t0, t1}
+let sprites = [];       // per route: {img, w, h}
+let simT = 0;           // seconds since midnight
+let playing = true;
+let lastFrame = performance.now();
+const speedSel = document.getElementById("speed");
+const scrub = document.getElementById("scrub");
+const playBtn = document.getElementById("play");
+const stats = document.getElementById("stats");
+
+// URL params: ?t=HH:MM start time, ?speed=N, ?paused=1
+const qp = new URLSearchParams(location.search);
+if (qp.get("t")) { const [h, m] = qp.get("t").split(":").map(Number); simT = h * 3600 + (m || 0) * 60; }
+if (qp.get("speed")) speedSel.value = qp.get("speed");
+if (qp.get("paused")) playing = false;
+
+playBtn.onclick = () => { playing = !playing; playBtn.textContent = playing ? "⏸" : "▶"; };
+scrub.oninput = () => { simT = +scrub.value; };
+
+// ---- pan / zoom ----
+let dragging = false, lx = 0, ly = 0;
+cv.addEventListener("mousedown", e => { dragging = true; lx = e.clientX; ly = e.clientY; cv.classList.add("drag"); });
+addEventListener("mouseup", () => { dragging = false; cv.classList.remove("drag"); });
+addEventListener("mousemove", e => {
+  if (!dragging) return;
+  view.x -= (e.clientX - lx) / view.k; view.y -= (e.clientY - ly) / view.k;
+  lx = e.clientX; ly = e.clientY;
+});
+cv.addEventListener("wheel", e => {
+  e.preventDefault();
+  const f = Math.exp(-e.deltaY * 0.0015);
+  const mx = view.x + e.clientX / view.k, my = view.y + e.clientY / view.k;
+  view.k = Math.min(3, Math.max(0.08, view.k * f));
+  view.x = mx - e.clientX / view.k; view.y = my - e.clientY / view.k;
+}, { passive: false });
+
+// ---- sprites ----
+function makeSprite(route) {
+  const rail = route.rail, R = rail ? 12 : 9.5;
+  const label = route.n;
+  const s = document.createElement("canvas");
+  const scale = 2;
+  s.width = s.height = (R + 2) * 2 * scale;
+  const g = s.getContext("2d");
+  g.scale(scale, scale);
+  const c = (R + 2);
+  g.beginPath(); g.arc(c, c, R, 0, 7);
+  g.fillStyle = route.c; g.fill();
+  g.lineWidth = rail ? 2 : 1.2; g.strokeStyle = "rgba(255,255,255,.9)"; g.stroke();
+  g.fillStyle = route.t;
+  let fs = label.length <= 2 ? 12 : label.length === 3 ? 9.5 : 7;
+  g.font = `bold ${fs}px -apple-system, Arial`;
+  g.textAlign = "center"; g.textBaseline = "middle";
+  g.fillText(label, c, c + 0.5);
+  return { img: s, half: c };
+}
+
+// ---- load ----
+Promise.all([
+  new Promise(res => { const im = new Image(); im.onload = () => res(im); im.src = "map.png"; }),
+  fetch("schedule.json").then(r => r.json()),
+]).then(([im, d]) => {
+  map = im; data = d;
+  fitView(im.width, im.height);
+  shapes = d.shapes.map(flat => {
+    const pts = Float32Array.from(flat);
+    const n = flat.length / 2;
+    const cum = new Float32Array(n);
+    for (let i = 1; i < n; i++) {
+      const dx = pts[2*i] - pts[2*i-2], dy = pts[2*i+1] - pts[2*i-1];
+      cum[i] = cum[i-1] + Math.hypot(dx, dy);
+    }
+    return { pts, cum };
+  });
+  sprites = d.routes.map(makeSprite);
+  trips = d.trips.map(t => {
+    const times = new Int32Array(t.length - 2);
+    times[0] = t[2];
+    for (let i = 3; i < t.length; i++) times[i-2] = times[i-3] + t[i];
+    return { r: t[0], p: t[1], times, t0: times[0], t1: times[times.length-1] };
+  });
+  // draw rail last so trains sit on top of the bus swarm
+  trips.sort((a, b) => (d.routes[a.r].rail ? 1 : 0) - (d.routes[b.r].rail ? 1 : 0));
+  requestAnimationFrame(frame);
+});
+
+function smoothstep(f) { return f * f * (3 - 2 * f); }
+
+function posAlong(shape, dist) {
+  const { pts, cum } = shape;
+  let lo = 0, hi = cum.length - 1;
+  if (dist <= 0) return [pts[0], pts[1]];
+  if (dist >= cum[hi]) return [pts[2*hi], pts[2*hi+1]];
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; (cum[m] <= dist ? lo = m : hi = m); }
+  const f = (dist - cum[lo]) / (cum[hi] - cum[lo] || 1);
+  return [pts[2*lo] + (pts[2*hi] - pts[2*lo]) * f,
+          pts[2*lo+1] + (pts[2*hi+1] - pts[2*lo+1]) * f];
+}
+
+function frame(now) {
+  const dt = (now - lastFrame) / 1000; lastFrame = now;
+  if (playing) {
+    simT += dt * +speedSel.value;
+    if (simT >= 86400) simT -= 86400;
+    scrub.value = simT | 0;
+  }
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.fillStyle = "#cfe3ec"; ctx.fillRect(0, 0, W, H);
+  ctx.setTransform(DPR * view.k, 0, 0, DPR * view.k, -view.x * DPR * view.k, -view.y * DPR * view.k);
+  ctx.drawImage(map, 0, 0);
+
+  // clock above the Metro logo (map px: logo x 240-460, y 3640-3900)
+  ctx.fillStyle = "#1a1a1a";
+  ctx.font = "700 110px -apple-system, 'Helvetica Neue', Arial";
+  ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+  const hh = String(Math.floor(simT / 3600)).padStart(2, "0");
+  const mm = String(Math.floor(simT % 3600 / 60)).padStart(2, "0");
+  ctx.fillText(`${hh}:${mm}`, 240, 3590);
+
+  // vehicles
+  let active = 0;
+  const t = simT;
+  for (let i = 0; i < trips.length; i++) {
+    const tr = trips[i];
+    if (t < tr.t0 || t > tr.t1) continue;
+    const pat = data.patterns[tr.p];
+    if (!pat) continue;
+    const times = tr.times, d = pat.d;
+    let lo = 0, hi = times.length - 1;
+    while (hi - lo > 1) { const m = (lo + hi) >> 1; (times[m] <= t ? lo = m : hi = m); }
+    const span = times[hi] - times[lo];
+    const f = span > 0 ? smoothstep((t - times[lo]) / span) : 0;
+    const dist = d[lo] + (d[hi] - d[lo]) * f;
+    const [x, y] = posAlong(shapes[pat.s], dist);
+    const sp = sprites[tr.r];
+    const s = 1 / view.k * Math.min(1, view.k * 2.3);  // keep readable, shrink slightly at high zoom-out
+    ctx.drawImage(sp.img, x - sp.half * s, y - sp.half * s, sp.img.width / 2 * s, sp.img.height / 2 * s);
+    active++;
+  }
+  const hhmm = `${hh}:${mm}`;
+  stats.textContent = `${hhmm} · ${active} vehicles`;
+  requestAnimationFrame(frame);
+}
+</script>
+</body>
+</html>

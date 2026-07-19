@@ -161,6 +161,8 @@ def main():
             for row in csv.DictReader(f):
                 label = route_label(row["route_short_name"], row["route_long_name"])
                 color = row["route_color"] or BUS_COLOR
+                if color == "000000":
+                    color = "B4333D"  # map's Rapid red (GTFS says black; map draws red)
                 text = row["route_text_color"] or BUS_TEXT
                 rmeta[row["route_id"]] = (label, color, text, row["route_id"] if is_rail else "")
         trip_info = {}
