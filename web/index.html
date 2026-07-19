@@ -75,6 +75,44 @@ if (qp.get("paused")) playing = false;
 playBtn.onclick = () => { playing = !playing; playBtn.textContent = playing ? "⏸" : "▶"; };
 scrub.oninput = () => { simT = +scrub.value; };
 
+// ---- hi-res tile pyramid (pre-rendered from the PDF; levels 2x and 4x the base PNG) ----
+const TILE = 512;
+const tileCache = new Map();   // "level/c_r" -> Image
+let tilesDrawn = 0;
+function getTile(level, c, r) {
+  const key = `${level}/${c}_${r}`;
+  let img = tileCache.get(key);
+  if (!img) {
+    if (tileCache.size > 400) {          // drop oldest entries
+      for (const k of tileCache.keys()) {
+        tileCache.delete(k);
+        if (tileCache.size <= 300) break;
+      }
+    }
+    img = new Image();
+    img.src = `tiles/${level}/${c}_${r}.webp`;
+    tileCache.set(key, img);
+  }
+  return img;
+}
+function drawTiles() {
+  tilesDrawn = 0;
+  if (view.k * DPR <= 1.05 || !map) return;         // base PNG is sharp enough
+  const level = view.k * DPR <= 2.05 ? 2 : 4;
+  const ts = TILE / level;                           // tile size in map px
+  const c0 = Math.max(0, Math.floor(view.x / ts)), r0 = Math.max(0, Math.floor(view.y / ts));
+  const c1 = Math.min(Math.ceil(map.width / ts) - 1, Math.floor((view.x + W / view.k) / ts));
+  const r1 = Math.min(Math.ceil(map.height / ts) - 1, Math.floor((view.y + H / view.k) / ts));
+  for (let r = r0; r <= r1; r++)
+    for (let c = c0; c <= c1; c++) {
+      const img = getTile(level, c, r);
+      if (img.complete && img.naturalWidth) {
+        ctx.drawImage(img, c * ts, r * ts, img.naturalWidth / level, img.naturalHeight / level);
+        tilesDrawn++;
+      }
+    }
+}
+
 // ---- pan / zoom ----
 let dragging = false, lx = 0, ly = 0;
 cv.addEventListener("mousedown", e => { dragging = true; lx = e.clientX; ly = e.clientY; cv.classList.add("drag"); });
@@ -83,13 +121,15 @@ addEventListener("mousemove", e => {
   if (!dragging) return;
   view.x -= (e.clientX - lx) / view.k; view.y -= (e.clientY - ly) / view.k;
   lx = e.clientX; ly = e.clientY;
+
 });
 cv.addEventListener("wheel", e => {
   e.preventDefault();
   const f = Math.exp(-e.deltaY * 0.0015);
   const mx = view.x + e.clientX / view.k, my = view.y + e.clientY / view.k;
-  view.k = Math.min(3, Math.max(0.08, view.k * f));
+  view.k = Math.min(8, Math.max(0.08, view.k * f));
   view.x = mx - e.clientX / view.k; view.y = my - e.clientY / view.k;
+
 }, { passive: false });
 
 // ---- sprites ----
@@ -120,6 +160,10 @@ Promise.all([
 ]).then(([im, d]) => {
   map = im; data = d;
   fitView(im.width, im.height);
+  if (qp.get("k")) view.k = +qp.get("k");
+  if (qp.get("x")) view.x = +qp.get("x");
+  if (qp.get("y")) view.y = +qp.get("y");
+
   shapes = d.shapes.map(flat => {
     const pts = Float32Array.from(flat);
     const n = flat.length / 2;
@@ -166,6 +210,7 @@ function frame(now) {
   ctx.fillStyle = "#cfe3ec"; ctx.fillRect(0, 0, W, H);
   ctx.setTransform(DPR * view.k, 0, 0, DPR * view.k, -view.x * DPR * view.k, -view.y * DPR * view.k);
   ctx.drawImage(map, 0, 0);
+  drawTiles();
 
   // clock above the Metro logo (map px: logo x 240-460, y 3640-3900)
   ctx.fillStyle = "#1a1a1a";
@@ -196,7 +241,8 @@ function frame(now) {
     active++;
   }
   const hhmm = `${hh}:${mm}`;
-  stats.textContent = `${hhmm} · ${active} vehicles`;
+  stats.textContent = `${hhmm} · ${active} vehicles` +
+    (qp.get("debug") ? ` · tiles:${tilesDrawn}` : "");
   requestAnimationFrame(frame);
 }
 </script>

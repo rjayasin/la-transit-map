@@ -15,7 +15,13 @@ URL params: `?t=8:30&speed=150&paused=1`.
 
 ## Approach
 
-- **Background** — `web/map.png`, rasterized from the 47″ system-map PDF (4096px, via `sips`).
+- **Background** — `web/map.png` (4096px base, via `sips`) plus a WebP tile
+  pyramid (`web/tiles/{2,4}/`, 512px tiles at 8192/16384px ≈ print resolution)
+  pre-rendered from the 47″ system-map PDF. Tiles stream in as you zoom, so the
+  map stays crisp at any zoom with no runtime cost. (Rendering the PDF directly
+  in-browser via PDF.js was tried and rejected: it paints its huge display list
+  on the main thread, stalling the animation; a full-map SVG extraction would be
+  a 50MB+ DOM.)
 - **Data** — LA Metro static GTFS (bus + rail) cached as zips in `data/gtfs/`
   (source: gitlab.com/LACMTA). `scripts/build_data.py` extracts all trips for
   one service date (**Wed 2026-07-22**): 1,242 rail + 13,303 bus trips on 114
@@ -42,6 +48,11 @@ python3 -m venv .venv && .venv/bin/pip install numpy scipy pillow
 cd data/gtfs && for z in gtfs_bus gtfs_rail; do unzip -o $z.zip -d $z; done && cd ../..
 .venv/bin/python scripts/georef.py      # refit transform (optional)
 .venv/bin/python scripts/build_data.py  # regenerate web/schedule.json
+
+# background tiles (regenerate only if the map PDF changes)
+sips -s format png --resampleWidth 8192  26-1720_blt_system_map_47x47.5-2.pdf --out /tmp/map8k.png
+sips -s format png --resampleWidth 16384 26-1720_blt_system_map_47x47.5-2.pdf --out /tmp/map16k.png
+.venv/bin/python scripts/make_tiles.py /tmp/map8k.png /tmp/map16k.png
 ```
 
 ## Known limitations
