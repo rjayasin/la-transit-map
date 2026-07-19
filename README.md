@@ -1,7 +1,8 @@
 # la-transit-map
 
-Animated 24-hour visualization of every scheduled LA Metro bus and train,
-played over Metro's official "Bus and Rail System" map (May 2026).
+Animated 24-hour visualization of every scheduled transit vehicle in LA —
+Metro bus & rail plus 13 municipal systems and Metrolink — played over
+Metro's official "Bus and Rail System" map (May 2026).
 
 ## Run
 
@@ -24,30 +25,34 @@ URL params: `?t=8:30&speed=150&paused=1`.
   PDF-crisp. (Rendering the PDF directly in-browser via PDF.js was tried and
   rejected: it paints its huge display list on the main thread, stalling the
   animation; a full-map SVG extraction would be a 50MB+ DOM.)
-- **Data** — LA Metro static GTFS (bus + rail) cached as zips in `data/gtfs/`
-  (source: gitlab.com/LACMTA). `scripts/build_data.py` extracts all trips for
-  one service date (**Wed 2026-07-22**): 1,242 rail + 13,303 bus trips on 114
-  routes, emitted as compact `schedule.json` (~3 MB) — route colors/labels,
-  shape polylines in map pixels, per-stop distance along shape, stop arrival times.
-  Trips crossing midnight are duplicated shifted −24 h so owl service appears after 00:00.
+- **Data** — 15 static GTFS feeds cached as zips in `data/gtfs/` (see Data
+  sources). `scripts/build_data.py` extracts all trips for one service date
+  (**Wed 2026-07-22**; feeds whose calendar misses that date fall back to their
+  busiest covered Wednesday): **26,902 trips on 336 routes** — 1,242 Metro rail
+  + 13,303 Metro bus + ~12,200 municipal/Metrolink — emitted as compact
+  `schedule.json` (~5 MB): route colors/labels, shape polylines in map pixels,
+  per-stop distance along shape, stop arrival times. Trips crossing midnight
+  are duplicated shifted −24 h so owl service appears after 00:00.
 - **Georeferencing** (`scripts/georef.py`) — the map is quasi-geographic, so a
   lat/lon→pixel transform is fitted automatically: color-mask the six drawn rail
   lines, then ICP-align GTFS rail shapes to them (affine init → 2nd-order
   polynomial warp, median error ~11 px). Result in `data/transform.json`.
-  Rail shapes are additionally *snapped* onto the drawn line pixels, so trains
-  ride exactly on their painted lines; buses use the polynomial warp.
+  Metro rail shapes are additionally *snapped* onto the drawn line pixels, so
+  trains ride exactly on their painted lines; everything else uses the warp.
 - **Rendering** (`index.html`, vanilla canvas) — each vehicle is a circle in
-  its GTFS `route_color` labeled with the route number/letter (buses default to
-  Metro orange; GTFS's black for Rapid 720/754/761 is overridden with the map's
-  Rapid red). Motion eases in/out at every stop (smoothstep between scheduled
-  arrivals). Rail draws on top of buses. Digital clock (e.g. `08:30`) sits above
-  the Metro logo, lower left. The full day loops midnight→midnight.
+  its GTFS `route_color` labeled with the route number/letter (Metro buses
+  default to Metro orange; GTFS's black for Rapid 720/754/761 is overridden
+  with the map's Rapid red; long route names are compressed to ≤4-char codes).
+  Motion eases in/out at every stop (smoothstep between scheduled arrivals).
+  Rail (`route_type` 0/1/2, incl. Metrolink) draws on top of buses. Vehicles
+  that leave the drawn map area are hidden. Digital clock (e.g. `08:30`) sits
+  above the Metro logo, lower left. The full day loops midnight→midnight.
 
 ## Rebuild data
 
 ```sh
 python3 -m venv .venv && .venv/bin/pip install numpy scipy pillow
-cd data/gtfs && for z in gtfs_bus gtfs_rail; do unzip -o $z.zip -d $z; done && cd ../..
+cd data/gtfs && for z in *.zip; do unzip -o "$z" -d "${z%.zip}"; done && cd ../..
 .venv/bin/python scripts/georef.py      # refit transform (optional)
 .venv/bin/python scripts/build_data.py  # regenerate schedule.json
 
@@ -57,8 +62,43 @@ cd data/gtfs && for z in gtfs_bus gtfs_rail; do unzip -o $z.zip -d $z; done && c
 
 ## Known limitations
 
-- Metro-operated service only (no Big Blue Bus, Foothill, DASH, Metrolink…).
+- Missing systems: Glendale Beeline (download blocked), OCTA / AVTA / Santa
+  Clarita / Simi Valley (essentially off-map), Amtrak, and the small community
+  shuttles in the map's "Municipal & Neighboring" legend without public GTFS.
+- Stale feeds: Torrance Transit's newest public GTFS is from Jan 2024;
+  Culver City / Montebello / GTrans calendars end just before the target date —
+  those systems animate their busiest covered Wednesday instead.
+- Metrolink's feed has no shape geometry; its trains run station-to-station
+  straight lines (and vanish at the map edge, as do all off-map segments).
 - The map is schematic in places; buses in the far San Fernando Valley /
-  far-east corners can drift off their drawn streets (rail is snapped, so trains stay true).
-- A few routes (e.g. 161) extend past the map edge and park at the border.
+  far-east corners can drift off their drawn streets (Metro rail is snapped,
+  so trains stay true).
 - Downtown is a ghosted call-out box on the source map; vehicles pass over it.
+
+## Data sources
+
+Background map: [LA Metro "Bus and Rail System" map (May 2026)](https://www.metro.net/riding/maps/)
+— the PDF in this repo, © LACMTA.
+
+GTFS feeds (cached in `data/gtfs/`, fetched 2026-07-19). Metro feeds come from
+LACMTA's GitLab; municipal feeds are the latest-copy mirrors of the
+[Mobility Database](https://mobilitydatabase.org) catalog; Metrolink is from
+its official site.
+
+| Feed | Agency | Source |
+|---|---|---|
+| `gtfs_bus` | LA Metro bus | [gitlab.com/LACMTA/gtfs_bus](https://gitlab.com/LACMTA/gtfs_bus) |
+| `gtfs_rail` | LA Metro rail | [gitlab.com/LACMTA/gtfs_rail](https://gitlab.com/LACMTA/gtfs_rail) |
+| `metrolink` | Metrolink | [metrolinktrains.com GTFS](https://metrolinktrains.com/globalassets/about/gtfs/gtfs.zip) |
+| `bigbluebus` | Big Blue Bus (Santa Monica) | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-big-blue-bus-gtfs-37.zip?alt=media) |
+| `culvercity` | Culver CityBus | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-culver-city-bus-gtfs-38.zip?alt=media) |
+| `ladot` | LADOT (DASH, Commuter Express) | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-los-angeles-department-of-transportation-ladot-gtfs-1210.zip?alt=media) |
+| `longbeach` | Long Beach Transit | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-long-beach-transit-lbt-gtfs-1198.zip?alt=media) |
+| `foothill` | Foothill Transit | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-foothill-transit-gtfs-101.zip?alt=media) |
+| `torrance` | Torrance Transit | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-torrance-transit-gtfs-34.zip?alt=media) |
+| `norwalk` | Norwalk Transit | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-norwalk-transit-system-nts-gtfs-2242.zip?alt=media) |
+| `montebello` | Montebello Bus Lines | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-montebello-bus-lines-gtfs-2201.zip?alt=media) |
+| `gtrans` | GTrans (Gardena) | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-gtrans-gtfs-2270.zip?alt=media) |
+| `pasadena` | Pasadena Transit | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-pasadena-transit-gtfs-41.zip?alt=media) |
+| `burbank` | BurbankBus | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-burbankbus-gtfs-2149.zip?alt=media) |
+| `beachcities` | Beach Cities Transit (Redondo) | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-beach-cities-transit-gtfs-1999.zip?alt=media) |
