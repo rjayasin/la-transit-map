@@ -16,12 +16,14 @@ URL params: `?t=8:30&speed=150&paused=1`.
 ## Approach
 
 - **Background** — `web/map.png` (4096px base, via `sips`) plus a WebP tile
-  pyramid (`web/tiles/{2,4}/`, 512px tiles at 8192/16384px ≈ print resolution)
-  pre-rendered from the 47″ system-map PDF. Tiles stream in as you zoom, so the
-  map stays crisp at any zoom with no runtime cost. (Rendering the PDF directly
-  in-browser via PDF.js was tried and rejected: it paints its huge display list
-  on the main thread, stalling the animation; a full-map SVG extraction would be
-  a 50MB+ DOM.)
+  pyramid (`web/tiles/{2,4,8}/`, 512px tiles ≡ 8192/16384/32768px ≈ up to
+  700 dpi of the 47″ map) rendered tile-by-tile from the PDF vectors with
+  PyMuPDF (`scripts/make_tiles.py`), so no giant intermediate bitmap is needed.
+  Tiles cascade in as you zoom, and max zoom is capped at the deepest level's
+  1:1, so the background is never shown upscaled — every reachable zoom is
+  PDF-crisp. (Rendering the PDF directly in-browser via PDF.js was tried and
+  rejected: it paints its huge display list on the main thread, stalling the
+  animation; a full-map SVG extraction would be a 50MB+ DOM.)
 - **Data** — LA Metro static GTFS (bus + rail) cached as zips in `data/gtfs/`
   (source: gitlab.com/LACMTA). `scripts/build_data.py` extracts all trips for
   one service date (**Wed 2026-07-22**): 1,242 rail + 13,303 bus trips on 114
@@ -49,10 +51,8 @@ cd data/gtfs && for z in gtfs_bus gtfs_rail; do unzip -o $z.zip -d $z; done && c
 .venv/bin/python scripts/georef.py      # refit transform (optional)
 .venv/bin/python scripts/build_data.py  # regenerate web/schedule.json
 
-# background tiles (regenerate only if the map PDF changes)
-sips -s format png --resampleWidth 8192  26-1720_blt_system_map_47x47.5-2.pdf --out /tmp/map8k.png
-sips -s format png --resampleWidth 16384 26-1720_blt_system_map_47x47.5-2.pdf --out /tmp/map16k.png
-.venv/bin/python scripts/make_tiles.py /tmp/map8k.png /tmp/map16k.png
+# background tiles (regenerate only if the map PDF changes; needs pip install pymupdf)
+.venv/bin/python scripts/make_tiles.py
 ```
 
 ## Known limitations
