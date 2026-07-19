@@ -13,13 +13,15 @@ the after-midnight portion of "yesterday's" service appears at the start of
 the simulated day.
 """
 import csv, json, math, os, sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta
 
 import numpy as np
+from PIL import Image
+from scipy.spatial import cKDTree
 
 sys.path.insert(0, "scripts")
-from georef import load_masks  # noqa: E402
+from georef import EXCLUDE, load_masks  # noqa: E402
 
 TARGET = date(2026, 7, 22)  # a Wednesday inside the Metro JUNE26 calendar window
 GTFS = "data/gtfs"
@@ -103,6 +105,111 @@ def route_label(short, long_name):
         return t2
     words = [w for w in s.replace("-", " ").split() if w]
     return "".join(w[0] for w in words[:3]).upper() if len(words) > 1 else tok[:3].upper()
+
+
+# ---- drawn-line masks & snapping ----------------------------------------
+# Every agency's lines are drawn in a distinct color; snapping each route's
+# warped shape onto its color mask puts vehicles exactly on the drawn lines.
+
+_IMG = None, None
+
+def map_image():
+    global _IMG
+    if _IMG[0] is None:
+        im = np.asarray(Image.open("map.png").convert("RGB"), dtype=np.int32)
+        keep = np.ones(im.shape[:2], dtype=bool)
+        for x0, y0, x1, y1 in EXCLUDE:
+            keep[y0:y1, x0:x1] = False
+        _IMG = im, keep
+    return _IMG
+
+_TREES = {}
+
+def mask_tree(colors, tol=38.0):
+    """KD-tree over map pixels within tol of ANY of the given colors."""
+    key = (tuple(map(tuple, colors)), tol)
+    if key not in _TREES:
+        im, keep = map_image()
+        m = np.zeros(keep.shape, dtype=bool)
+        for rgb in colors:
+            d2 = ((im - np.array(rgb)) ** 2).sum(axis=2)
+            m |= d2 < tol * tol
+        ys, xs = np.nonzero(m & keep)
+        _TREES[key] = cKDTree(np.c_[xs, ys]) if len(xs) > 300 else None
+    return _TREES[key]
+
+# Metro's drawn line colors (sampled from the map)
+ORANGE = (217, 129, 83)     # Metro Local/Rapid orange
+RAPID_RED = (180, 51, 61)   # 720/754/761
+
+# Per-agency drawn-line color seeds, sampled from the map's legend swatches.
+# Thin dashes sample washed-out, so each seed is refined against pixels found
+# along the agency's actual routes before masking. Pasadena Transit's color is
+# plain gray (identical to street art), so it keeps the polynomial warp.
+LEGEND_SEEDS = {
+    "culvercity": [(215, 215, 157)],
+    "gtrans": [(198, 165, 188)],
+    "ladot": [(175, 170, 141), (154, 150, 117)],   # DASH + Commuter Express olives
+    "longbeach": [(136, 88, 92)],
+    "norwalk": [(197, 224, 223)],
+    "bigbluebus": [(143, 135, 136)],
+    "foothill": [(108, 133, 116)],
+    "montebello": [(172, 186, 153)],
+    "torrance": [(137, 139, 174)],
+    "burbank": [(132, 168, 155)],
+    "beachcities": [(170, 181, 169)],
+}
+
+def refine_color(shape_pts, seed, r2=55 * 55, need=250):
+    """Median of pixels along the shapes that are close to the seed color."""
+    im, keep = map_image()
+    h, w = keep.shape
+    seed = np.array(seed)
+    samples = []
+    for pts in shape_pts[:20]:
+        for x, y in densify(pts, 10.0):
+            xi, yi = int(x), int(y)
+            if not (1 <= xi < w - 1 and 1 <= yi < h - 1) or not keep[yi, xi]:
+                continue
+            for dx, dy in ((0, 0), (2, 0), (-2, 0), (0, 2), (0, -2)):
+                c = im[yi + dy, xi + dx]
+                if ((c - seed) ** 2).sum() < r2:
+                    samples.append(c)
+    if len(samples) < need:
+        return None
+    return tuple(np.median(samples, axis=0).astype(int).tolist())
+
+def snap_coherent(pts, tree, caps=(40.0, 26.0, 14.0), win=61):
+    """Snap a warped polyline onto a drawn-line mask. The displacement field is
+    smoothed along the line so whole stretches move to the same drawn street
+    instead of individual points grabbing different parallels. Returns None if
+    the line isn't substantially drawn on the map."""
+    P = np.array(densify(pts, 4.0), dtype=float)
+    n = len(P)
+    if n < 8 or tree is None:
+        return None
+    idx = np.arange(n)
+    for ci, cap in enumerate(caps):
+        d, j = tree.query(P)
+        ok = d < cap
+        if ci == 0 and ok.sum() < n * 0.5:
+            return None                    # mostly undrawn: keep the warp
+        if ok.sum() < 4:
+            return None
+        disp = np.full((n, 2), np.nan)
+        disp[ok] = tree.data[j[ok]] - P[ok]
+        k = np.ones(win) / win
+        for c in (0, 1):
+            col = np.interp(idx, idx[~np.isnan(disp[:, c])], disp[:, c][~np.isnan(disp[:, c])])
+            disp[:, c] = np.convolve(np.pad(col, win // 2, mode="edge"), k, "valid")
+        P = P + disp
+    d, j = tree.query(P)                   # final tight snap + light smoothing
+    ok = d < 8
+    P[ok] = tree.data[j[ok]]
+    k = np.ones(7) / 7
+    for c in (0, 1):
+        P[:, c] = np.convolve(np.pad(P[:, c], 3, mode="edge"), k, "valid")
+    return [tuple(p) for p in P]
 
 
 def densify(pts, max_step=6.0):
@@ -260,22 +367,45 @@ def main():
             if row["shape_id"] in used_shapes:
                 tmp[row["shape_id"]].append((int(row["shape_pt_sequence"]),
                                              float(row["shape_pt_lon"]), float(row["shape_pt_lat"])))
-        rail_route_by_shape = {}
-        if feed == "gtfs_rail":
-            for row in trip_rows:
-                rail_route_by_shape[row["shape_id"]] = row["route_id"]
+        route_by_shape = {row.get("shape_id", ""): row["route_id"] for row in trip_rows}
+        warped = {}
         for sid, p in tmp.items():
             p.sort()
             x, y = to_px(np.array([q[1] for q in p]), np.array([q[2] for q in p]))
-            pts = list(zip(x, y))
+            warped[sid] = list(zip(x, y))
+
+        # snap shapes onto the drawn lines of this system where they exist
+        agency_tree = None
+        if feed in LEGEND_SEEDS and warped:
+            cols = [refine_color(list(warped.values()), s) for s in LEGEND_SEEDS[feed]]
+            cols = [c for c in cols if c]
+            if cols:
+                agency_tree = mask_tree(cols, 30.0)
+            print(f"  {feed} drawn color(s): {cols}")
+
+        snapped = 0
+        for sid, pts in warped.items():
+            out_pts = None
             if feed == "gtfs_rail":
-                tree = rail_trees.get(rail_route_by_shape.get(sid))
+                tree = rail_trees.get(route_by_shape.get(sid))
                 if tree is not None:
-                    pts = snap_rail(densify(pts), tree)
-            shapes_raw[(feed, sid)] = simplify(pts)
+                    out_pts = snap_rail(densify(pts), tree)
+            elif feed == "gtfs_bus":
+                rid0 = (route_by_shape.get(sid) or "").split("-")[0]
+                if rid0 in ("720", "754", "761"):
+                    out_pts = snap_coherent(pts, mask_tree([RAPID_RED]))
+                elif rid0 == "910":
+                    pass   # J/Silver: drawn color collides with freeway gray
+                else:
+                    out_pts = snap_coherent(pts, mask_tree([ORANGE]))
+            elif agency_tree is not None:
+                out_pts = snap_coherent(pts, agency_tree)
+            if out_pts is not None:
+                snapped += 1
+            shapes_raw[(feed, sid)] = simplify(out_pts if out_pts is not None else pts)
         n_trips = len(trips_out) - n_before
         stats[feed] = n_trips
-        print(f"{feed}: {n_trips} trips on {day} ({len(tmp)} shapes)")
+        print(f"{feed}: {n_trips} trips on {day} ({snapped}/{len(warped)} shapes snapped)")
 
     # finalize shapes + cumulative dists (including stop-derived pseudo-shapes)
     shapes_out, cums, shape_index = [], [], {}

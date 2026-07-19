@@ -37,8 +37,15 @@ URL params: `?t=8:30&speed=150&paused=1`.
   lat/lon→pixel transform is fitted automatically: color-mask the six drawn rail
   lines, then ICP-align GTFS rail shapes to them (affine init → 2nd-order
   polynomial warp, median error ~11 px). Result in `data/transform.json`.
-  Metro rail shapes are additionally *snapped* onto the drawn line pixels, so
-  trains ride exactly on their painted lines; everything else uses the warp.
+- **Line snapping** — after the warp, every shape is pulled onto its system's
+  *drawn* lines so vehicles ride the artwork, not raw geography. Rail snaps to
+  the six rail-color masks. Buses snap per system color (Metro orange, Rapid
+  red, and each municipal agency's color — legend swatches seed the palette,
+  refined against pixels along the routes) using a coherence trick: the snap
+  displacement is smoothed along the shape so whole stretches move to the same
+  drawn street instead of points grabbing different parallels. Shapes whose
+  lines aren't drawn (minor routes, Pasadena/Norwalk/Burbank grays, J-line
+  silver ≈ freeway gray, Metrolink) keep the warp.
 - **Rendering** (`index.html`, vanilla canvas) — each vehicle is a circle in
   its GTFS `route_color` labeled with the route number/letter (Metro buses
   default to Metro orange; GTFS's black for Rapid 720/754/761 is overridden
