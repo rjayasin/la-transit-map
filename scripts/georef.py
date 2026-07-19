@@ -11,7 +11,7 @@ from PIL import Image
 from scipy.spatial import cKDTree
 from scipy.optimize import least_squares
 
-MAP = "web/map.png"
+MAP = "map.png"
 RAIL = "data/gtfs/gtfs_rail"
 
 # GTFS route colors for the six rail lines

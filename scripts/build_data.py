@@ -1,4 +1,4 @@
-"""Build web/schedule.json from cached GTFS feeds.
+"""Build schedule.json from cached GTFS feeds.
 
 - Picks a service date (weekday) and gathers all active trips (bus + rail).
 - Projects shapes into map pixel space via data/transform.json (poly2 warp).
@@ -263,7 +263,7 @@ def main():
 
     out = {"date": SERVICE_DATE, "routes": routes, "shapes": shapes_out,
            "patterns": patterns_out, "trips": trips_final}
-    with open("web/schedule.json", "w") as f:
+    with open("schedule.json", "w") as f:
         json.dump(out, f, separators=(",", ":"))
     stats["routes"] = len(routes)
     stats["shapes"] = len(shapes_out)

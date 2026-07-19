@@ -26,7 +26,7 @@ for lvl in LEVELS:
     s = base_scale * lvl          # output px per pt
     w, h = int(pw * s + 0.5), int(ph * s + 0.5)
     cols, rows = (w + TILE - 1) // TILE, (h + TILE - 1) // TILE
-    out = f"web/tiles/{lvl}"
+    out = f"tiles/{lvl}"
     os.makedirs(out, exist_ok=True)
     total = 0
     for r in range(rows):
