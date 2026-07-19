@@ -7,7 +7,7 @@
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #cfe3ec;
                font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; }
-  #c { display: block; width: 100vw; height: 100vh; cursor: grab; }
+  #c { display: block; width: 100vw; height: 100vh; cursor: grab; touch-action: none; }
   #c.drag { cursor: grabbing; }
   #bar { position: fixed; left: 50%; transform: translateX(-50%); bottom: 14px;
          background: rgba(20,20,25,.82); color: #fff; border-radius: 12px;
@@ -128,14 +128,40 @@ addEventListener("mousemove", e => {
   lx = e.clientX; ly = e.clientY;
 
 });
+function zoomAt(cx, cy, f) {
+  const mx = view.x + cx / view.k, my = view.y + cy / view.k;
+  view.k = Math.min(8 / DPR, Math.max(0.08, view.k * f));  // cap at deepest tile level's 1:1
+  view.x = mx - cx / view.k; view.y = my - cy / view.k;
+}
 cv.addEventListener("wheel", e => {
   e.preventDefault();
-  const f = Math.exp(-e.deltaY * 0.0015);
-  const mx = view.x + e.clientX / view.k, my = view.y + e.clientY / view.k;
-  view.k = Math.min(8 / DPR, Math.max(0.08, view.k * f));  // cap at deepest tile level's 1:1
-  view.x = mx - e.clientX / view.k; view.y = my - e.clientY / view.k;
-
+  zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.0015));
 }, { passive: false });
+
+// touch: one finger pans, two fingers pinch-zoom around the pinch midpoint
+let touches = new Map();
+function touchPts(e) { for (const t of e.changedTouches) touches.set(t.identifier, [t.clientX, t.clientY]); }
+cv.addEventListener("touchstart", e => { e.preventDefault(); touchPts(e); }, { passive: false });
+cv.addEventListener("touchmove", e => {
+  e.preventDefault();
+  const prev = new Map(touches);
+  touchPts(e);
+  const ids = [...touches.keys()];
+  if (ids.length === 1 && prev.has(ids[0])) {
+    const [px, py] = prev.get(ids[0]), [cx, cy] = touches.get(ids[0]);
+    view.x -= (cx - px) / view.k; view.y -= (cy - py) / view.k;
+  } else if (ids.length >= 2 && prev.has(ids[0]) && prev.has(ids[1])) {
+    const [ax0, ay0] = prev.get(ids[0]), [bx0, by0] = prev.get(ids[1]);
+    const [ax1, ay1] = touches.get(ids[0]), [bx1, by1] = touches.get(ids[1]);
+    const d0 = Math.hypot(bx0 - ax0, by0 - ay0), d1 = Math.hypot(bx1 - ax1, by1 - ay1);
+    const mx = (ax1 + bx1) / 2, my = (ay1 + by1) / 2;
+    view.x -= (mx - (ax0 + bx0) / 2) / view.k; view.y -= (my - (ay0 + by0) / 2) / view.k;
+    if (d0 > 0) zoomAt(mx, my, d1 / d0);
+  }
+}, { passive: false });
+const endTouch = e => { for (const t of e.changedTouches) touches.delete(t.identifier); };
+cv.addEventListener("touchend", endTouch);
+cv.addEventListener("touchcancel", endTouch);
 
 // ---- sprites ----
 function makeSprite(route) {
