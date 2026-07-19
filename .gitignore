@@ -1,0 +1,5 @@
+data/gtfs/gtfs_bus/
+data/gtfs/gtfs_rail/
+.DS_Store
+__pycache__/
+.venv/
