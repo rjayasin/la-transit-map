@@ -15,16 +15,36 @@
   #bar { position: fixed; left: 50%; transform: translateX(-50%); bottom: 14px;
          background: rgba(20,20,25,.82); color: #fff; border-radius: 12px;
          padding: 10px 16px; display: flex; align-items: center; gap: 12px;
-         backdrop-filter: blur(6px); box-shadow: 0 4px 18px rgba(0,0,0,.3); }
+         backdrop-filter: blur(6px); box-shadow: 0 4px 18px rgba(0,0,0,.3);
+         transition: opacity .45s; }
+  #bar.faded { opacity: 0; pointer-events: none; }
   #bar button { background: #fff; color: #111; border: 0; border-radius: 8px;
                 width: 38px; height: 30px; font-size: 15px; cursor: pointer; }
   #bar input[type=range] { width: min(46vw, 520px); }
   #bar select { background: #333; color: #fff; border: 0; border-radius: 6px; padding: 4px; }
   #stats { font-variant-numeric: tabular-nums; opacity: .85; font-size: 13px; min-width: 150px; }
+  #filters { position: fixed; bottom: 72px;
+             background: rgba(20,20,25,.92); color: #fff; border-radius: 12px;
+             padding: 12px 16px; display: none; backdrop-filter: blur(6px);
+             box-shadow: 0 4px 18px rgba(0,0,0,.3); font-size: 13px; }
+  #filters.open { display: block; }
+  /* caret pointing down at the filter button */
+  #filters::after { content: ""; position: absolute; bottom: -8px;
+                    left: var(--caret-x, 50%); margin-left: -8px;
+                    border: 8px solid transparent; border-bottom: 0;
+                    border-top-color: rgba(20,20,25,.92); }
+  #filters .grid { display: grid; grid-template-columns: repeat(2, max-content);
+                   gap: 5px 20px; margin-top: 9px; }
+  #filters label { display: flex; align-items: center; gap: 7px; cursor: pointer;
+                   white-space: nowrap; }
+  #filters .head { border-bottom: 1px solid rgba(255,255,255,.25); padding-bottom: 8px;
+                   font-weight: 600; }
+  #filters input { accent-color: #e8a33d; }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
+<div id="filters"></div>
 <div id="bar">
   <button id="play" title="play/pause">⏸</button>
   <input id="scrub" type="range" min="0" max="86399" step="10" value="0">
@@ -35,6 +55,11 @@
     <option value="400">400×</option>
   </select>
   <span id="stats"></span>
+  <button id="sys" title="transit systems">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-2px">
+      <path d="M3 4h18l-7.2 8.4V19l-3.6 2.4v-9L3 4z"/>
+    </svg>
+  </button>
 </div>
 <script>
 "use strict";
@@ -78,8 +103,80 @@ if (qp.get("t")) { const [h, m] = qp.get("t").split(":").map(Number); simT = h *
 if (qp.get("speed")) speedSel.value = qp.get("speed");
 if (qp.get("paused")) playing = false;
 
-playBtn.onclick = () => { playing = !playing; playBtn.textContent = playing ? "⏸" : "▶"; };
+function togglePlay() { playing = !playing; playBtn.textContent = playing ? "⏸" : "▶"; }
+playBtn.onclick = togglePlay;
 scrub.oninput = () => { simT = +scrub.value; };
+addEventListener("keydown", e => {
+  if (e.code !== "Space" || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (/^(INPUT|SELECT|BUTTON|TEXTAREA)$/.test(e.target.tagName)) return;
+  e.preventDefault();
+  togglePlay();
+});
+
+// ---- system filter popover ----
+const bar = document.getElementById("bar");
+const filtersEl = document.getElementById("filters");
+const sysBtn = document.getElementById("sys");
+let sysOn = [];
+sysBtn.onclick = () => {
+  if (filtersEl.classList.toggle("open")) {
+    // center over the button, clamped to the viewport; aim the caret at it
+    const cx = sysBtn.getBoundingClientRect().left + sysBtn.offsetWidth / 2;
+    const w = filtersEl.offsetWidth;
+    const left = Math.min(Math.max(cx - w / 2, 8), W - w - 8);
+    filtersEl.style.left = left + "px";
+    filtersEl.style.setProperty("--caret-x", (cx - left) + "px");
+  }
+};
+function buildFilters(systems) {
+  sysOn = systems.map(() => true);
+  const allCb = document.createElement("input");
+  allCb.type = "checkbox"; allCb.checked = true;
+  const head = document.createElement("label");
+  head.className = "head";
+  head.append(allCb, "All systems");
+  const grid = document.createElement("div");
+  grid.className = "grid";
+  const boxes = systems.map((name, i) => {
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.checked = true;
+    cb.onchange = () => {
+      sysOn[i] = cb.checked;
+      const on = sysOn.filter(Boolean).length;
+      allCb.checked = on === sysOn.length;
+      allCb.indeterminate = on > 0 && on < sysOn.length;
+    };
+    const lab = document.createElement("label");
+    lab.append(cb, name);
+    grid.append(lab);
+    return cb;
+  });
+  allCb.onchange = () => {
+    allCb.indeterminate = false;
+    sysOn.fill(allCb.checked);
+    boxes.forEach(b => { b.checked = allCb.checked; });
+  };
+  filtersEl.append(head, grid);
+}
+
+// ---- auto-hide the control bar; wake on activity near the bottom edge ----
+let barTimer = 0;
+function bumpBar() {
+  bar.classList.remove("faded");
+  clearTimeout(barTimer);
+  barTimer = setTimeout(() => {
+    if (filtersEl.classList.contains("open")) { bumpBar(); return; }
+    bar.classList.add("faded");
+  }, 5000);
+}
+addEventListener("mousemove", e => { if (H - e.clientY < 140) bumpBar(); });
+addEventListener("touchstart", e => {
+  const t = e.touches[0];
+  if (t && H - t.clientY < 140) bumpBar();
+}, { passive: true });
+for (const el of [bar, filtersEl])
+  for (const ev of ["pointerdown", "input"]) el.addEventListener(ev, bumpBar);
+bumpBar();
 
 // ---- hi-res tile pyramid (pre-rendered from the PDF; levels 2x and 4x the base PNG) ----
 const TILE = 512;
@@ -213,6 +310,7 @@ Promise.all([
   }
   shapes = d.shapes.map(toShape);
   sprites = d.routes.map(makeSprite);
+  buildFilters(d.systems || []);
   insetRect = d.insetRect;
   insetRuns = (d.insets || []).map(runs => runs && runs.map(toShape));
   // GTFS times are minute-quantized, so consecutive stops can share a
@@ -333,6 +431,7 @@ function frame(now) {
   for (let i = 0; i < trips.length; i++) {
     const tr = trips[i];
     if (t < tr.t0 || t > tr.t1) continue;
+    if (!sysOn[data.routes[tr.r].sy]) continue;
     const pat = data.patterns[tr.p];
     if (!pat) continue;
     const times = tr.times, d = pat.d;

@@ -33,6 +33,18 @@ FEEDS = ["gtfs_rail", "gtfs_bus", "bigbluebus", "culvercity", "ladot", "longbeac
 METRO_BUS_COLOR, METRO_BUS_TEXT = "E16710", "FFFFFF"
 FALLBACK_COLOR, FALLBACK_TEXT = "888888", "FFFFFF"
 
+# display names for the system filter UI, keyed by feed
+FEED_NAMES = {
+    "gtfs_rail": "Metro Rail", "gtfs_bus": "Metro Bus",
+    "bigbluebus": "Big Blue Bus", "culvercity": "Culver CityBus",
+    "ladot": "LADOT", "longbeach": "Long Beach Transit",
+    "foothill": "Foothill Transit", "torrance": "Torrance Transit",
+    "norwalk": "Norwalk Transit", "montebello": "Montebello Bus Lines",
+    "gtrans": "GTrans", "pasadena": "Pasadena Transit",
+    "burbank": "BurbankBus", "beachcities": "Beach Cities Transit",
+    "metrolink": "Metrolink",
+}
+
 # Metrolink trips.txt leaves shape_id empty; shapes.txt carries per-line
 # in/out geometry instead. direction_id orientation is not uniform across
 # lines — this mapping was measured by monotone-fitting each direction's
@@ -493,6 +505,7 @@ def main():
     rail_trees = load_masks()
 
     routes, route_idx = [], {}      # route_idx[(feed, route_id)]
+    systems, system_idx = [], {}    # per-feed display names, routes point in
     shapes_raw = {}                 # (feed, shape_id) -> [(x,y)...] px
     shape_ll = {}                   # shape key -> [(lon,lat)...] original
     shape_rail = {}                 # (feed, shape_id) -> rail route_id
@@ -568,8 +581,12 @@ def main():
             rkey = (feed, rid)
             if rkey not in route_idx:
                 label, color, text, rail = rmeta[rid]
+                if feed not in system_idx:
+                    system_idx[feed] = len(systems)
+                    systems.append(FEED_NAMES.get(feed, feed))
                 route_idx[rkey] = len(routes)
-                routes.append({"n": label, "c": "#" + color, "t": "#" + text, "rail": rail})
+                routes.append({"n": label, "c": "#" + color, "t": "#" + text,
+                               "rail": rail, "sy": system_idx[feed]})
             pkey = (feed, sid, stop_seq)
             if pkey not in pattern_idx:
                 pattern_idx[pkey] = len(patterns)
@@ -709,7 +726,8 @@ def main():
                           for r in shape_runs[si]]
     stats["inset_shapes"] = len(used_si)
 
-    out = {"date": TARGET.strftime("%Y%m%d"), "routes": routes, "shapes": shapes_out,
+    out = {"date": TARGET.strftime("%Y%m%d"), "systems": systems,
+           "routes": routes, "shapes": shapes_out,
            "patterns": patterns_out, "trips": trips_final,
            "insets": insets_out, "insetRect": list(INSET_RECT)}
     with open("schedule.json", "w") as f:
