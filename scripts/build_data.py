@@ -538,17 +538,67 @@ def densify(pts, max_step=6.0):
     return out
 
 
-def snap_rail(pts, tree, cap=45.0, win=9):
-    """Snap polyline points to nearest drawn-line pixel; smooth; keep original
-    where the drawn line has gaps (stations, ghosted downtown)."""
-    arr = np.array(pts)
-    dist, j = tree.query(arr)
-    snapped = np.where((dist < cap)[:, None], tree.data[j][:, [0, 1]], arr)
-    k = np.ones(win) / win
-    sm = np.copy(snapped)
-    for c in (0, 1):
-        sm[:, c] = np.convolve(np.pad(snapped[:, c], win // 2, mode="edge"), k, "valid")
-    return [tuple(p) for p in sm]
+def chaikin(pts, iters=2):
+    """Round a polyline's corners (Chaikin corner cutting), keeping endpoints.
+    Collinear runs stay straight, so only turns get curved."""
+    P = np.asarray(pts, dtype=float)
+    for _ in range(iters):
+        if len(P) < 3:
+            break
+        a, b = P[:-1], P[1:]
+        cut = np.empty((2 * len(a), 2))
+        cut[0::2] = 0.75 * a + 0.25 * b
+        cut[1::2] = 0.25 * a + 0.75 * b
+        P = np.vstack([P[0], cut, P[-1]])
+    return P
+
+
+def snap_rail(pts, tree, caps=(45.0, 24.0), wins=(15, 9), max_gap=45, rnd=2):
+    """Snap a warped rail polyline onto its drawn-track mask, coherently.
+
+    Each pass pins points within `cap` of the track to it, interpolates that
+    displacement across shorter unsnapped runs, and smooths it along the line,
+    so a stretch where the schematic warp drifts off the drawn track is pulled
+    back as a whole rather than a few points snapping and the rest sagging.
+    Snapping each point to its own nearest track pixel (the previous approach)
+    left a westward hook on the B line by Universal City; the passes tighten
+    the cap so the second pass reels in what the first left bulging. Runs
+    longer than `max_gap` densified points keep the raw warp instead — the
+    ghosted downtown call-out has no track to snap onto. Corners are rounded
+    with Chaikin so turns read as curves, not right angles."""
+    P = np.array(densify(pts, 4.0), dtype=float)
+    n = len(P)
+    idx = np.arange(n)
+    for pass_i, (cap, win) in enumerate(zip(caps, wins)):
+        dist, j = tree.query(P)
+        ok = dist < cap
+        if ok.sum() < 4:
+            if pass_i == 0:
+                return [tuple(p) for p in P]    # nothing drawn here: keep the warp
+            break
+        disp = np.full((n, 2), np.nan)
+        disp[ok] = tree.data[j[ok]] - P[ok]
+        i = 0                                    # keep the warp through long gaps
+        while i < n:
+            if not ok[i]:
+                k = i
+                while k < n and not ok[k]:
+                    k += 1
+                if k - i > max_gap:
+                    disp[i:k] = 0.0
+                i = k
+            else:
+                i += 1
+        known = ~np.isnan(disp[:, 0])
+        kern = np.ones(win) / win
+        for c in (0, 1):
+            col = np.interp(idx, idx[known], disp[known, c])
+            disp[:, c] = np.convolve(np.pad(col, win // 2, mode="edge"), kern, "valid")
+        P = P + disp
+    dist, j = tree.query(P)                      # final tight re-snap on the track
+    close = dist < 8
+    P[close] = tree.data[j[close]]
+    return [tuple(p) for p in chaikin(simplify(P, 1.0), rnd)]
 
 
 def simplify(pts, tol=1.2):
@@ -842,7 +892,7 @@ def main():
             if feed == "gtfs_rail":
                 tree = rail_trees.get(rid)
                 if tree is not None:
-                    out_pts = snap_rail(densify(pts), tree)
+                    out_pts = snap_rail(pts, tree)
                 if rid in ROUTE_COLORS:
                     shape_isnap[(feed, sid)] = ([ROUTE_COLORS[rid]], TOL, toks)
             elif feed == "gtfs_bus":
