@@ -364,21 +364,95 @@ def badge_words(region="main"):
     return _BADGES[region]
 
 
-def route_anchors(tokens, tree, region="main"):
+def badge_line_color(cx, cy, r=7):
+    """Dominant fill color of the chip a route-number badge sits on.
+
+    A badge is the number drawn on a small colored chip. In a tiny window the
+    only pixels are the cream map background, the dark number glyphs, and the
+    chip fill. Discard the background (cream/white — every channel high; keyed
+    off min-channel so a saturated fill like Metro orange (217,129,83), bright
+    in red but low in blue, isn't mistaken for it) and the glyphs (near-black),
+    then take the largest color cluster of what remains: that is the chip.
+    A plain median would blend chip and glyph and pull a saturated orange chip
+    halfway to gray; the dominant cluster recovers the true fill (orange badges
+    land within ~1 px of orange this way, ~48 px via the median). Returns None
+    when there's no fill to read."""
+    im, _ = map_image()
+    h, w = im.shape[:2]
+    xi, yi = int(round(cx)), int(round(cy))
+    if not (r <= xi < w - r and r <= yi < h - r):
+        return None
+    sub = im[yi - r:yi + r + 1, xi - r:xi + r + 1].reshape(-1, 3).astype(int)
+    fill = sub[(sub.min(1) <= 190) & (sub.max(1) >= 70)]   # not cream, not glyph
+    if len(fill) < 6:
+        return None
+    codes = (fill // 24) @ np.array([10000, 100, 1])       # coarse color bins
+    vals, counts = np.unique(codes, return_counts=True)
+    return np.median(fill[codes == vals[counts.argmax()]], axis=0)
+
+
+_RIVAL_PALETTE = None
+
+
+def rival_palette():
+    """Every agency's drawn color, as a lookup for whose badge a chip is.
+    Metro exact colors plus each municipal legend seed / badge fill — enough
+    to tell one agency's chip from another's, which is all the anchor test
+    needs."""
+    global _RIVAL_PALETTE
+    if _RIVAL_PALETTE is None:
+        cols = [ORANGE, RAPID_RED, *ROUTE_COLORS.values()]
+        for seeds in LEGEND_SEEDS.values():
+            cols += seeds
+        cols += list(BADGE_FILLS.values())
+        _RIVAL_PALETTE = np.array(cols, dtype=float)
+    return _RIVAL_PALETTE
+
+
+def route_anchors(tokens, tree, region="main", colors=None, margin=8.0):
     """Badge positions for any of the route's number tokens that lie on the
     agency's drawn-line mask (rejects same-number badges of other agencies,
     highway shields, street labels). The agency color must be present AT the
     word itself (badge fill / colored glyph strokes), not merely nearby —
-    another agency's badge drawn against this agency's line must not match."""
+    another agency's badge drawn against this agency's line must not match.
+
+    colors: the agency's drawn color(s). A route number can belong to several
+    agencies (Big Blue Bus 3 and Culver CityBus 3 run bundled through
+    Westchester), and their lines pass close enough that a foreign badge clips
+    this agency's mask and passes the presence test above. So also read the
+    badge's own chip color and drop it when some *other* agency's color
+    explains it better than this one's — Culver City's khaki "3" is far nearer
+    Culver City's own color than Big Blue's gray. This is relative, not a fixed
+    tolerance: a chip that is merely a faded shade of the agency's own color
+    (its own color still the closest) is kept, so genuine badges survive.
+    Passed only for agencies where the drawn colors are muted and mutually
+    distinct; Metro's saturated orange fades toward other agencies' hues and
+    so is left ungated."""
     if tree is None:
         return []
+    own = [np.array(c, dtype=float) for c in (colors or [])]
+    rivals = None
+    if own:
+        pal = rival_palette()
+        own_arr = np.array(own)
+        # drop palette entries that ARE this agency's own color
+        d_to_own = np.sqrt(((pal[:, None, :] - own_arr[None, :, :]) ** 2).sum(2)).min(1)
+        rivals = pal[d_to_own > 15]
     pts = []
     for t in tokens:
         for cx, cy in badge_words(region).get(t, ()):
             # >=10: a real badge fill / glyph has dozens of mask pixels here;
             # stray antialiased fringes near a foreign badge have a few
-            if len(tree.query_ball_point([cx, cy], 6.0)) >= 10:
-                pts.append((cx, cy))
+            if len(tree.query_ball_point([cx, cy], 6.0)) < 10:
+                continue
+            if own:
+                bc = badge_line_color(cx, cy)
+                if bc is not None:
+                    own_d = min(np.sqrt(((bc - c) ** 2).sum()) for c in own)
+                    riv_d = np.sqrt(((rivals - bc) ** 2).sum(1)).min()
+                    if riv_d < own_d - margin:
+                        continue               # another agency's color fits better
+            pts.append((cx, cy))
     return pts
 
 
@@ -781,15 +855,22 @@ def main():
                     cols = [ORANGE]
                 if cols is not None:
                     tree = mask_tree(cols)
+                    # no color gate: Metro's orange badges render with variable
+                    # fade (crisp ~1 px from orange, faded ~70), overlapping
+                    # muted foreign badge colors, so a color test drops genuine
+                    # ones. Metro's number badges are dense and its anchoring
+                    # was already tuned without it.
                     anc = route_anchors(toks, tree)
                     anchored += bool(anc)
                     out_pts = snap_coherent(pts, tree, anchors=anc)
                     shape_isnap[(feed, sid)] = (cols, 38.0, toks)
             elif agency_tree is not None:
                 anchor_tree = agency_tree
+                anchor_cols = list(good)
                 if feed in BADGE_FILLS:
-                    anchor_tree = mask_tree(good + [BADGE_FILLS[feed]], 30.0)
-                anc = route_anchors(toks, anchor_tree)
+                    anchor_cols = good + [BADGE_FILLS[feed]]
+                    anchor_tree = mask_tree(anchor_cols, 30.0)
+                anc = route_anchors(toks, anchor_tree, colors=anchor_cols)
                 anchored += bool(anc)
                 out_pts = snap_coherent(pts, agency_tree, anchors=anc)
                 shape_isnap[(feed, sid)] = (good, 30.0, toks)
@@ -828,7 +909,8 @@ def main():
                 if key[0] == "gtfs_bus" and cols:
                     cols = [ORANGE]   # inset draws ALL Metro bus lines orange
                 tree = mask_tree(cols, tol, region="inset") if cols else None
-                anc = route_anchors(toks, tree, region="inset")
+                gate = None if key[0] in ("gtfs_bus", "gtfs_rail") else cols
+                anc = route_anchors(toks, tree, region="inset", colors=gate)
                 runs = inset_runs(ll, shapes_raw[key], cums[si], tree, anc)
             shape_runs[si] = runs
         return shape_runs[si]
