@@ -5,12 +5,18 @@ The paths drawn are exactly what schedule.json feeds the animation — the poly2
 warp plus whatever line snapping build_data.py managed — so anything that looks
 off here is off in the browser too.
 
+The background is drawn from the high-resolution WebP tile pyramid (tiles/),
+so zoomed-in crops stay PDF-crisp instead of an upscaled map.png. The deepest
+level whose output fits within a size cap is chosen automatically; pass --png
+to fall back to map.png, or --level to force one.
+
 Usage:
     scripts/debug_line.py 720                # Metro Bus 720
     scripts/debug_line.py 2 --system "Big"   # disambiguate a shared number
     scripts/debug_line.py 720 --stops        # + stop positions along the shape
     scripts/debug_line.py 720 --inset        # the DTLA inset panel instead
     scripts/debug_line.py 720 --shape 3      # one variant only
+    scripts/debug_line.py 720 --png          # cheap map.png background
 """
 import argparse
 import json
@@ -23,6 +29,10 @@ from PIL import Image, ImageDraw
 MAP = "map.png"
 SCHEDULE = "schedule.json"
 OUTDIR = "scratch"
+TILEDIR = "tiles"
+TILE = 512                 # tile edge, px (matches make_tiles.py)
+TILE_LEVELS = (8, 4, 2)    # scale factors over the 4096px base, deepest first
+OUT_CAP = 4000             # longest output edge before dropping to a shallower level
 PAD = 150          # px of map kept around the path's bounding box
 
 # high-contrast against the map's muted palette; one per shape variant
@@ -120,14 +130,55 @@ def point_at(pts, dist):
 
 
 def draw_path(dr, pts, color, width):
-    dr.line(pts, fill=(0, 0, 0), width=width + 4, joint="curve")   # casing
+    pad = max(2, round(width * 0.4))
+    dr.line(pts, fill=(0, 0, 0), width=width + 2 * pad, joint="curve")  # casing
     dr.line(pts, fill=color, width=width, joint="curve")
 
 
 def draw_dot(dr, xy, color, r):
     x, y = xy
-    dr.ellipse([x - r - 1, y - r - 1, x + r + 1, y + r + 1], fill=(0, 0, 0))
+    pad = max(1, round(r * 0.25))
+    dr.ellipse([x - r - pad, y - r - pad, x + r + pad, y + r + pad], fill=(0, 0, 0))
     dr.ellipse([x - r, y - r, x + r, y + r], fill=color)
+
+
+def choose_level(box, forced=None):
+    """Deepest tile level whose rendered crop stays under OUT_CAP px on its
+    long edge, or None to signal the map.png fallback (tiles missing, --png,
+    or a crop so large that even the shallowest level is oversized — e.g.
+    --full, where PDF-crisp detail isn't the point)."""
+    if forced == 1 or not os.path.isdir(TILEDIR):
+        return None
+    long_edge = max(box[2] - box[0], box[3] - box[1])
+    if forced in TILE_LEVELS:
+        return forced
+    for lvl in TILE_LEVELS:
+        if os.path.isdir(f"{TILEDIR}/{lvl}") and long_edge * lvl <= OUT_CAP:
+            return lvl
+    return None
+
+
+def render_region(box, level):
+    """Stitch the tile pyramid into the crop `box` (given in 4096px base
+    coordinates) at `level`. A base coordinate p maps to this image at
+    (p - box_origin) * level."""
+    x0, y0, x1, y1 = (v * level for v in box)
+    canvas = Image.new("RGB", (x1 - x0, y1 - y0), (255, 255, 255))
+    for c in range(x0 // TILE, (x1 - 1) // TILE + 1):
+        for r in range(y0 // TILE, (y1 - 1) // TILE + 1):
+            path = f"{TILEDIR}/{level}/{c}_{r}.webp"
+            if os.path.exists(path):
+                canvas.paste(Image.open(path), (c * TILE - x0, r * TILE - y0))
+    return canvas
+
+
+def background(box, forced=None):
+    """(image, scale) for the crop: the tile pyramid where it fits, else the
+    map.png crop at 1:1."""
+    level = choose_level(box, forced)
+    if level is None:
+        return Image.open(MAP).convert("RGB").crop(box), 1
+    return render_region(box, level), level
 
 
 def main():
@@ -139,7 +190,10 @@ def main():
     ap.add_argument("--stops", action="store_true", help="mark stop positions")
     ap.add_argument("--inset", action="store_true", help="draw the DTLA inset runs")
     ap.add_argument("--full", action="store_true", help="whole map, no crop to the path")
-    ap.add_argument("--width", type=int, default=5, help="path stroke width (default 5)")
+    ap.add_argument("--width", type=int, default=5, help="path stroke width in base px (default 5)")
+    ap.add_argument("--png", action="store_true", help="use map.png instead of the tile pyramid")
+    ap.add_argument("--level", type=int, choices=(2, 4, 8),
+                    help="force a tile level instead of choosing by crop size")
     ap.add_argument("-o", "--out", help=f"output path (default {OUTDIR}/debug_<line>.png)")
     a = ap.parse_args()
 
@@ -164,43 +218,55 @@ def main():
             sys.exit(f"--shape must be 0..{len(variants) - 1}")
         variants = [variants[a.shape]]
 
-    im = Image.open(MAP).convert("RGB")
-    dr = ImageDraw.Draw(im)
-    drawn = []
-
+    # collect draw ops in 4096px base coordinates, then render once the crop
+    # box and tile level are known
+    paths, dots, drawn = [], [], []
     for n, (si, (ntrips, pi)) in enumerate(variants):
         color = COLORS[n % len(COLORS)]
         pat = d["patterns"][pi]
         if a.inset:
             for r, run in enumerate(d["insets"][si] or []):
                 pts = pairs(run)
-                draw_path(dr, pts, color, a.width)
+                paths.append((pts, color))
                 drawn += pts
                 if a.stops and pat and "ir" in pat:
                     for k, ir in enumerate(pat["ir"]):
                         if ir == r:
-                            draw_dot(dr, point_at(pts, pat["id"][k]), color, a.width)
+                            dots.append((point_at(pts, pat["id"][k]), color))
         else:
             pts = pairs(d["shapes"][si])
-            draw_path(dr, pts, color, a.width)
+            paths.append((pts, color))
             drawn += pts
             if a.stops and pat:
                 for dist in pat["d"]:
-                    draw_dot(dr, point_at(pts, dist), color, a.width)
+                    dots.append((point_at(pts, dist), color))
 
     if not drawn:
         sys.exit("nothing to draw" + (" — this route has no inset runs" if a.inset else ""))
 
+    W, H = 4096, 4139
     if a.inset:
         box = tuple(d["insetRect"])
     elif a.full:
-        box = (0, 0, im.width, im.height)
+        box = (0, 0, W, H)
     else:
         xs = [p[0] for p in drawn]
         ys = [p[1] for p in drawn]
         box = (max(0, int(min(xs)) - PAD), max(0, int(min(ys)) - PAD),
-               min(im.width, int(max(xs)) + PAD), min(im.height, int(max(ys)) + PAD))
-    im = im.crop(box)
+               min(W, int(max(xs)) + PAD), min(H, int(max(ys)) + PAD))
+
+    im, scale = background(box, forced=1 if a.png else a.level)
+    dr = ImageDraw.Draw(im)
+    width = max(2, min(a.width * scale, a.width * 4))
+    radius = max(2, min(a.width * scale, a.width * 4))
+
+    def to_px(p):
+        return ((p[0] - box[0]) * scale, (p[1] - box[1]) * scale)
+
+    for pts, color in paths:
+        draw_path(dr, [to_px(p) for p in pts], color, width)
+    for xy, color in dots:
+        draw_dot(dr, to_px(xy), color, radius)
 
     slug = "".join(c if c.isalnum() else "-" for c in system.lower()).strip("-")
     while "--" in slug:
@@ -209,7 +275,8 @@ def main():
         OUTDIR, f"debug_{slug}_{a.line}{'_inset' if a.inset else ''}.png")
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     im.save(out)
-    print(f"crop {box} -> {out} ({im.width}x{im.height})")
+    src = "map.png" if scale == 1 else f"tiles L{scale}"
+    print(f"crop {box} via {src} -> {out} ({im.width}x{im.height})")
 
 
 if __name__ == "__main__":
