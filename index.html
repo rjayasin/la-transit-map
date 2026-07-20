@@ -210,10 +210,35 @@ Promise.all([
     return { pts, cum };
   });
   sprites = d.routes.map(makeSprite);
+  // GTFS times are minute-quantized, so consecutive stops can share a
+  // timestamp (or sit 1s apart — a scheduler trick to force ordering) while
+  // the bus travels between them, teleporting the vehicle. Spread each run
+  // of (near-)tied times over the adjacent gap, proportional to distance.
+  function detie(times, dist) {
+    const n = times.length;
+    let i = 0;
+    while (i < n - 1) {
+      if (times[i+1] - times[i] > 1) { i++; continue; }
+      let j = i;
+      while (j + 1 < n && times[j+1] - times[j] <= 1) j++;
+      if (j + 1 < n) {           // spread [i..j+1] over the gap that follows
+        const T = times[i], U = times[j+1], D = dist[j+1] - dist[i];
+        if (D > 0) for (let m = i + 1; m <= j; m++)
+          times[m] = T + (U - T) * (dist[m] - dist[i]) / D;
+      } else if (i > 0) {        // run ends the trip: use the preceding gap
+        const T = times[i-1], U = times[j], D = dist[j] - dist[i-1];
+        if (D > 0) for (let m = i; m < j; m++)
+          times[m] = T + (U - T) * (dist[m] - dist[i-1]) / D;
+      }
+      i = j;
+    }
+  }
   trips = d.trips.map(t => {
-    const times = new Int32Array(t.length - 2);
+    const times = new Float64Array(t.length - 2);
     times[0] = t[2];
     for (let i = 3; i < t.length; i++) times[i-2] = times[i-3] + t[i];
+    const pat = d.patterns[t[1]];
+    if (pat) detie(times, pat.d);
     return { r: t[0], p: t[1], times, t0: times[0], t1: times[times.length-1] };
   });
   // draw rail last so trains sit on top of the bus swarm

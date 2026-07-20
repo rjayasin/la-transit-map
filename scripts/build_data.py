@@ -32,6 +32,21 @@ FEEDS = ["gtfs_rail", "gtfs_bus", "bigbluebus", "culvercity", "ladot", "longbeac
 METRO_BUS_COLOR, METRO_BUS_TEXT = "E16710", "FFFFFF"
 FALLBACK_COLOR, FALLBACK_TEXT = "888888", "FFFFFF"
 
+# Metrolink trips.txt leaves shape_id empty; shapes.txt carries per-line
+# in/out geometry instead. direction_id orientation is not uniform across
+# lines — this mapping was measured by monotone-fitting each direction's
+# stop sequence against both shapes (wrong one fits ~1000 px off, right
+# one <1 px).
+METROLINK_SHAPES = {
+    ("91 Line", "0"): "91in", ("91 Line", "1"): "91out",
+    ("Antelope Valley Line", "0"): "AVout", ("Antelope Valley Line", "1"): "AVin",
+    ("Inland Emp.-Orange Co. Line", "0"): "IEOCin", ("Inland Emp.-Orange Co. Line", "1"): "IEOCout",
+    ("Orange County Line", "0"): "OCin", ("Orange County Line", "1"): "OCout",
+    ("Riverside Line", "0"): "RIVERout", ("Riverside Line", "1"): "RIVERin",
+    ("San Bernardino Line", "0"): "SBout", ("San Bernardino Line", "1"): "SBin",
+    ("Ventura County Line", "0"): "VTout", ("Ventura County Line", "1"): "VTin",
+}
+
 with open("data/transform.json") as f:
     TR = json.load(f)["poly2"]
 
@@ -266,24 +281,44 @@ def simplify(pts, tol=1.2):
 
 
 def project_stops(shape_px, cum, stop_px):
-    """Distance along shape for each stop, forced monotonic."""
-    P = np.asarray(shape_px)
+    """Distance along shape for each stop: minimum-cost monotone assignment.
+
+    Projects every stop onto every shape segment, then a DP picks the
+    non-decreasing (by segment) sequence minimizing total squared stop-to-shape
+    distance. A greedy nearest-point ratchet fails on loops and overlapping
+    out/back legs: one stop matching the wrong leg jams all later stops at the
+    end of the shape, freezing the whole pattern.
+    """
+    P = np.asarray(shape_px, dtype=float)
+    S = len(stop_px)
+    if len(P) < 2:
+        return [0.0] * S
     A, Bv = P[:-1], P[1:] - P[:-1]
     L2 = (Bv ** 2).sum(1)
     L2[L2 == 0] = 1e-9
-    dists = []
-    lo = 0.0
-    for sx, sy in stop_px:
-        rel = np.array([sx, sy]) - A
-        t = np.clip((rel * Bv).sum(1) / L2, 0, 1)
-        proj = A + Bv * t[:, None]
-        d2 = ((proj - [sx, sy]) ** 2).sum(1)
-        along = cum[:-1] + t * np.sqrt(L2)
-        d2[along < lo - 30] = 1e18
-        i = int(np.argmin(d2))
-        lo = max(lo, along[i])
-        dists.append(lo)
-    return dists
+    stops = np.asarray(stop_px, dtype=float)
+    rel = stops[:, None, :] - A[None, :, :]              # S x N x 2
+    t = np.clip((rel * Bv).sum(2) / L2, 0.0, 1.0)
+    proj = A + Bv * t[..., None]
+    d2 = ((proj - stops[:, None, :]) ** 2).sum(2)        # S x N
+    along = cum[:-1] + t * np.sqrt(L2)
+    N = d2.shape[1]
+    idx = np.arange(N)
+    pmarg = np.empty((S, N), dtype=np.int32)             # backtrack pointers
+    best = d2[0]
+    for i in range(1, S):
+        m = np.minimum.accumulate(best)
+        arg = np.where(best <= m, idx, 0)
+        np.maximum.accumulate(arg, out=arg)              # argmin of best[:k+1]
+        pmarg[i] = arg
+        best = d2[i] + m
+    ks = np.empty(S, dtype=np.int64)
+    ks[-1] = int(np.argmin(best))
+    for i in range(S - 1, 0, -1):
+        ks[i - 1] = pmarg[i][ks[i]]
+    dists = along[np.arange(S), ks]
+    np.maximum.accumulate(dists, out=dists)              # order ties within a segment
+    return [float(v) for v in dists]
 
 
 def main():
@@ -331,8 +366,14 @@ def main():
             rail = row.get("route_type") in ("0", "1", "2")
             rmeta[row["route_id"]] = (label, color, text or "FFFFFF", rail)
 
-        trip_info = {row["trip_id"]: (row["route_id"], row.get("shape_id", ""))
-                     for row in trip_rows if row["service_id"] in active}
+        trip_info = {}
+        for row in trip_rows:
+            if row["service_id"] not in active:
+                continue
+            sid = row.get("shape_id", "")
+            if feed == "metrolink":
+                sid = METROLINK_SHAPES.get((row["route_id"], row.get("direction_id", "")), sid)
+            trip_info[row["trip_id"]] = (row["route_id"], sid)
 
         stop_times = defaultdict(list)
         for row in read_csv(feed, "stop_times.txt"):
@@ -425,12 +466,16 @@ def main():
         spx = [stops_px[(feed, s)] for s in stop_seq]
         key = (feed, sid)
         if key not in shape_index:            # no shape in feed: polyline through stops
-            if len(set(spx)) < 2:
-                patterns_out.append(None)
-                stats["skipped_no_shape"] += 1
-                continue
-            shapes_raw[key] = spx
-            add_shape(key, spx)
+            # key per pattern — distinct stop sequences must not share one
+            # pseudo-shape (all Metrolink lines once collided on an empty sid)
+            key = (feed, sid, stop_seq)
+            if key not in shape_index:
+                if len(set(spx)) < 2:
+                    patterns_out.append(None)
+                    stats["skipped_no_shape"] += 1
+                    continue
+                shapes_raw[key] = spx
+                add_shape(key, spx)
         si = shape_index[key]
         d = project_stops(shapes_raw[key], cums[si], spx)
         patterns_out.append({"s": si, "d": [round(v) for v in d]})
