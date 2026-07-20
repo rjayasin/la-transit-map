@@ -205,15 +205,80 @@ def refine_color(shape_pts, seed, r2=55 * 55, need=250):
         return None
     return tuple(np.median(samples, axis=0).astype(int).tolist())
 
-def snap_coherent(pts, tree, caps=(40.0, 26.0, 14.0), win=61):
+# ---- route-number badge anchors from the source PDF ----------------------
+# The map draws a numbered badge on every route line. All routes of one agency
+# share a drawn color, so mask snapping alone can lock a shape onto a parallel
+# street belonging to a different route. Badge text extracted from the vector
+# PDF pins each shape to its own drawn line: a word matching the route's number
+# that sits on the agency's color mask is a point known to be ON that route.
+
+_BADGES = None
+
+def badge_words():
+    """{token: [(x, y) map px, ...]} for every word on the map, or None."""
+    global _BADGES
+    if _BADGES is None:
+        _BADGES = {}
+        try:
+            import fitz
+            doc = fitz.open("26-1720_blt_system_map_47x47.5-2.pdf")
+            page = doc[0]
+            im, _ = map_image()
+            s = im.shape[1] / page.rect.width
+            out = defaultdict(list)
+            for x0, y0, x1, y1, w, *_r in page.get_text("words"):
+                cx, cy = (x0 + x1) / 2 * s, (y0 + y1) / 2 * s
+                if any(ex0 <= cx < ex1 and ey0 <= cy < ey1 for ex0, ey0, ex1, ey1 in EXCLUDE):
+                    continue
+                out[w.strip()].append((cx, cy))
+            _BADGES = dict(out)
+        except Exception as e:                      # missing pdf / pymupdf
+            print(f"badge extraction unavailable: {e}")
+    return _BADGES
+
+
+def route_anchors(tokens, tree):
+    """Badge positions for any of the route's number tokens that lie on the
+    agency's drawn-line mask (rejects same-number badges of other agencies,
+    highway shields, street labels)."""
+    if tree is None:
+        return []
+    pts = []
+    for t in tokens:
+        for cx, cy in badge_words().get(t, ()):
+            d, _ = tree.query([cx, cy])
+            if d < 12:
+                pts.append((cx, cy))
+    return pts
+
+
+def snap_coherent(pts, tree, caps=(40.0, 26.0, 14.0), win=61, anchors=None):
     """Snap a warped polyline onto a drawn-line mask. The displacement field is
     smoothed along the line so whole stretches move to the same drawn street
     instead of individual points grabbing different parallels. Returns None if
-    the line isn't substantially drawn on the map."""
+    the line isn't substantially drawn on the map.
+
+    anchors: points known to lie on this route's drawn line (its map badges).
+    The global warp's local error can exceed the spacing of parallel drawn
+    streets, so first shift the polyline by a displacement field interpolated
+    between anchors, then snap with tighter caps so the corrected line can't
+    wander back onto a neighboring route."""
     P = np.array(densify(pts, 4.0), dtype=float)
     n = len(P)
     if n < 8 or tree is None:
         return None
+    if anchors:
+        cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(P, axis=0).T))])
+        A = np.asarray(anchors, dtype=float)
+        d2 = ((P[None, :, :] - A[:, None, :]) ** 2).sum(2)
+        j = d2.argmin(1)
+        near = np.sqrt(d2[np.arange(len(A)), j]) < 120       # badge serves this shape
+        if near.any():
+            order = np.argsort(cum[j[near]])
+            s = cum[j[near]][order]
+            D = (A[near] - P[j[near]])[order]
+            P = P + np.c_[np.interp(cum, s, D[:, 0]), np.interp(cum, s, D[:, 1])]
+            caps = (26.0, 14.0)
     idx = np.arange(n)
     for ci, cap in enumerate(caps):
         d, j = tree.query(P)
@@ -461,7 +526,7 @@ def main():
                 stops_px[(feed, r["stop_id"])] = (x, y)
                 stops_ll[(feed, r["stop_id"])] = (float(r["stop_lon"]), float(r["stop_lat"]))
 
-        rmeta = {}
+        rmeta, badge_tokens = {}, {}
         for row in read_csv(feed, "routes.txt"):
             label = route_label(row.get("route_short_name", ""), row.get("route_long_name", ""))
             color = (row.get("route_color") or "").strip()
@@ -472,6 +537,9 @@ def main():
                 color = "B4333D"  # map's Rapid red (GTFS says black; map draws red)
             rail = row.get("route_type") in ("0", "1", "2")
             rmeta[row["route_id"]] = (label, color, text or "FFFFFF", rail)
+            # tokens as printed on map badges, for anchor lookup
+            short = (row.get("route_short_name") or "").strip()
+            badge_tokens[row["route_id"]] = set(short.replace("/", " ").split()) | {label}
 
         trip_info = {}
         for row in trip_rows:
@@ -531,9 +599,10 @@ def main():
                 agency_tree = mask_tree(cols, 30.0)
             print(f"  {feed} drawn color(s): {cols}")
 
-        snapped = 0
+        snapped = anchored = 0
         for sid, pts in warped.items():
             out_pts = None
+            toks = badge_tokens.get(route_by_shape.get(sid), set())
             if feed == "gtfs_rail":
                 tree = rail_trees.get(route_by_shape.get(sid))
                 if tree is not None:
@@ -541,13 +610,19 @@ def main():
             elif feed == "gtfs_bus":
                 rid0 = (route_by_shape.get(sid) or "").split("-")[0]
                 if rid0 in ("720", "754", "761"):
-                    out_pts = snap_coherent(pts, mask_tree([RAPID_RED]))
+                    tree = mask_tree([RAPID_RED])
                 elif rid0 == "910":
-                    pass   # J/Silver: drawn color collides with freeway gray
+                    tree = None   # J/Silver: drawn color collides with freeway gray
                 else:
-                    out_pts = snap_coherent(pts, mask_tree([ORANGE]))
+                    tree = mask_tree([ORANGE])
+                if tree is not None:
+                    anc = route_anchors(toks, tree)
+                    anchored += bool(anc)
+                    out_pts = snap_coherent(pts, tree, anchors=anc)
             elif agency_tree is not None:
-                out_pts = snap_coherent(pts, agency_tree)
+                anc = route_anchors(toks, agency_tree)
+                anchored += bool(anc)
+                out_pts = snap_coherent(pts, agency_tree, anchors=anc)
             if out_pts is not None:
                 snapped += 1
             shapes_raw[(feed, sid)] = simplify(out_pts if out_pts is not None else pts)
@@ -557,7 +632,8 @@ def main():
                 shape_rail[(feed, sid)] = route_by_shape.get(sid)
         n_trips = len(trips_out) - n_before
         stats[feed] = n_trips
-        print(f"{feed}: {n_trips} trips on {day} ({snapped}/{len(warped)} shapes snapped)")
+        print(f"{feed}: {n_trips} trips on {day} "
+              f"({snapped}/{len(warped)} shapes snapped, {anchored} anchored)")
 
     # finalize shapes + cumulative dists (including stop-derived pseudo-shapes)
     shapes_out, cums, shape_index = [], [], {}

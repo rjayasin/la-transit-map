@@ -58,12 +58,12 @@ URL params: `?t=8:30&speed=150&paused=1`.
 ## Rebuild data
 
 ```sh
-python3 -m venv .venv && .venv/bin/pip install numpy scipy pillow
+python3 -m venv .venv && .venv/bin/pip install numpy scipy pillow pymupdf
 cd data/gtfs && for z in *.zip; do unzip -o "$z" -d "${z%.zip}"; done && cd ../..
 .venv/bin/python scripts/georef.py      # refit transform (optional)
-.venv/bin/python scripts/build_data.py  # regenerate schedule.json
+.venv/bin/python scripts/build_data.py  # regenerate schedule.json (pymupdf: badge anchors from the PDF)
 
-# background tiles (regenerate only if the map PDF changes; needs pip install pymupdf)
+# background tiles (regenerate only if the map PDF changes)
 .venv/bin/python scripts/make_tiles.py
 ```
 
