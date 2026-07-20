@@ -116,9 +116,11 @@ route with a little margin:
 .venv/bin/python scripts/debug_line.py 720 --inset    # the DTLA inset panel
 ```
 
-A route label alone is ambiguous — a dozen agencies run a line "1" — so the
-script lists the matching systems and exits when the label is shared; pass
-`--system` with any substring to pick one. Each route usually has several
+A route label alone is ambiguous — a dozen agencies run a line "1" — so a
+shared label prompts for which system to draw, by number or by any substring
+of the name. `--system` skips the prompt, and when there's nobody to ask
+(piped or redirected) the script prints the `--system` flags and exits 2
+instead of hanging. Each route usually has several
 shape variants, listed on stdout sorted by trip count and drawn in different
 colors. The top two are normally the two directions of the same corridor and
 overlap almost exactly, so use `--shape N` to read them one at a time.

@@ -50,11 +50,37 @@ def find_route(d, label, system):
         sys.exit(f"no route labeled {label!r}"
                  + (f" in a system matching {system!r}" if system else ""))
     if len(hits) > 1:
-        print(f"{label!r} exists in several systems — pass --system:", file=sys.stderr)
-        for i in hits:
-            print(f"  --system {d['systems'][d['routes'][i]['sy']]!r}", file=sys.stderr)
-        sys.exit(2)
+        return pick_system(d, label, hits)
     return hits[0]
+
+
+def pick_system(d, label, hits):
+    """Ask which system's route to draw. Falls back to printing the --system
+    flags and exiting when there's nobody to ask (piped, redirected, CI)."""
+    names = [d["systems"][d["routes"][i]["sy"]] for i in hits]
+    if not (sys.stdin.isatty() and sys.stderr.isatty()):
+        print(f"{label!r} exists in several systems — pass --system:", file=sys.stderr)
+        for n in names:
+            print(f"  --system {n!r}", file=sys.stderr)
+        sys.exit(2)
+    print(f"Route {label!r} runs in several systems:", file=sys.stderr)
+    for n, name in enumerate(names, 1):
+        print(f"  {n:2d}) {name}", file=sys.stderr)
+    while True:
+        try:
+            raw = input(f"select [1-{len(hits)}, or q to quit]: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print(file=sys.stderr)
+            sys.exit(2)
+        if raw.lower() in ("q", "quit", "exit"):
+            sys.exit(2)
+        if raw.isdigit() and 1 <= int(raw) <= len(hits):
+            return hits[int(raw) - 1]
+        # also accept a unique substring of the system name
+        m = [i for i, name in enumerate(names) if raw and raw.lower() in name.lower()]
+        if len(m) == 1:
+            return hits[m[0]]
+        print("  not a valid choice", file=sys.stderr)
 
 
 def shapes_for(d, ridx):
