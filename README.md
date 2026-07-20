@@ -50,7 +50,17 @@ URL params: `?t=8:30&speed=150&paused=1`.
   artwork and so punch holes in the color masks — are bridged by a
   morphological closing, since a broken line otherwise loses the snap to
   whichever parallel street stays continuous (Metro 2 used to land a block
-  south of Sunset under the "WEST HOLLYWOOD" label). Shapes whose
+  south of Sunset under the "WEST HOLLYWOOD" label). Because a whole agency
+  shares one drawn color, the snap is also pinned by *anchors* — the numbered
+  route badges printed on the map, extracted from the PDF: a badge matching the
+  route's number that sits on the agency's color mask is a point known to be on
+  that route. Numbers collide across agencies, though (Big Blue Bus 3 and
+  Culver CityBus 3 run bundled through Westchester), so a candidate badge is
+  kept only if its own chip color is best explained by *this* agency's color
+  rather than another's — Culver City's khaki "3" no longer drags Big Blue's
+  route onto the wrong street. (This test is applied to the muted, mutually
+  distinct municipal palettes; Metro's saturated orange fades toward other
+  hues, so its dense badges are left ungated.) Shapes whose
   lines aren't drawn (minor routes, Pasadena/Norwalk/Burbank grays, J-line
   silver ≈ freeway gray, Metrolink) keep the warp.
 - **Rendering** (`index.html`, vanilla canvas) — each vehicle is a circle in
