@@ -124,7 +124,15 @@ route with a little margin:
 .venv/bin/python scripts/debug_line.py 720 --stops    # + stop positions
 .venv/bin/python scripts/debug_line.py 720 --shape 0  # one variant only
 .venv/bin/python scripts/debug_line.py 720 --inset    # the DTLA inset panel
+.venv/bin/python scripts/debug_line.py 720 --png      # cheap map.png background
 ```
+
+The background is drawn from the same high-resolution WebP tile pyramid the
+app uses (`tiles/`), so a tight crop stays PDF-crisp instead of an upscaled
+`map.png` — labels and route badges under the line stay legible when you zoom
+in to check a block. The deepest level whose output fits a size cap is chosen
+automatically; `--png` forces the cheap `map.png` background and `--level
+{2,4,8}` pins a level (`--full`, the whole map, always uses `map.png`).
 
 A route label alone is ambiguous — a dozen agencies run a line "1" — so a
 shared label prompts for which system to draw, by number or by any substring
