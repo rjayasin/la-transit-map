@@ -221,6 +221,12 @@ DRAWN_COLORS = {
 # Thin dashes sample washed-out, so each seed is refined against pixels found
 # along the agency's actual routes before masking. Pasadena Transit's color is
 # plain gray (identical to street art), so it keeps the polynomial warp.
+# Badge fill colors that differ from the drawn line color: used only for
+# anchor detection (the words sit on light chips), never for line snapping.
+BADGE_FILLS = {
+    "foothill": (118, 140, 120),
+}
+
 LEGEND_SEEDS = {
     "culvercity": [(215, 215, 157)],
     "gtrans": [(198, 165, 188)],
@@ -228,7 +234,7 @@ LEGEND_SEEDS = {
     "longbeach": [(136, 88, 92)],
     "norwalk": [(162, 208, 207)],   # badge-fill sampled; legend swatch too pale
     "bigbluebus": [(143, 135, 136)],
-    "foothill": [(108, 133, 116)],
+    "foothill": [(62, 100, 78)],    # dark evergreen lines; legend swatch too pale
     "montebello": [(172, 186, 153)],
     "torrance": [(137, 139, 174)],
     "burbank": [(132, 168, 155)],
@@ -704,7 +710,10 @@ def main():
                     out_pts = snap_coherent(pts, tree, anchors=anc)
                     shape_isnap[(feed, sid)] = (cols, 38.0, toks)
             elif agency_tree is not None:
-                anc = route_anchors(toks, agency_tree)
+                anchor_tree = agency_tree
+                if feed in BADGE_FILLS:
+                    anchor_tree = mask_tree(good + [BADGE_FILLS[feed]], 30.0)
+                anc = route_anchors(toks, anchor_tree)
                 anchored += bool(anc)
                 out_pts = snap_coherent(pts, agency_tree, anchors=anc)
                 shape_isnap[(feed, sid)] = (good, 30.0, toks)
