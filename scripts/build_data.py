@@ -322,7 +322,7 @@ def route_anchors(tokens, tree, region="main"):
 
 
 def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
-                  anchor_gate=120.0, min_frac=0.5):
+                  anchor_gate=120.0, min_frac=0.5, tail=(10.0, 11)):
     """Snap a warped polyline onto a drawn-line mask. The displacement field is
     smoothed along the line so whole stretches move to the same drawn street
     instead of individual points grabbing different parallels. Returns None if
@@ -332,7 +332,15 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
     The global warp's local error can exceed the spacing of parallel drawn
     streets, so first shift the polyline by a displacement field interpolated
     between anchors, then snap with tighter caps so the corrected line can't
-    wander back onto a neighboring route."""
+    wander back onto a neighboring route.
+
+    tail: (cap, window) for one last pass with a short smoothing window. The
+    wide window that keeps whole stretches together also averages the
+    correction across junctions, leaving the line sagging a line-width or two
+    off the artwork wherever parallel routes crowd it (Sunset through West
+    Hollywood). The cap is kept below the spacing of neighboring drawn streets
+    so this can only refine within the corridor the wide passes chose, never
+    hop to the next one."""
     P = np.array(densify(pts, 4.0), dtype=float)
     n = len(P)
     if n < 8 or tree is None:
@@ -354,19 +362,24 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
             if default_caps:
                 caps = (26.0, 14.0)        # anchors pin the street; stay tight
     idx = np.arange(n)
-    for ci, cap in enumerate(caps):
+    passes = [(cap, win) for cap in caps] + ([tail] if tail else [])
+    for ci, (cap, pwin) in enumerate(passes):
+        pwin = min(pwin, max(3, (n // 2) * 2 - 1))
+        is_tail = bool(tail) and ci == len(passes) - 1
         d, j = tree.query(P)
         ok = d < cap
         if ci == 0 and ok.sum() < n * min_frac:
             return None                    # mostly undrawn: keep the warp
         if ok.sum() < 4:
+            if is_tail:
+                break                      # nothing close enough to refine; keep it
             return None
         disp = np.full((n, 2), np.nan)
         disp[ok] = tree.data[j[ok]] - P[ok]
-        k = np.ones(win) / win
+        k = np.ones(pwin) / pwin
         for c in (0, 1):
             col = np.interp(idx, idx[~np.isnan(disp[:, c])], disp[:, c][~np.isnan(disp[:, c])])
-            disp[:, c] = np.convolve(np.pad(col, win // 2, mode="edge"), k, "valid")
+            disp[:, c] = np.convolve(np.pad(col, pwin // 2, mode="edge"), k, "valid")
         P = P + disp
     d, j = tree.query(P)                   # final tight snap + light smoothing
     ok = d < 8
