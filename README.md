@@ -58,6 +58,39 @@ URL params: `?t=8:30&speed=150&paused=1`.
   that leave the drawn map area are hidden. Digital clock (e.g. `08:30`) sits
   above the Metro logo, lower left. The full day loops midnight→midnight.
 
+## Python source files
+
+All the Python is offline build tooling — nothing runs in the browser. The
+pipeline order is `georef.py` → `georef_inset.py` → `build_data.py`, with
+`make_tiles.py` independent of the other three.
+
+```
+scripts/
+├── build_data.py    Builds schedule.json from every cached GTFS feed in
+│                    data/gtfs/. Picks a service date per feed, warps shapes
+│                    into map pixels via data/transform.json, snaps them onto
+│                    the drawn line colors (using route-number badges pulled
+│                    from the map PDF as anchors), projects stops onto shapes,
+│                    and emits routes / shapes / patterns / trips plus the
+│                    per-shape DTLA inset geometry.
+├── georef.py        Fits the lat/lon → map-pixel transform for the main map by
+│                    color-masking the six drawn rail lines and ICP-aligning
+│                    GTFS rail shapes to them (affine init, then a 2nd-order
+│                    polynomial warp). Writes data/transform.json and a
+│                    diagnostic overlay image. Also owns the shared constants
+│                    build_data.py imports: rail route colors, mask tolerance,
+│                    and the excluded regions of the map image.
+├── georef_inset.py  Same fit again, restricted to the Downtown LA inset panel,
+│                    whose rotated grid needs its own transform. Adds an
+│                    "inset" entry to data/transform.json and defines the inset
+│                    frame rect, legend box, and geographic bounds that
+│                    build_data.py reads.
+└── make_tiles.py    Rasterizes the background WebP tile pyramid
+                     (tiles/{2,4,8}/, 512px tiles) tile-by-tile straight from
+                     the map PDF with PyMuPDF, so no giant intermediate bitmap
+                     is ever created. Only needs rerunning if the PDF changes.
+```
+
 ## Rebuild data
 
 ```sh
