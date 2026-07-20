@@ -21,7 +21,8 @@ from PIL import Image
 from scipy.spatial import cKDTree
 
 sys.path.insert(0, "scripts")
-from georef import EXCLUDE, load_masks  # noqa: E402
+from georef import EXCLUDE, ROUTE_COLORS, TOL, load_masks  # noqa: E402
+from georef_inset import GEO as INSET_GEO, LEGEND as INSET_LEGEND, RECT as INSET_RECT  # noqa: E402
 
 TARGET = date(2026, 7, 22)  # a Wednesday inside the Metro JUNE26 calendar window
 GTFS = "data/gtfs"
@@ -48,13 +49,23 @@ METROLINK_SHAPES = {
 }
 
 with open("data/transform.json") as f:
-    TR = json.load(f)["poly2"]
+    _TRJ = json.load(f)
+TR = _TRJ["poly2"]
+TR_INSET = _TRJ.get("inset", {}).get("poly2")
+if "geo" in _TRJ.get("inset", {}):
+    INSET_GEO = tuple(_TRJ["inset"]["geo"])   # fitted frame coverage wins
 
 
 def to_px(lon, lat):
     L, T = lon - TR["lon0"], lat - TR["lat0"]
     B = np.c_[np.ones_like(L), L, T, L * L, L * T, T * T]
     return B @ TR["cx"], B @ TR["cy"]
+
+
+def to_inset_px(lon, lat):
+    L, T = lon - TR_INSET["lon0"], lat - TR_INSET["lat0"]
+    B = np.c_[np.ones_like(L), L, T, L * L, L * T, T * T]
+    return B @ TR_INSET["cx"], B @ TR_INSET["cy"]
 
 
 def read_csv(feed, name):
@@ -321,14 +332,109 @@ def project_stops(shape_px, cum, stop_px):
     return [float(v) for v in dists]
 
 
+def inset_rail_trees():
+    """Per-rail-route KD-trees over drawn line pixels inside the inset frame
+    (the frame is EXCLUDEd from the main-map masks, so build separately)."""
+    im = np.asarray(Image.open("map.png").convert("RGB"), dtype=np.int32)
+    x0, y0, x1, y1 = INSET_RECT
+    keep = np.zeros(im.shape[:2], dtype=bool)
+    keep[y0:y1, x0:x1] = True
+    lx0, ly0, lx1, ly1 = INSET_LEGEND
+    keep[ly0:ly1, lx0:lx1] = False       # legend shows sample rail artwork
+    trees = {}
+    for rid, rgb in ROUTE_COLORS.items():
+        d2 = ((im - np.array(rgb)) ** 2).sum(axis=2)
+        ys, xs = np.nonzero((d2 < TOL * TOL) & keep)
+        if len(xs) > 100:
+            trees[rid] = cKDTree(np.c_[xs, ys])
+    return trees
+
+
+def inset_runs(ll, stored_pts, cum, snap_tree=None, snap_cap=25.0):
+    """Portions of a shape inside the DTLA inset, as runs of inset-px
+    polyline. Motion in the inset is computed natively in inset space (the
+    schematic main map collapses downtown, so main-shape distance cannot
+    parameterize it): each run carries its own cumulative distance, and
+    stops are later projected onto it. d0/d1 (distance range on the main
+    shape) only route each stop to the right run."""
+    ll = np.asarray(ll, dtype=float)
+    if TR_INSET is None or len(ll) < 2:
+        return None
+    ix, iy = to_inset_px(ll[:, 0], ll[:, 1])
+    x0, y0, x1, y1 = INSET_RECT
+    inside = ((ix > x0) & (ix < x1) & (iy > y0) & (iy < y1) &
+              (ll[:, 0] > INSET_GEO[0]) & (ll[:, 0] < INSET_GEO[2]) &
+              (ll[:, 1] > INSET_GEO[1]) & (ll[:, 1] < INSET_GEO[3]))
+    if not inside.any():
+        return None
+    spans, i, n = [], 0, len(ll)
+    while i < n:
+        if not inside[i]:
+            i += 1
+            continue
+        j = i
+        while j + 1 < n and inside[j + 1]:
+            j += 1
+        a, b = max(0, i - 1), min(n - 1, j + 1)   # one point past each edge
+        spans.append((a, b))
+        i = j + 1
+    out = []
+    for a, b in spans:
+        if b - a < 1:
+            continue
+        mx, my = to_px(ll[a:b+1, 0], ll[a:b+1, 1])
+        d = project_stops(stored_pts, cum, list(zip(mx, my)))
+        px, py = ix[a:b+1].copy(), iy[a:b+1].copy()
+        if snap_tree is not None:
+            dist, j2 = snap_tree.query(np.c_[px, py])
+            hit = dist < snap_cap
+            px[hit] = snap_tree.data[j2[hit], 0]
+            py[hit] = snap_tree.data[j2[hit], 1]
+        pts = np.c_[px, py]
+        # drop edge-hugging slivers that never meaningfully enter the frame
+        vis = ((pts[:, 0] > x0 + 8) & (pts[:, 0] < x1 - 8) &
+               (pts[:, 1] > y0 + 8) & (pts[:, 1] < y1 - 8))
+        if not vis.any():
+            continue
+        icum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(pts, axis=0).T))])
+        if icum[-1] < 10:
+            continue
+        out.append({"pts": pts, "icum": icum, "d0": d[0], "d1": d[-1]})
+    return out or None
+
+
+def inset_stop_map(runs, stop_d, stop_ipx):
+    """Per stop: (run index or -1, distance along that run's inset polyline).
+    A stop belongs to the run whose main-shape distance range contains its
+    pattern distance; its inset position is then projected onto that run."""
+    ir = [-1] * len(stop_d)
+    idist = [0.0] * len(stop_d)
+    x0, y0, x1, y1 = INSET_RECT
+    for r, run in enumerate(runs):
+        members = [k for k, sd in enumerate(stop_d)
+                   if run["d0"] - 5 <= sd <= run["d1"] + 5 and ir[k] < 0
+                   and x0 - 40 < stop_ipx[k][0] < x1 + 40
+                   and y0 - 40 < stop_ipx[k][1] < y1 + 40]
+        if not members:
+            continue
+        proj = project_stops(run["pts"], run["icum"], [stop_ipx[k] for k in members])
+        for k, v in zip(members, proj):
+            ir[k] = r
+            idist[k] = v
+    return ir, idist
+
+
 def main():
     rail_trees = load_masks()
 
     routes, route_idx = [], {}      # route_idx[(feed, route_id)]
     shapes_raw = {}                 # (feed, shape_id) -> [(x,y)...] px
+    shape_ll = {}                   # shape key -> [(lon,lat)...] original
+    shape_rail = {}                 # (feed, shape_id) -> rail route_id
     trips_out = []
     patterns, pattern_idx = [], {}  # key (feed, shape_id, stop_seq)
     stops_px = {}                   # (feed, stop_id) -> (x, y)
+    stops_ll = {}                   # (feed, stop_id) -> (lon, lat)
     stats = defaultdict(int)
 
     for feed in FEEDS:
@@ -353,6 +459,7 @@ def main():
                            np.array([float(r["stop_lat"]) for r in srows]))
             for r, x, y in zip(srows, xs, ys):
                 stops_px[(feed, r["stop_id"])] = (x, y)
+                stops_ll[(feed, r["stop_id"])] = (float(r["stop_lon"]), float(r["stop_lat"]))
 
         rmeta = {}
         for row in read_csv(feed, "routes.txt"):
@@ -444,6 +551,10 @@ def main():
             if out_pts is not None:
                 snapped += 1
             shapes_raw[(feed, sid)] = simplify(out_pts if out_pts is not None else pts)
+            p = tmp[sid]
+            shape_ll[(feed, sid)] = [(q[1], q[2]) for q in p]
+            if feed == "gtfs_rail":
+                shape_rail[(feed, sid)] = route_by_shape.get(sid)
         n_trips = len(trips_out) - n_before
         stats[feed] = n_trips
         print(f"{feed}: {n_trips} trips on {day} ({snapped}/{len(warped)} shapes snapped)")
@@ -461,6 +572,18 @@ def main():
     for key, pts in shapes_raw.items():
         add_shape(key, pts)
 
+    # DTLA inset: per-shape downtown runs in inset px, computed on demand
+    itrees = inset_rail_trees() if TR_INSET is not None else {}
+    shape_runs = {}                 # si -> runs or None
+
+    def runs_for(key, si):
+        if si not in shape_runs:
+            ll = shape_ll.get(key)
+            tree = itrees.get(shape_rail.get(key)) if key[0] == "gtfs_rail" else None
+            shape_runs[si] = (inset_runs(ll, shapes_raw[key], cums[si], tree)
+                              if ll is not None and TR_INSET is not None else None)
+        return shape_runs[si]
+
     patterns_out = []
     for feed, sid, stop_seq in patterns:
         spx = [stops_px[(feed, s)] for s in stop_seq]
@@ -475,10 +598,20 @@ def main():
                     stats["skipped_no_shape"] += 1
                     continue
                 shapes_raw[key] = spx
+                shape_ll[key] = [stops_ll[(feed, s)] for s in stop_seq]
                 add_shape(key, spx)
         si = shape_index[key]
         d = project_stops(shapes_raw[key], cums[si], spx)
-        patterns_out.append({"s": si, "d": [round(v) for v in d]})
+        entry = {"s": si, "d": [round(v) for v in d]}
+        runs = runs_for(key, si)
+        if runs:
+            sll = np.array([stops_ll[(feed, s)] for s in stop_seq], dtype=float)
+            sx, sy = to_inset_px(sll[:, 0], sll[:, 1])
+            ir, idist = inset_stop_map(runs, d, list(zip(sx, sy)))
+            if any(r >= 0 for r in ir):
+                entry["ir"] = ir
+                entry["id"] = [round(v) for v in idist]
+        patterns_out.append(entry)
 
     trips_final = []
     for ridx, pkey, times in trips_out:
@@ -492,8 +625,17 @@ def main():
             trips_final.append([ridx, pi, t0 - 86400] + deltas)
             stats["wrapped"] += 1
 
+    # inset run geometry, only for shapes some pattern actually mapped onto
+    used_si = {p["s"] for p in patterns_out if p and "ir" in p}
+    insets_out = [None] * len(shapes_out)
+    for si in used_si:
+        insets_out[si] = [[round(v, 1) for xy in r["pts"] for v in xy]
+                          for r in shape_runs[si]]
+    stats["inset_shapes"] = len(used_si)
+
     out = {"date": TARGET.strftime("%Y%m%d"), "routes": routes, "shapes": shapes_out,
-           "patterns": patterns_out, "trips": trips_final}
+           "patterns": patterns_out, "trips": trips_final,
+           "insets": insets_out, "insetRect": list(INSET_RECT)}
     with open("schedule.json", "w") as f:
         json.dump(out, f, separators=(",", ":"))
     stats["routes"] = len(routes)
