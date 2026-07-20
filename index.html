@@ -18,8 +18,9 @@
          backdrop-filter: blur(6px); box-shadow: 0 4px 18px rgba(0,0,0,.3);
          transition: opacity .45s; }
   #bar.faded { opacity: 0; pointer-events: none; }
-  #bar button { background: #fff; color: #111; border: 0; border-radius: 8px;
+  #bar button { background: transparent; color: #fff; border: 0; border-radius: 8px;
                 width: 38px; height: 30px; font-size: 15px; cursor: pointer; }
+  #bar button:hover { background: rgba(255,255,255,.16); }
   #bar input[type=range] { width: min(46vw, 520px); }
   #bar select { background: #333; color: #fff; border: 0; border-radius: 6px; padding: 4px; }
   #stats { font-variant-numeric: tabular-nums; opacity: .85; font-size: 13px; min-width: 150px; }
@@ -101,14 +102,14 @@ const stats = document.getElementById("stats");
 const qp = new URLSearchParams(location.search);
 if (qp.get("t")) { const [h, m] = qp.get("t").split(":").map(Number); simT = h * 3600 + (m || 0) * 60; }
 if (qp.get("speed")) speedSel.value = qp.get("speed");
-if (qp.get("paused")) playing = false;
+if (qp.get("paused")) { playing = false; playBtn.textContent = "▶"; }
 
 function togglePlay() { playing = !playing; playBtn.textContent = playing ? "⏸" : "▶"; }
 playBtn.onclick = togglePlay;
 scrub.oninput = () => { simT = +scrub.value; };
+// space always plays/pauses — never re-activates the last-clicked control
 addEventListener("keydown", e => {
   if (e.code !== "Space" || e.metaKey || e.ctrlKey || e.altKey) return;
-  if (/^(INPUT|SELECT|BUTTON|TEXTAREA)$/.test(e.target.tagName)) return;
   e.preventDefault();
   togglePlay();
 });
@@ -223,6 +224,8 @@ function drawTiles() {
 
 // ---- pan / zoom ----
 let dragging = false, lx = 0, ly = 0;
+// any press on the map dismisses the filter popover
+cv.addEventListener("pointerdown", () => filtersEl.classList.remove("open"));
 cv.addEventListener("mousedown", e => { dragging = true; lx = e.clientX; ly = e.clientY; cv.classList.add("drag"); });
 addEventListener("mouseup", () => { dragging = false; cv.classList.remove("drag"); });
 addEventListener("mousemove", e => {

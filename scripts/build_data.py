@@ -162,16 +162,37 @@ def map_image():
     return _IMG
 
 _TREES = {}
+_BG = None
+
+def bg_palette(k=12):
+    """The map's dominant colors (background, freeways, parks, water...).
+    Muted agency line colors can sit within mask tolerance of these — e.g.
+    Culver City's khaki vs. freeway tan — so masks exclude pixels that match
+    an infrastructure color better than the agency color."""
+    global _BG
+    if _BG is None:
+        im, keep = map_image()
+        sub = im[::4, ::4][keep[::4, ::4]]
+        codes = (sub[:, 0] >> 3) * 1024 + (sub[:, 1] >> 3) * 32 + (sub[:, 2] >> 3)
+        vals, counts = np.unique(codes, return_counts=True)
+        top = vals[np.argsort(counts)[-k:]]
+        _BG = np.c_[top // 1024, (top // 32) % 32, top % 32] * 8 + 4
+    return _BG
 
 def mask_tree(colors, tol=38.0):
-    """KD-tree over map pixels within tol of ANY of the given colors."""
+    """KD-tree over map pixels within tol of ANY of the given colors and
+    closer to one of them than to any dominant background color."""
     key = (tuple(map(tuple, colors)), tol)
     if key not in _TREES:
         im, keep = map_image()
-        m = np.zeros(keep.shape, dtype=bool)
+        d2a = np.full(keep.shape, np.inf)
         for rgb in colors:
-            d2 = ((im - np.array(rgb)) ** 2).sum(axis=2)
-            m |= d2 < tol * tol
+            d2a = np.minimum(d2a, ((im - np.array(rgb)) ** 2).sum(axis=2))
+        m = d2a < tol * tol
+        for bg in bg_palette():
+            if min(((np.array(c) - bg) ** 2).sum() for c in colors) < 24 * 24:
+                continue                       # bg IS this agency's color; keep
+            m &= d2a < ((im - bg) ** 2).sum(axis=2)
         ys, xs = np.nonzero(m & keep)
         _TREES[key] = cKDTree(np.c_[xs, ys]) if len(xs) > 300 else None
     return _TREES[key]
@@ -179,6 +200,14 @@ def mask_tree(colors, tol=38.0):
 # Metro's drawn line colors (sampled from the map)
 ORANGE = (217, 129, 83)     # Metro Local/Rapid orange
 RAPID_RED = (180, 51, 61)   # 720/754/761
+BUSWAY_GRAY = "969CA0"      # J Line 910/950 freeway busway ribbon
+
+# Drawn colors for feeds whose lines can't be color-masked, sampled from the
+# map, so vehicle sprites still match the artwork they ride on.
+DRAWN_COLORS = {
+    "pasadena": (204, 193, 184),   # plain gray, same as street art
+    "metrolink": (120, 124, 126),  # crosshatched railroad gray
+}
 
 # Per-agency drawn-line color seeds, sampled from the map's legend swatches.
 # Thin dashes sample washed-out, so each seed is refined against pixels found
@@ -252,14 +281,15 @@ def badge_words():
 def route_anchors(tokens, tree):
     """Badge positions for any of the route's number tokens that lie on the
     agency's drawn-line mask (rejects same-number badges of other agencies,
-    highway shields, street labels)."""
+    highway shields, street labels). The agency color must be present AT the
+    word itself (badge fill / colored glyph strokes), not merely nearby —
+    another agency's badge drawn against this agency's line must not match."""
     if tree is None:
         return []
     pts = []
     for t in tokens:
         for cx, cy in badge_words().get(t, ()):
-            d, _ = tree.query([cx, cy])
-            if d < 12:
+            if len(tree.query_ball_point([cx, cy], 6.0)) >= 4:
                 pts.append((cx, cy))
     return pts
 
@@ -539,15 +569,18 @@ def main():
                 stops_px[(feed, r["stop_id"])] = (x, y)
                 stops_ll[(feed, r["stop_id"])] = (float(r["stop_lon"]), float(r["stop_lat"]))
 
-        rmeta, badge_tokens = {}, {}
+        rmeta, badge_tokens, is_dash = {}, {}, {}
         for row in read_csv(feed, "routes.txt"):
             label = route_label(row.get("route_short_name", ""), row.get("route_long_name", ""))
             color = (row.get("route_color") or "").strip()
             text = (row.get("route_text_color") or "").strip()
+            is_dash[row["route_id"]] = "DASH" in (row.get("route_long_name") or "")
             if not color:
                 color, text = (METRO_BUS_COLOR, METRO_BUS_TEXT) if is_metro else (FALLBACK_COLOR, FALLBACK_TEXT)
             if color == "000000" and is_metro:
                 color = "B4333D"  # map's Rapid red (GTFS says black; map draws red)
+            if row["route_id"].split("-")[0] in ("910", "950"):
+                color, text = BUSWAY_GRAY, "FFFFFF"   # J Line rides the gray busway
             rail = row.get("route_type") in ("0", "1", "2")
             rmeta[row["route_id"]] = (label, color, text or "FFFFFF", rail)
             # tokens as printed on map badges, for anchor lookup
@@ -608,13 +641,30 @@ def main():
             warped[sid] = list(zip(x, y))
 
         # snap shapes onto the drawn lines of this system where they exist
-        agency_tree = None
+        agency_tree, sprite_cols = None, None
         if feed in LEGEND_SEEDS and warped:
-            cols = [refine_color(list(warped.values()), s) for s in LEGEND_SEEDS[feed]]
-            cols = [c for c in cols if c]
-            if cols:
-                agency_tree = mask_tree(cols, 30.0)
-            print(f"  {feed} drawn color(s): {cols}")
+            seeds = LEGEND_SEEDS[feed]
+            refined = [refine_color(list(warped.values()), s) for s in seeds]
+            good = [c for c in refined if c]
+            if good:
+                agency_tree = mask_tree(good, 30.0)
+            # sprites take the drawn color even when refinement failed
+            sprite_cols = [c or tuple(s) for c, s in zip(refined, seeds)]
+            print(f"  {feed} drawn color(s): {good}")
+        elif feed in DRAWN_COLORS:
+            sprite_cols = [DRAWN_COLORS[feed]]
+
+        # recolor this agency's sprites to match the line color the map draws
+        # (GTFS route_color is the agency's own branding, not the map's)
+        if sprite_cols:
+            for (f, rid), ridx in route_idx.items():
+                if f != feed:
+                    continue
+                c = sprite_cols[0]
+                if len(sprite_cols) > 1 and not is_dash.get(rid):
+                    c = sprite_cols[1]        # ladot: [DASH, Commuter Express]
+                routes[ridx]["c"] = "#%02X%02X%02X" % tuple(c)
+                routes[ridx]["t"] = "#FFFFFF"
 
         snapped = anchored = 0
         for sid, pts in warped.items():

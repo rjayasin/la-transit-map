@@ -49,7 +49,10 @@ URL params: `?t=8:30&speed=150&paused=1`.
 - **Rendering** (`index.html`, vanilla canvas) — each vehicle is a circle in
   its GTFS `route_color` labeled with the route number/letter (Metro buses
   default to Metro orange; GTFS's black for Rapid 720/754/761 is overridden
-  with the map's Rapid red; long route names are compressed to ≤4-char codes).
+  with the map's Rapid red; the J Line rides the gray busway so it draws gray;
+  municipal agencies are recolored to the drawn line color sampled from the
+  map, so every sprite matches the artwork it travels on; long route names
+  are compressed to ≤4-char codes).
   Motion eases in/out at every stop (smoothstep between scheduled arrivals).
   Rail (`route_type` 0/1/2, incl. Metrolink) draws on top of buses. Vehicles
   that leave the drawn map area are hidden. Digital clock (e.g. `08:30`) sits
