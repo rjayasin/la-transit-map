@@ -43,7 +43,14 @@ URL params: `?t=8:30&speed=150&paused=1`.
   red, and each municipal agency's color — legend swatches seed the palette,
   refined against pixels along the routes) using a coherence trick: the snap
   displacement is smoothed along the shape so whole stretches move to the same
-  drawn street instead of points grabbing different parallels. Shapes whose
+  drawn street instead of points grabbing different parallels. Two refinements
+  keep that from leaving lines a block off: a final short-window pass, capped
+  below the spacing of neighboring streets, fixes the sag the wide smoothing
+  leaves at junctions; and place-name labels — which are painted over the
+  artwork and so punch holes in the color masks — are bridged by a
+  morphological closing, since a broken line otherwise loses the snap to
+  whichever parallel street stays continuous (Metro 2 used to land a block
+  south of Sunset under the "WEST HOLLYWOOD" label). Shapes whose
   lines aren't drawn (minor routes, Pasadena/Norwalk/Burbank grays, J-line
   silver ≈ freeway gray, Metrolink) keep the warp.
 - **Rendering** (`index.html`, vanilla canvas) — each vehicle is a circle in
@@ -73,6 +80,10 @@ scripts/
 │                    from the map PDF as anchors), projects stops onto shapes,
 │                    and emits routes / shapes / patterns / trips plus the
 │                    per-shape DTLA inset geometry.
+├── debug_line.py    Draws one route's cached path on top of the map, to see
+│                    where vehicles diverge from the drawn artwork. Reads the
+│                    polylines straight out of schedule.json, so it shows
+│                    exactly what the animation plays back — snapping included.
 ├── georef.py        Fits the lat/lon → map-pixel transform for the main map by
 │                    color-masking the six drawn rail lines and ICP-aligning
 │                    GTFS rail shapes to them (affine init, then a 2nd-order
@@ -90,6 +101,27 @@ scripts/
                      the map PDF with PyMuPDF, so no giant intermediate bitmap
                      is ever created. Only needs rerunning if the PDF changes.
 ```
+
+### Checking a line against the artwork
+
+`debug_line.py` is the tool for the recurring question "why is this bus off
+its street?". It writes `scratch/debug_<system>_<line>.png`, cropped to the
+route with a little margin:
+
+```sh
+.venv/bin/python scripts/debug_line.py 720            # Metro Bus 720
+.venv/bin/python scripts/debug_line.py 2 --system "Big Blue"   # shared number
+.venv/bin/python scripts/debug_line.py 720 --stops    # + stop positions
+.venv/bin/python scripts/debug_line.py 720 --shape 0  # one variant only
+.venv/bin/python scripts/debug_line.py 720 --inset    # the DTLA inset panel
+```
+
+A route label alone is ambiguous — a dozen agencies run a line "1" — so the
+script lists the matching systems and exits when the label is shared; pass
+`--system` with any substring to pick one. Each route usually has several
+shape variants, listed on stdout sorted by trip count and drawn in different
+colors. The top two are normally the two directions of the same corridor and
+overlap almost exactly, so use `--shape N` to read them one at a time.
 
 ## Rebuild data
 

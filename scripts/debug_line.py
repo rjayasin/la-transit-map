@@ -176,7 +176,11 @@ def main():
                min(im.width, int(max(xs)) + PAD), min(im.height, int(max(ys)) + PAD))
     im = im.crop(box)
 
-    out = a.out or os.path.join(OUTDIR, f"debug_{a.line}{'_inset' if a.inset else ''}.png")
+    slug = "".join(c if c.isalnum() else "-" for c in system.lower()).strip("-")
+    while "--" in slug:
+        slug = slug.replace("--", "-")
+    out = a.out or os.path.join(
+        OUTDIR, f"debug_{slug}_{a.line}{'_inset' if a.inset else ''}.png")
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     im.save(out)
     print(f"crop {box} -> {out} ({im.width}x{im.height})")
