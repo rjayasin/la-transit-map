@@ -1,0 +1,17 @@
+name: Trigger site deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      # SITE_DEPLOY_TOKEN is a fine-grained PAT with contents:write on
+      # rjayasin/rjayasin.github.io; the default GITHUB_TOKEN can't reach
+      # other repos.
+      - name: Dispatch to rjayasin.github.io
+        env:
+          GH_TOKEN: ${{ secrets.SITE_DEPLOY_TOKEN }}
+        run: gh api repos/rjayasin/rjayasin.github.io/dispatches -f event_type=la-transit-map-push
