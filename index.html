@@ -95,6 +95,7 @@ let trips = [];         // {r, p, times:Int32Array, t0, t1}
 let sprites = [];       // per route: {img, w, h}
 let simT = 0;           // seconds since midnight
 let playing = true;
+let followTrip = -1;    // index into trips of the vehicle being followed, or -1
 let lastFrame = performance.now();
 const speedSel = document.getElementById("speed");
 const scrub = document.getElementById("scrub");
@@ -226,11 +227,20 @@ function drawTiles() {
 }
 
 // ---- pan / zoom ----
-let dragging = false, lx = 0, ly = 0;
+let dragging = false, lx = 0, ly = 0, downX = 0, downY = 0, pressOnMap = false;
 // any press on the map dismisses the filter popover
 cv.addEventListener("pointerdown", () => filtersEl.classList.remove("open"));
-cv.addEventListener("mousedown", e => { dragging = true; lx = e.clientX; ly = e.clientY; cv.classList.add("drag"); });
-addEventListener("mouseup", () => { dragging = false; cv.classList.remove("drag"); });
+cv.addEventListener("mousedown", e => {
+  dragging = true; lx = e.clientX; ly = e.clientY;
+  downX = e.clientX; downY = e.clientY; pressOnMap = true;
+  cv.classList.add("drag");
+});
+addEventListener("mouseup", e => {
+  dragging = false; cv.classList.remove("drag");
+  // a press that didn't turn into a drag is a click: (de)select for follow mode
+  if (pressOnMap && Math.hypot(e.clientX - downX, e.clientY - downY) < 5) handleTap(e.clientX, e.clientY);
+  pressOnMap = false;
+});
 addEventListener("mousemove", e => {
   if (!dragging) return;
   view.x -= (e.clientX - lx) / view.k; view.y -= (e.clientY - ly) / view.k;
@@ -249,8 +259,12 @@ cv.addEventListener("wheel", e => {
 
 // touch: one finger pans, two fingers pinch-zoom around the pinch midpoint
 let touches = new Map();
+let tapStart = null;   // {x, y} of a candidate single-finger tap, else null
 function touchPts(e) { for (const t of e.changedTouches) touches.set(t.identifier, [t.clientX, t.clientY]); }
-cv.addEventListener("touchstart", e => { e.preventDefault(); touchPts(e); }, { passive: false });
+cv.addEventListener("touchstart", e => {
+  e.preventDefault(); touchPts(e);
+  tapStart = e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null;
+}, { passive: false });
 cv.addEventListener("touchmove", e => {
   e.preventDefault();
   const prev = new Map(touches);
@@ -267,8 +281,20 @@ cv.addEventListener("touchmove", e => {
     view.x -= (mx - (ax0 + bx0) / 2) / view.k; view.y -= (my - (ay0 + by0) / 2) / view.k;
     if (d0 > 0) zoomAt(mx, my, d1 / d0);
   }
+  // any second finger or meaningful drift disqualifies the tap
+  if (tapStart) {
+    const c = touches.get(ids[0]);
+    if (ids.length !== 1 || (c && Math.hypot(c[0] - tapStart.x, c[1] - tapStart.y) > 8)) tapStart = null;
+  }
 }, { passive: false });
-const endTouch = e => { for (const t of e.changedTouches) touches.delete(t.identifier); };
+const endTouch = e => {
+  if (tapStart && touches.size <= 1) {
+    const t = e.changedTouches[0];
+    if (t && Math.hypot(t.clientX - tapStart.x, t.clientY - tapStart.y) < 8) handleTap(tapStart.x, tapStart.y);
+  }
+  tapStart = null;
+  for (const t of e.changedTouches) touches.delete(t.identifier);
+};
 cv.addEventListener("touchend", endTouch);
 cv.addEventListener("touchcancel", endTouch);
 
@@ -407,12 +433,59 @@ function posAlong(shape, dist) {
           pts[2*lo+1] + (pts[2*hi+1] - pts[2*lo+1]) * f];
 }
 
+// on-screen sprite size factor: constant when zoomed out, grows gently with deep zoom
+function spriteScale() {
+  return 1 / view.k * Math.min(1, view.k * 2.3) * Math.min(2.2, Math.max(1, Math.sqrt(view.k)));
+}
+
+// map-px position of a trip's vehicle at time t, or null if it isn't running
+function vehiclePos(tr, t) {
+  if (t < tr.t0 || t > tr.t1) return null;
+  const pat = data.patterns[tr.p];
+  if (!pat) return null;
+  const times = tr.times, d = pat.d;
+  let lo = 0, hi = times.length - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; (times[m] <= t ? lo = m : hi = m); }
+  return posAlong(shapes[pat.s], distAt(times, d, lo, hi, t));
+}
+
+// index of the running vehicle under a screen point, or -1 if none is close enough
+function pickVehicle(cx, cy) {
+  if (!data) return -1;
+  const mx = view.x + cx / view.k, my = view.y + cy / view.k;
+  const s = spriteScale(), tol = 6 / view.k;   // a few screen px of slack for touch
+  let best = -1, bestD = Infinity;
+  for (let i = 0; i < trips.length; i++) {
+    const tr = trips[i];
+    if (!sysOn[data.routes[tr.r].sy]) continue;
+    const p = vehiclePos(tr, simT);
+    if (!p) continue;
+    const rad = (sprites[tr.r].half + 2) * s + tol;
+    const dx = p[0] - mx, dy = p[1] - my, dd = dx*dx + dy*dy;
+    if (dd <= rad*rad && dd < bestD) { bestD = dd; best = i; }
+  }
+  return best;
+}
+
+// follow mode: while paused, tapping a vehicle follows it; tapping empty space clears it
+function handleTap(cx, cy) {
+  if (playing) return;
+  followTrip = pickVehicle(cx, cy);
+}
+
 function frame(now) {
   const dt = (now - lastFrame) / 1000; lastFrame = now;
   if (playing) {
     simT += dt * +speedSel.value;
     if (simT >= 86400) simT -= 86400;
     scrub.value = simT | 0;
+  }
+  // follow mode: keep the tracked vehicle centered (zoom stays under user control)
+  if (followTrip >= 0) {
+    const tr = trips[followTrip];
+    const p = tr && sysOn[data.routes[tr.r].sy] ? vehiclePos(tr, simT) : null;
+    if (p) { view.x = p[0] - (W / 2) / view.k; view.y = p[1] - (H / 2) / view.k; }
+    else followTrip = -1;   // trip ended or its system was filtered out
   }
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.fillStyle = "#cfe3ec"; ctx.fillRect(0, 0, W, H);
@@ -431,8 +504,7 @@ function frame(now) {
   // vehicles
   let active = 0;
   const t = simT;
-  // constant screen size when zoomed out; grow gently with deep zoom
-  const s = 1 / view.k * Math.min(1, view.k * 2.3) * Math.min(2.2, Math.max(1, Math.sqrt(view.k)));
+  const s = spriteScale();
   const insetDraws = [];
   for (let i = 0; i < trips.length; i++) {
     const tr = trips[i];
@@ -448,6 +520,10 @@ function frame(now) {
     if (x < -15 || x > map.width + 15 || y < 700 || y > map.height + 15) continue;  // off the drawn map
     const sp = sprites[tr.r];
     ctx.drawImage(sp.img, x - sp.half * s, y - sp.half * s, sp.img.width / 2 * s, sp.img.height / 2 * s);
+    if (i === followTrip) {   // ring around the followed vehicle
+      ctx.beginPath(); ctx.arc(x, y, (sp.half + 4) * s, 0, 7);
+      ctx.lineWidth = 2 * s; ctx.strokeStyle = "#111"; ctx.stroke();
+    }
     active++;
     // mirror into the DTLA inset panel. Inset motion is computed in inset
     // space (the schematic main map collapses downtown): each stop knows its
@@ -488,6 +564,7 @@ function frame(now) {
   }
   const hhmm = `${hh}:${mm}`;
   stats.textContent = `${hhmm} · ${active} vehicles` +
+    (followTrip >= 0 && trips[followTrip] ? ` · following ${data.routes[trips[followTrip].r].n}` : "") +
     (qp.get("debug") ? ` · tiles:${tilesDrawn}` : "");
   requestAnimationFrame(frame);
 }
