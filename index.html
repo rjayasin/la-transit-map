@@ -92,6 +92,8 @@ let shapes = [];        // {pts: Float32Array, cum: Float32Array}
 let insetRuns = [];     // per shape: null or [{d, p}] mirroring it into the DTLA inset
 let insetRect = null;   // [x0, y0, x1, y1] inset frame in map px
 let trips = [];         // {r, p, times:Int32Array, t0, t1}
+let vAlpha = null;      // per-trip opacity, eased in real time so vehicles fade in/out
+const FADE_SEC = 0.16;  // how long a vehicle takes to fade on appear/disappear
 let sprites = [];       // per route: {img, w, h}
 let simT = 0;           // seconds since midnight
 let playing = true;
@@ -392,6 +394,7 @@ Promise.all([
   });
   // draw rail last so trains sit on top of the bus swarm
   trips.sort((a, b) => (d.routes[a.r].rail ? 1 : 0) - (d.routes[b.r].rail ? 1 : 0));
+  vAlpha = new Float32Array(trips.length);   // all start hidden, fade in on first frame
   requestAnimationFrame(frame);
 });
 
@@ -506,25 +509,35 @@ function frame(now) {
   const t = simT;
   const s = spriteScale();
   const insetDraws = [];
+  const step = dt / FADE_SEC;   // opacity change this frame (real time, not sim time)
   for (let i = 0; i < trips.length; i++) {
     const tr = trips[i];
-    if (t < tr.t0 || t > tr.t1) continue;
-    if (!sysOn[data.routes[tr.r].sy]) continue;
     const pat = data.patterns[tr.p];
-    if (!pat) continue;
+    // a vehicle is "present" while its trip is running and its system is shown;
+    // ease opacity toward that so it fades in on appear and out on disappear
+    const present = pat && t >= tr.t0 && t <= tr.t1 && sysOn[data.routes[tr.r].sy];
+    let a = vAlpha[i] + (present ? step : -step);
+    a = a < 0 ? 0 : a > 1 ? 1 : a;
+    vAlpha[i] = a;
+    if (a <= 0.01 || !pat) continue;
+    // position from the trip clock, clamped to the trip window so a vehicle
+    // fading out past its last stop lingers at the terminal, not at (0,0)
+    const tc = t < tr.t0 ? tr.t0 : t > tr.t1 ? tr.t1 : t;
     const times = tr.times, d = pat.d;
     let lo = 0, hi = times.length - 1;
-    while (hi - lo > 1) { const m = (lo + hi) >> 1; (times[m] <= t ? lo = m : hi = m); }
-    const dist = distAt(times, d, lo, hi, t);
+    while (hi - lo > 1) { const m = (lo + hi) >> 1; (times[m] <= tc ? lo = m : hi = m); }
+    const dist = distAt(times, d, lo, hi, tc);
     const [x, y] = posAlong(shapes[pat.s], dist);
     if (x < -15 || x > map.width + 15 || y < 700 || y > map.height + 15) continue;  // off the drawn map
     const sp = sprites[tr.r];
+    if (a < 1) ctx.globalAlpha = a;
     ctx.drawImage(sp.img, x - sp.half * s, y - sp.half * s, sp.img.width / 2 * s, sp.img.height / 2 * s);
     if (i === followTrip) {   // ring around the followed vehicle
       ctx.beginPath(); ctx.arc(x, y, (sp.half + 4) * s, 0, 7);
       ctx.lineWidth = 2 * s; ctx.strokeStyle = "#111"; ctx.stroke();
     }
-    active++;
+    if (a < 1) ctx.globalAlpha = 1;
+    if (present) active++;
     // mirror into the DTLA inset panel. Inset motion is computed in inset
     // space (the schematic main map collapses downtown): each stop knows its
     // run + distance along the run's inset polyline, and the vehicle's
@@ -545,9 +558,9 @@ function frame(now) {
         // on the main map that adjacent stops can share a rounded distance)
         const span = d[hi] - d[lo], tspan = times[hi] - times[lo];
         const fp = span > 0 ? Math.min(1, Math.max(0, (dist - d[lo]) / span))
-                 : tspan > 0 ? (t - times[lo]) / tspan : 0;
+                 : tspan > 0 ? (tc - times[lo]) / tspan : 0;
         const [ix, iy] = posAlong(insetRuns[pat.s][run], i0 + (i1 - i0) * fp);
-        insetDraws.push(sp, ix, iy);
+        insetDraws.push(sp, ix, iy, a);
       }
     }
   }
@@ -556,9 +569,11 @@ function frame(now) {
     ctx.beginPath();
     ctx.rect(insetRect[0], insetRect[1], insetRect[2] - insetRect[0], insetRect[3] - insetRect[1]);
     ctx.clip();
-    for (let k = 0; k < insetDraws.length; k += 3) {
-      const sp = insetDraws[k], x = insetDraws[k+1], y = insetDraws[k+2];
+    for (let k = 0; k < insetDraws.length; k += 4) {
+      const sp = insetDraws[k], x = insetDraws[k+1], y = insetDraws[k+2], a = insetDraws[k+3];
+      if (a < 1) ctx.globalAlpha = a;
       ctx.drawImage(sp.img, x - sp.half * s, y - sp.half * s, sp.img.width / 2 * s, sp.img.height / 2 * s);
+      if (a < 1) ctx.globalAlpha = 1;
     }
     ctx.restore();
   }
