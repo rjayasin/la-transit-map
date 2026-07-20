@@ -18,6 +18,7 @@ from datetime import date, datetime, timedelta
 
 import numpy as np
 from PIL import Image
+from scipy import ndimage as ndi
 from scipy.spatial import cKDTree
 
 sys.path.insert(0, "scripts")
@@ -86,6 +87,26 @@ def read_csv(feed, name):
         return []
     with open(path, encoding="utf-8-sig") as f:
         return list(csv.DictReader(f))
+
+
+def read_cols(feed, name, cols):
+    """Rows of just `cols`, as tuples. DictReader builds a dict per row, which
+    is most of the parse time on the multi-million-row stop_times.txt files;
+    the hot loops only ever want a handful of columns. Missing columns come
+    back as ''."""
+    path = f"{GTFS}/{feed}/{name}"
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8-sig") as f:
+        r = csv.reader(f)
+        try:
+            head = next(r)
+        except StopIteration:
+            return []
+        idx = [head.index(c) if c in head else -1 for c in cols]
+        n = len(head)
+        return [tuple(row[i] if 0 <= i < len(row) else "" for i in idx)
+                for row in r if len(row) >= n - 1]
 
 
 def active_services(feed, d):
@@ -179,30 +200,70 @@ def bg_palette(k=12):
         _BG = np.c_[top // 1024, (top // 32) % 32, top % 32] * 8 + 4
     return _BG
 
+LABEL_BRIDGE = 28   # px; half-width of the largest label gap worth closing
+
+
+def bridge_label_gaps(m, sub, d2a, tol, radius=LABEL_BRIDGE):
+    """Re-add drawn-line pixels that a place-name label is painted over.
+
+    Labels sit on top of the artwork, so a color mask breaks wherever a name
+    crosses a line — "WEST HOLLYWOOD" puts a ~40 px hole in Metro 2's Sunset
+    line. The snap then locks onto whichever parallel street stays unbroken
+    (Metro 2 was landing a block south). Morphologically close the mask and
+    keep the filled pixels only where label text actually is, so gaps get
+    bridged but genuine line ends stay ends.
+
+    Label text is gray, and so are several agencies' drawn lines (Torrance,
+    Big Blue Bus, Beach Cities). Pixels anywhere near the color being masked
+    are therefore not eligible as "text", or an agency's own artwork would be
+    read as a label and dilated into the mask wholesale."""
+    mx, mn = sub.max(axis=2), sub.min(axis=2)
+    text = ndi.binary_dilation((mx - mn) < 26, np.ones((5, 5), bool)) & (mx < 215)
+    text &= d2a > (tol * 1.6) ** 2
+    k = 2 * radius + 1
+    closed = m
+    for st in (np.ones((1, k), bool), np.ones((k, 1), bool)):
+        closed = ndi.binary_dilation(closed, st)
+    for st in (np.ones((1, k), bool), np.ones((k, 1), bool)):
+        closed = ndi.binary_erosion(closed, st)
+    return m | (closed & text)
+
+
 def mask_tree(colors, tol=38.0, region="main"):
     """KD-tree over map pixels within tol of ANY of the given colors and
     closer to one of them than to any dominant background color. region
     "main" is the map outside EXCLUDE; "inset" is the DTLA inset frame
-    (minus its legend), which the main masks deliberately exclude."""
+    (minus its legend), which the main masks deliberately exclude.
+
+    Everything is computed on the region's bounding box rather than the whole
+    sheet — the inset is 2% of the map's area and there is one mask per
+    agency color per shape, so full-image passes dominated the build."""
     key = (tuple(map(tuple, colors)), tol, region)
     if key not in _TREES:
-        im, keep = map_image()
+        im, keep_full = map_image()
         if region == "inset":
-            keep = np.zeros(keep.shape, dtype=bool)
             x0, y0, x1, y1 = INSET_RECT
-            keep[y0:y1, x0:x1] = True
+            keep = np.ones((y1 - y0, x1 - x0), dtype=bool)
             lx0, ly0, lx1, ly1 = INSET_LEGEND
-            keep[ly0:ly1, lx0:lx1] = False   # legend shows sample line artwork
+            keep[ly0 - y0:ly1 - y0, lx0 - x0:lx1 - x0] = False  # sample artwork
+        else:
+            x0, y0 = 0, 0
+            y1, x1 = keep_full.shape
+            keep = keep_full
+        sub = im[y0:y1, x0:x1]
         d2a = np.full(keep.shape, np.inf)
         for rgb in colors:
-            d2a = np.minimum(d2a, ((im - np.array(rgb)) ** 2).sum(axis=2))
+            d2a = np.minimum(d2a, ((sub - np.array(rgb)) ** 2).sum(axis=2))
         m = d2a < tol * tol
         for bg in bg_palette():
             if min(((np.array(c) - bg) ** 2).sum() for c in colors) < 24 * 24:
                 continue                       # bg IS this agency's color; keep
-            m &= d2a < ((im - bg) ** 2).sum(axis=2)
+            m &= d2a < ((sub - bg) ** 2).sum(axis=2)
+        # after the background filter: bridged pixels are label gray, which
+        # every background test would reject
+        m = bridge_label_gaps(m, sub, d2a, tol)
         ys, xs = np.nonzero(m & keep)
-        _TREES[key] = cKDTree(np.c_[xs, ys]) if len(xs) > 300 else None
+        _TREES[key] = cKDTree(np.c_[xs + x0, ys + y0]) if len(xs) > 300 else None
     return _TREES[key]
 
 # Metro's drawn line colors (sampled from the map)
@@ -628,10 +689,11 @@ def main():
             trip_info[row["trip_id"]] = (row["route_id"], sid)
 
         stop_times = defaultdict(list)
-        for row in read_csv(feed, "stop_times.txt"):
-            ti = row["trip_id"]
-            if ti in trip_info and (row.get("arrival_time") or "").strip():
-                stop_times[ti].append((int(row["stop_sequence"]), parse_time(row["arrival_time"]), row["stop_id"]))
+        for ti, seq, at, sid_ in read_cols(
+                feed, "stop_times.txt",
+                ("trip_id", "stop_sequence", "arrival_time", "stop_id")):
+            if ti in trip_info and at.strip():
+                stop_times[ti].append((int(seq), parse_time(at), sid_))
 
         n_before = len(trips_out)
         used_shapes = set()
@@ -660,10 +722,11 @@ def main():
 
         # load shapes used by this feed
         tmp = defaultdict(list)
-        for row in read_csv(feed, "shapes.txt"):
-            if row["shape_id"] in used_shapes:
-                tmp[row["shape_id"]].append((int(row["shape_pt_sequence"]),
-                                             float(row["shape_pt_lon"]), float(row["shape_pt_lat"])))
+        for sid_, seq, lon, lat in read_cols(
+                feed, "shapes.txt",
+                ("shape_id", "shape_pt_sequence", "shape_pt_lon", "shape_pt_lat")):
+            if sid_ in used_shapes:
+                tmp[sid_].append((int(seq), float(lon), float(lat)))
         route_by_shape = {row.get("shape_id", ""): row["route_id"] for row in trip_rows}
         warped = {}
         for sid, p in tmp.items():
