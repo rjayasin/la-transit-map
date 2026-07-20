@@ -179,12 +179,20 @@ def bg_palette(k=12):
         _BG = np.c_[top // 1024, (top // 32) % 32, top % 32] * 8 + 4
     return _BG
 
-def mask_tree(colors, tol=38.0):
+def mask_tree(colors, tol=38.0, region="main"):
     """KD-tree over map pixels within tol of ANY of the given colors and
-    closer to one of them than to any dominant background color."""
-    key = (tuple(map(tuple, colors)), tol)
+    closer to one of them than to any dominant background color. region
+    "main" is the map outside EXCLUDE; "inset" is the DTLA inset frame
+    (minus its legend), which the main masks deliberately exclude."""
+    key = (tuple(map(tuple, colors)), tol, region)
     if key not in _TREES:
         im, keep = map_image()
+        if region == "inset":
+            keep = np.zeros(keep.shape, dtype=bool)
+            x0, y0, x1, y1 = INSET_RECT
+            keep[y0:y1, x0:x1] = True
+            lx0, ly0, lx1, ly1 = INSET_LEGEND
+            keep[ly0:ly1, lx0:lx1] = False   # legend shows sample line artwork
         d2a = np.full(keep.shape, np.inf)
         for rgb in colors:
             d2a = np.minimum(d2a, ((im - np.array(rgb)) ** 2).sum(axis=2))
@@ -218,7 +226,7 @@ LEGEND_SEEDS = {
     "gtrans": [(198, 165, 188)],
     "ladot": [(175, 170, 141), (154, 150, 117)],   # DASH + Commuter Express olives
     "longbeach": [(136, 88, 92)],
-    "norwalk": [(197, 224, 223)],
+    "norwalk": [(162, 208, 207)],   # badge-fill sampled; legend swatch too pale
     "bigbluebus": [(143, 135, 136)],
     "foothill": [(108, 133, 116)],
     "montebello": [(172, 186, 153)],
@@ -228,10 +236,14 @@ LEGEND_SEEDS = {
 }
 
 def refine_color(shape_pts, seed, r2=55 * 55, need=250):
-    """Median of pixels along the shapes that are close to the seed color."""
+    """Median of pixels along the shapes that are close to the seed color.
+    Pixels that match a dominant background color better than the seed are
+    dropped — street gray sits within sampling range of the muted agency
+    seeds and would drag the median gray (Montebello's sage came out gray)."""
     im, keep = map_image()
     h, w = keep.shape
     seed = np.array(seed)
+    bgs = [b for b in bg_palette() if ((b - seed) ** 2).sum() > 24 * 24]
     samples = []
     for pts in shape_pts[:20]:
         for x, y in densify(pts, 10.0):
@@ -240,7 +252,8 @@ def refine_color(shape_pts, seed, r2=55 * 55, need=250):
                 continue
             for dx, dy in ((0, 0), (2, 0), (-2, 0), (0, 2), (0, -2)):
                 c = im[yi + dy, xi + dx]
-                if ((c - seed) ** 2).sum() < r2:
+                d2s = ((c - seed) ** 2).sum()
+                if d2s < r2 and all(((c - b) ** 2).sum() > d2s for b in bgs):
                     samples.append(c)
     if len(samples) < need:
         return None
@@ -253,32 +266,38 @@ def refine_color(shape_pts, seed, r2=55 * 55, need=250):
 # PDF pins each shape to its own drawn line: a word matching the route's number
 # that sits on the agency's color mask is a point known to be ON that route.
 
-_BADGES = None
+_BADGES = None                     # {"main": {...}, "inset": {...}}
 
-def badge_words():
-    """{token: [(x, y) map px, ...]} for every word on the map, or None."""
+def badge_words(region="main"):
+    """{token: [(x, y) map px, ...]} for every word on the map, split into
+    the main map and the DTLA inset frame (whose badges anchor inset runs)."""
     global _BADGES
     if _BADGES is None:
-        _BADGES = {}
+        _BADGES = {"main": {}, "inset": {}}
         try:
             import fitz
             doc = fitz.open("26-1720_blt_system_map_47x47.5-2.pdf")
             page = doc[0]
             im, _ = map_image()
             s = im.shape[1] / page.rect.width
-            out = defaultdict(list)
+            main, inset = defaultdict(list), defaultdict(list)
+            ix0, iy0, ix1, iy1 = INSET_RECT
+            lx0, ly0, lx1, ly1 = INSET_LEGEND
             for x0, y0, x1, y1, w, *_r in page.get_text("words"):
                 cx, cy = (x0 + x1) / 2 * s, (y0 + y1) / 2 * s
-                if any(ex0 <= cx < ex1 and ey0 <= cy < ey1 for ex0, ey0, ex1, ey1 in EXCLUDE):
-                    continue
-                out[w.strip()].append((cx, cy))
-            _BADGES = dict(out)
+                if ix0 <= cx < ix1 and iy0 <= cy < iy1:
+                    if not (lx0 <= cx < lx1 and ly0 <= cy < ly1):
+                        inset[w.strip()].append((cx, cy))
+                elif not any(ex0 <= cx < ex1 and ey0 <= cy < ey1
+                             for ex0, ey0, ex1, ey1 in EXCLUDE):
+                    main[w.strip()].append((cx, cy))
+            _BADGES = {"main": dict(main), "inset": dict(inset)}
         except Exception as e:                      # missing pdf / pymupdf
             print(f"badge extraction unavailable: {e}")
-    return _BADGES
+    return _BADGES[region]
 
 
-def route_anchors(tokens, tree):
+def route_anchors(tokens, tree, region="main"):
     """Badge positions for any of the route's number tokens that lie on the
     agency's drawn-line mask (rejects same-number badges of other agencies,
     highway shields, street labels). The agency color must be present AT the
@@ -288,13 +307,16 @@ def route_anchors(tokens, tree):
         return []
     pts = []
     for t in tokens:
-        for cx, cy in badge_words().get(t, ()):
-            if len(tree.query_ball_point([cx, cy], 6.0)) >= 4:
+        for cx, cy in badge_words(region).get(t, ()):
+            # >=10: a real badge fill / glyph has dozens of mask pixels here;
+            # stray antialiased fringes near a foreign badge have a few
+            if len(tree.query_ball_point([cx, cy], 6.0)) >= 10:
                 pts.append((cx, cy))
     return pts
 
 
-def snap_coherent(pts, tree, caps=(40.0, 26.0, 14.0), win=61, anchors=None):
+def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
+                  anchor_gate=120.0, min_frac=0.5):
     """Snap a warped polyline onto a drawn-line mask. The displacement field is
     smoothed along the line so whole stretches move to the same drawn street
     instead of individual points grabbing different parallels. Returns None if
@@ -309,23 +331,27 @@ def snap_coherent(pts, tree, caps=(40.0, 26.0, 14.0), win=61, anchors=None):
     n = len(P)
     if n < 8 or tree is None:
         return None
+    default_caps = caps is None
+    if default_caps:
+        caps = (40.0, 26.0, 14.0)
     if anchors:
         cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(P, axis=0).T))])
         A = np.asarray(anchors, dtype=float)
         d2 = ((P[None, :, :] - A[:, None, :]) ** 2).sum(2)
         j = d2.argmin(1)
-        near = np.sqrt(d2[np.arange(len(A)), j]) < 120       # badge serves this shape
+        near = np.sqrt(d2[np.arange(len(A)), j]) < anchor_gate  # badge serves this shape
         if near.any():
             order = np.argsort(cum[j[near]])
             s = cum[j[near]][order]
             D = (A[near] - P[j[near]])[order]
             P = P + np.c_[np.interp(cum, s, D[:, 0]), np.interp(cum, s, D[:, 1])]
-            caps = (26.0, 14.0)
+            if default_caps:
+                caps = (26.0, 14.0)        # anchors pin the street; stay tight
     idx = np.arange(n)
     for ci, cap in enumerate(caps):
         d, j = tree.query(P)
         ok = d < cap
-        if ci == 0 and ok.sum() < n * 0.5:
+        if ci == 0 and ok.sum() < n * min_frac:
             return None                    # mostly undrawn: keep the warp
         if ok.sum() < 4:
             return None
@@ -439,25 +465,7 @@ def project_stops(shape_px, cum, stop_px):
     return [float(v) for v in dists]
 
 
-def inset_rail_trees():
-    """Per-rail-route KD-trees over drawn line pixels inside the inset frame
-    (the frame is EXCLUDEd from the main-map masks, so build separately)."""
-    im = np.asarray(Image.open("map.png").convert("RGB"), dtype=np.int32)
-    x0, y0, x1, y1 = INSET_RECT
-    keep = np.zeros(im.shape[:2], dtype=bool)
-    keep[y0:y1, x0:x1] = True
-    lx0, ly0, lx1, ly1 = INSET_LEGEND
-    keep[ly0:ly1, lx0:lx1] = False       # legend shows sample rail artwork
-    trees = {}
-    for rid, rgb in ROUTE_COLORS.items():
-        d2 = ((im - np.array(rgb)) ** 2).sum(axis=2)
-        ys, xs = np.nonzero((d2 < TOL * TOL) & keep)
-        if len(xs) > 100:
-            trees[rid] = cKDTree(np.c_[xs, ys])
-    return trees
-
-
-def inset_runs(ll, stored_pts, cum, snap_tree=None, snap_cap=25.0):
+def inset_runs(ll, stored_pts, cum, snap_tree=None, anchors=None):
     """Portions of a shape inside the DTLA inset, as runs of inset-px
     polyline. Motion in the inset is computed natively in inset space (the
     schematic main map collapses downtown, so main-shape distance cannot
@@ -491,13 +499,17 @@ def inset_runs(ll, stored_pts, cum, snap_tree=None, snap_cap=25.0):
             continue
         mx, my = to_px(ll[a:b+1, 0], ll[a:b+1, 1])
         d = project_stops(stored_pts, cum, list(zip(mx, my)))
-        px, py = ix[a:b+1].copy(), iy[a:b+1].copy()
+        pts = np.c_[ix[a:b+1], iy[a:b+1]]
         if snap_tree is not None:
-            dist, j2 = snap_tree.query(np.c_[px, py])
-            hit = dist < snap_cap
-            px[hit] = snap_tree.data[j2[hit], 0]
-            py[hit] = snap_tree.data[j2[hit], 1]
-        pts = np.c_[px, py]
+            # same coherent snap + badge anchors as the main map, but scaled
+            # for the magnified inset: a short smoothing window keeps the
+            # grid's right-angle turns square, and a tight anchor gate stops
+            # chips on the other street of a one-way couplet from matching
+            sc = snap_coherent([tuple(p) for p in pts], snap_tree,
+                               caps=(60.0, 30.0, 14.0), win=25, anchors=anchors,
+                               anchor_gate=75.0, min_frac=0.35)
+            if sc is not None:
+                pts = np.asarray(sc)
         # drop edge-hugging slivers that never meaningfully enter the frame
         vis = ((pts[:, 0] > x0 + 8) & (pts[:, 0] < x1 - 8) &
                (pts[:, 1] > y0 + 8) & (pts[:, 1] < y1 - 8))
@@ -538,7 +550,7 @@ def main():
     systems, system_idx = [], {}    # per-feed display names, routes point in
     shapes_raw = {}                 # (feed, shape_id) -> [(x,y)...] px
     shape_ll = {}                   # shape key -> [(lon,lat)...] original
-    shape_rail = {}                 # (feed, shape_id) -> rail route_id
+    shape_isnap = {}                # (feed, shape_id) -> (colors, tol, tokens)
     trips_out = []
     patterns, pattern_idx = [], {}  # key (feed, shape_id, stop_seq)
     stops_px = {}                   # (feed, stop_id) -> (x, y)
@@ -669,34 +681,38 @@ def main():
         snapped = anchored = 0
         for sid, pts in warped.items():
             out_pts = None
-            toks = badge_tokens.get(route_by_shape.get(sid), set())
+            rid = route_by_shape.get(sid)
+            toks = badge_tokens.get(rid, set())
             if feed == "gtfs_rail":
-                tree = rail_trees.get(route_by_shape.get(sid))
+                tree = rail_trees.get(rid)
                 if tree is not None:
                     out_pts = snap_rail(densify(pts), tree)
+                if rid in ROUTE_COLORS:
+                    shape_isnap[(feed, sid)] = ([ROUTE_COLORS[rid]], TOL, toks)
             elif feed == "gtfs_bus":
-                rid0 = (route_by_shape.get(sid) or "").split("-")[0]
+                rid0 = (rid or "").split("-")[0]
                 if rid0 in ("720", "754", "761"):
-                    tree = mask_tree([RAPID_RED])
+                    cols = [RAPID_RED]
                 elif rid0 == "910":
-                    tree = None   # J/Silver: drawn color collides with freeway gray
+                    cols = None   # J/Silver: drawn color collides with freeway gray
                 else:
-                    tree = mask_tree([ORANGE])
-                if tree is not None:
+                    cols = [ORANGE]
+                if cols is not None:
+                    tree = mask_tree(cols)
                     anc = route_anchors(toks, tree)
                     anchored += bool(anc)
                     out_pts = snap_coherent(pts, tree, anchors=anc)
+                    shape_isnap[(feed, sid)] = (cols, 38.0, toks)
             elif agency_tree is not None:
                 anc = route_anchors(toks, agency_tree)
                 anchored += bool(anc)
                 out_pts = snap_coherent(pts, agency_tree, anchors=anc)
+                shape_isnap[(feed, sid)] = (good, 30.0, toks)
             if out_pts is not None:
                 snapped += 1
             shapes_raw[(feed, sid)] = simplify(out_pts if out_pts is not None else pts)
             p = tmp[sid]
             shape_ll[(feed, sid)] = [(q[1], q[2]) for q in p]
-            if feed == "gtfs_rail":
-                shape_rail[(feed, sid)] = route_by_shape.get(sid)
         n_trips = len(trips_out) - n_before
         stats[feed] = n_trips
         print(f"{feed}: {n_trips} trips on {day} "
@@ -716,15 +732,20 @@ def main():
         add_shape(key, pts)
 
     # DTLA inset: per-shape downtown runs in inset px, computed on demand
-    itrees = inset_rail_trees() if TR_INSET is not None else {}
     shape_runs = {}                 # si -> runs or None
 
     def runs_for(key, si):
         if si not in shape_runs:
             ll = shape_ll.get(key)
-            tree = itrees.get(shape_rail.get(key)) if key[0] == "gtfs_rail" else None
-            shape_runs[si] = (inset_runs(ll, shapes_raw[key], cums[si], tree)
-                              if ll is not None and TR_INSET is not None else None)
+            runs = None
+            if ll is not None and TR_INSET is not None:
+                cols, tol, toks = shape_isnap.get(key, (None, 0, set()))
+                if key[0] == "gtfs_bus" and cols:
+                    cols = [ORANGE]   # inset draws ALL Metro bus lines orange
+                tree = mask_tree(cols, tol, region="inset") if cols else None
+                anc = route_anchors(toks, tree, region="inset")
+                runs = inset_runs(ll, shapes_raw[key], cums[si], tree, anc)
+            shape_runs[si] = runs
         return shape_runs[si]
 
     patterns_out = []
