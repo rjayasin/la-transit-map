@@ -379,7 +379,6 @@ def mask_tree(colors, tol=38.0, region="main"):
 
 STATION_MIN_AREA = 120     # px at MASK_LEVEL; a plain circle is about 220
 STATION_RING_DARK = 0.5    # fraction of a marker's border that must be stroke
-STATION_REACH = 45.0       # px a stop may sit from its drawn platform
 
 
 def station_markers(level=MASK_LEVEL):
@@ -421,6 +420,18 @@ def station_markers(level=MASK_LEVEL):
     return cached_pixels(("stations", level, STATION_MIN_AREA, STATION_RING_DARK,
                           art_stamp(f"{TILES}/{level}/0_0.webp"),
                           code_stamp(station_markers)), build)
+
+
+_MARKER_TREE = []
+
+
+def marker_tree():
+    """station_markers() as a KD-tree, or None where the sheet drew none."""
+    global _MARKER_TREE
+    if _MARKER_TREE == []:
+        M = station_markers()
+        _MARKER_TREE = cKDTree(M[:, :2]) if len(M) else None
+    return _MARKER_TREE
 
 
 def tile_cols(level):
@@ -1043,6 +1054,123 @@ def chaikin(pts, iters=2):
     return P
 
 
+TAIL_LIMIT = 90.0    # px of drawn track a terminus may sit beyond the warp's end
+TAIL_STEP = 3.0      # px; lattice pitch for the walk out
+TAIL_REACH = 8.0     # px a lattice cell may sit from drawn pixels
+TAIL_MARKER = 13.0   # px; a platform bridges the gap it cuts in its own ribbon
+TAIL_BLOCK = 16.0    # px around the stretch already covered, kept off the walk
+TAIL_FREE = 30.0     # px of line by the end left unblocked, so the walk can start
+TAIL_AHEAD = 0.75    # cosine of the widest cone off the line's heading a
+                     # terminus may be found in
+
+
+def centre_on_ink(pts, tree, r=7.0, need=4):
+    """Slide each point sideways to the middle of the ribbon beneath it.
+
+    The walk runs on a lattice whose cells only have to be *near* the drawn
+    line, so it comes out a few px off centre and wanders across the ribbon.
+    Nearest-pixel snapping would pin it to whichever edge is closer; averaging
+    the ink either side puts it down the middle instead."""
+    P = np.asarray(pts, dtype=float)
+    if len(P) < 2:
+        return P
+    t = np.gradient(P, axis=0)
+    t /= np.maximum(np.hypot(*t.T), 1e-9)[:, None]
+    for i, (p, n) in enumerate(zip(P, np.c_[-t[:, 1], t[:, 0]])):
+        q = tree.data[tree.query_ball_point(p, r)]
+        if len(q) >= need:
+            P[i] = p + n * float(((q - p) @ n).mean())
+    return P
+
+
+def rail_tail(pts, tree, end, limit=TAIL_LIMIT):
+    """The drawn track running on past one end of a snapped rail line, if any.
+
+    Snapping only ever moves a point sideways onto the artwork, so where the
+    warp lands a terminus short of where the sheet draws it the line simply
+    stops early and the last stretch of track is left bare — the E line gave up
+    at East LA Civic Center with Atlantic 70 px further on, and at 17th St/SMC
+    with Downtown Santa Monica 50 px behind it. This walks the mask outward
+    from the endpoint and returns the piece to append.
+
+    The lattice is the one mask_path() walks on, with two differences. Cells
+    within TAIL_BLOCK of the stretch already covered are cut, all but a short
+    window by the end itself, so the walk can only head away from the line
+    rather than doubling back along it; and a drawn platform counts as track,
+    since the white marker interrupts its own ribbon (16 px of it at East LA
+    Civic Center) and the walk has to cross that to reach the terminus behind
+    it. The farthest inked cell ahead of the endpoint is the target, and the
+    platform it stands in, if any, finishes the line off.
+
+    Two gates keep the walk from inventing track. Only ink inside a narrow cone
+    off the heading the line arrived on counts as the line carrying on, so
+    track that turns away is not followed — the A line's terminal loop at Long
+    Beach, where the warp lands the shape on the wrong side of the block and
+    the drawn line runs both ways round it. And a walk longer than `limit` says
+    this isn't a terminus at all: the line runs on and the end is a short-turn.
+    Either way the answer is empty and the end stays where the warp put it."""
+    D = np.array(densify([tuple(p) for p in pts], 2.0), dtype=float)
+    if end == 0:
+        D = D[::-1]
+    a = D[-1]
+    cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(D, axis=0).T))])
+    out = a - D[np.searchsorted(cum, cum[-1] - TAIL_FREE)]
+    if np.hypot(*out) < 1e-6:
+        return np.zeros((0, 2))
+    out /= np.hypot(*out)
+
+    span = limit + 30.0
+    lo, hi = a - span, a + span
+    nx, ny = (int(np.ceil((hi[k] - lo[k]) / TAIL_STEP)) + 1 for k in (0, 1))
+    C = np.stack(np.meshgrid(lo[0] + TAIL_STEP * np.arange(nx),
+                             lo[1] + TAIL_STEP * np.arange(ny), indexing="ij"), -1)
+    cells = C.reshape(-1, 2)
+    ink = tree.query(cells)[0] < TAIL_REACH
+    free = ink & ((cells - a) @ out > -TAIL_BLOCK)
+    mt = marker_tree()
+    if mt is not None:
+        free |= mt.query(cells)[0] < TAIL_MARKER
+    covered = cum <= cum[-1] - TAIL_FREE
+    if covered.any():
+        free &= cKDTree(D[covered]).query(cells)[0] > TAIL_BLOCK
+    ia = int(np.abs(cells - a).sum(1).argmin())
+    free[ia] = True
+
+    idx = np.arange(nx * ny).reshape(nx, ny)
+    rows, cols, w = [], [], []
+    for dx, dy in ((1, 0), (0, 1), (1, 1), (1, -1)):
+        s0 = idx[max(0, -dx):nx - max(0, dx), max(0, -dy):ny - max(0, dy)]
+        s1 = idx[max(0, dx):nx - max(0, -dx), max(0, dy):ny - max(0, -dy)]
+        ok = free.flat[s0] & free.flat[s1]
+        rows.append(s0[ok])
+        cols.append(s1[ok])
+        w.append(np.full(int(ok.sum()), TAIL_STEP * math.hypot(dx, dy)))
+    G = sparse.coo_matrix((np.concatenate(w),
+                           (np.concatenate(rows), np.concatenate(cols))),
+                          shape=(nx * ny, nx * ny))
+    dist, pred = dijkstra(G + G.T, indices=ia, return_predecessors=True)
+
+    reach = np.hypot(*(cells - a).T)
+    ahead = np.isfinite(dist) & ink & ((cells - a) @ out > TAIL_AHEAD * reach)
+    if not ahead.any():
+        return np.zeros((0, 2))
+    ib = int(np.argmax(np.where(ahead, reach, -1.0)))
+    if dist[ib] > limit:
+        return np.zeros((0, 2))
+    walk = [ib]
+    while walk[-1] != ia:
+        walk.append(pred[walk[-1]])
+    tail = centre_on_ink(cells[walk[-2::-1]], tree)
+    if not len(tail):                            # the endpoint was already there
+        return tail
+    if mt is not None:            # finish in the middle of the terminal platform
+        md, mj = mt.query(tail[-1])
+        c = mt.data[mj]
+        if md < TAIL_MARKER and (c - a) @ out > (tail[-1] - a) @ out:
+            tail = np.vstack([tail[np.hypot(*(tail - c).T) >= TAIL_MARKER], c])
+    return tail
+
+
 def snap_rail(pts, tree, caps=(45.0, 24.0), wins=(15, 9), max_gap=45, rnd=2):
     """Snap a warped rail polyline onto its drawn-track mask, coherently.
 
@@ -1088,6 +1216,8 @@ def snap_rail(pts, tree, caps=(45.0, 24.0), wins=(15, 9), max_gap=45, rnd=2):
     dist, j = tree.query(P)                      # final tight re-snap on the track
     close = dist < 8
     P[close] = tree.data[j[close]]
+    head, tail = (rail_tail(P, tree, e) for e in (0, -1))   # out to the terminus
+    P = np.vstack([head[::-1], P, tail])
     return [tuple(p) for p in chaikin(simplify(P, 1.0), rnd)]
 
 
@@ -1158,6 +1288,89 @@ def project_stops(shape_px, cum, stop_px):
     dists = along[np.arange(S), ks]
     np.maximum.accumulate(dists, out=dists)              # order ties within a segment
     return [float(v) for v in dists]
+
+
+def project_onto(P, cum, pts):
+    """(distance along P, distance off it) of each point's foot on P."""
+    Q = np.asarray(pts, dtype=float)
+    A, Bv = P[:-1], P[1:] - P[:-1]
+    L2 = (Bv ** 2).sum(1)
+    L2[L2 == 0] = 1e-9
+    rel = Q[:, None, :] - A[None, :, :]
+    t = np.clip((rel * Bv).sum(2) / L2, 0.0, 1.0)
+    d2 = (((A + Bv * t[..., None]) - Q[:, None, :]) ** 2).sum(2)
+    k = d2.argmin(1)
+    i = np.arange(len(Q))
+    return (cum[:-1] + t * np.sqrt(L2))[i, k], np.sqrt(d2[i, k])
+
+
+PLATFORM_NEAR = 14.0    # px a drawn platform may sit off the line it serves
+PLATFORM_GATE = 120.0   # px along the line a stop may be moved to reach its own
+
+
+def platform_stops(shape_px, cum, stop_px, gate=PLATFORM_GATE):
+    """Move each rail stop onto the platform the map draws for it.
+
+    Rail platforms are drawn: the white shape with the black stroke, a circle
+    alone or conjoined where lines meet. A stop projected from its warped
+    position lands beside one rather than on it, so the train eases to a halt
+    short of the platform or past it.
+
+    Matching each stop to its nearest marker independently isn't enough,
+    because near the sheet's schematic corners the warp lags the artwork by
+    more than the stops are apart: at the E line's east end it left Maravilla
+    and East LA Civic Center sharing one platform and put Atlantic on East LA
+    Civic Center's, so a train reached the map's terminus a station early. The
+    platforms along a line *are* its stop sequence, in order, so the two are
+    aligned as sequences instead — a monotone, one-to-one match, which pins
+    each stop to its own platform however far the warp has slid. Stops whose
+    platform the sheet doesn't draw fall in the gaps and keep the warp; that is
+    most of downtown, where the call-out panel covers the markers.
+    """
+    P = np.asarray(shape_px, dtype=float)
+    M = station_markers()
+    if len(P) < 2 or not len(M):
+        return stop_px
+    ms, moff = project_onto(P, cum, M[:, :2])
+    on = np.nonzero(moff < PLATFORM_NEAR)[0]
+    if not len(on):
+        return stop_px
+    on = on[np.argsort(ms[on])]
+    s, plat = ms[on], M[on, :2]
+    u = project_onto(P, cum, stop_px)[0]
+    S, K = len(u), len(s)
+
+    # Needleman-Wunsch: match, leave the stop on the warp, or leave the
+    # platform to another line. Leaving a platform out is free — a shape may
+    # run past platforms its pattern doesn't call at — while a stop that finds
+    # no platform costs the gate, so any match inside the gate beats skipping.
+    cost = np.abs(u[:, None] - s[None, :])
+    cost[cost >= gate] = np.inf
+    cost **= 2
+    F = np.zeros((S + 1, K + 1))
+    src = np.zeros((S + 1, K + 1), dtype=np.int32)   # which g the row min came from
+    hit = np.zeros((S + 1, K + 1), dtype=bool)       # ...and whether it was a match
+    ks = np.arange(K + 1)
+    for i in range(1, S + 1):
+        g = np.empty(K + 1)
+        g[0] = F[i - 1, 0] + gate ** 2
+        match, skip = F[i - 1, :K] + cost[i - 1], F[i - 1, 1:] + gate ** 2
+        g[1:] = np.minimum(match, skip)
+        hit[i, 1:] = match <= skip
+        F[i] = np.minimum.accumulate(g)
+        src[i] = np.maximum.accumulate(np.where(g <= F[i], ks, 0))
+
+    out = list(stop_px)
+    i, k = S, K
+    while i > 0:
+        kk = int(src[i, k])
+        if kk and hit[i, kk]:
+            out[i - 1] = tuple(plat[kk - 1])
+            k = kk - 1
+        else:
+            k = kk
+        i -= 1
+    return out
 
 
 INSET_SLACK = 25.0   # inset px a shape may stray outside the frame and still
@@ -1549,24 +1762,8 @@ def main():
         return shape_runs[si]
 
     patterns_out = []
-    marker_tree = None
-    if len(station_markers()):
-        marker_tree = cKDTree(station_markers()[:, :2])
-
     for feed, sid, stop_seq in patterns:
         spx = [stops_px[(feed, s)] for s in stop_seq]
-        if feed == "gtfs_rail" and marker_tree is not None:
-            # Rail platforms are drawn: the white shape with the black stroke,
-            # a circle alone or conjoined where lines meet. A stop projected
-            # from its warped position lands beside one rather than on it, so
-            # the train eases to a halt short of the platform or past it. Move
-            # each stop onto its own marker first; the projection below then
-            # measures to where the map says the platform is. Stops with no
-            # marker in reach — under the Downtown panel's own geometry, or a
-            # platform the sheet doesn't draw — keep the warp.
-            dist, j = marker_tree.query(spx)
-            spx = [tuple(marker_tree.data[jj]) if dd < STATION_REACH else p
-                   for p, dd, jj in zip(spx, dist, j)]
         key = (feed, sid)
         if key not in shape_index:            # no shape in feed: polyline through stops
             # key per pattern — distinct stop sequences must not share one
@@ -1581,6 +1778,8 @@ def main():
                 shape_ll[key] = [stops_ll[(feed, s)] for s in stop_seq]
                 add_shape(key, spx)
         si = shape_index[key]
+        if feed == "gtfs_rail":
+            spx = platform_stops(shapes_raw[key], cums[si], spx)
         prm = shape_param.get(key)
         if prm is None:
             d = project_stops(shapes_raw[key], cums[si], spx)

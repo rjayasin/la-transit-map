@@ -54,6 +54,20 @@ python3 -m http.server 8741
     when its own chip color is best explained by this agency's.
   - Shapes whose lines aren't drawn at all (minor routes, the gray-drawn
     agencies, Metrolink) keep the warp.
+  - Snapping only moves a point sideways, so a terminus the warp lands short of
+    leaves the last stretch of drawn track bare — 70 px of it past the E line's
+    Atlantic. Each rail line is therefore walked on past both ends, along its
+    own ink and through the platform markers interrupting it, until the drawn
+    line stops. A walk that has to turn away from the line's heading, or that
+    gets too far, is one where the track carries on rather than ending, and is
+    dropped.
+- **Rail platforms** — where a train halts is the white marker the sheet draws,
+  not the warped stop, and matching each stop to its nearest one double-books
+  platforms wherever the warp lags the artwork by more than the stops are
+  apart. The platforms along a line *are* its stop sequence, so the two are
+  aligned in order instead — one to one, and however far the warp has slid.
+  Stops whose platform isn't drawn, which is most of downtown under the
+  call-out panel, fall in the gaps and keep the warp.
 - **Rendering** (`index.html`, vanilla canvas) — each vehicle is a labeled
   circle in the color the map draws its line in, so every sprite matches the
   artwork it rides on. Trains pull away, run, and brake to a stand at each
