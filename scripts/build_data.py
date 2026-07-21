@@ -24,7 +24,8 @@ from scipy.sparse.csgraph import dijkstra
 from scipy.spatial import cKDTree
 
 sys.path.insert(0, "scripts")
-from georef import EXCLUDE, ROUTE_COLORS, TILE, TILES, TOL, load_masks  # noqa: E402
+from georef import (EXCLUDE, MASK_LEVEL, ROUTE_COLORS, TILE, TILES, TOL,  # noqa: E402
+                    load_masks, tile_scan)
 from georef_inset import GEO as INSET_GEO, LEGEND as INSET_LEGEND, RECT as INSET_RECT  # noqa: E402
 
 TARGET = date(2026, 7, 22)  # a Wednesday inside the Metro JUNE26 calendar window
@@ -358,6 +359,19 @@ def mask_tree(colors, tol=38.0, region="main"):
     return _TREES[key]
 
 
+def tile_tree(colors, tol, level=MASK_LEVEL):
+    """KD-tree of pixels matching `colors` read off the tile pyramid, in map
+    pixels. For artwork whose printed color map.png's downscale destroys."""
+    key = (tuple(map(tuple, colors)), tol, level)
+    if key not in _TREES:
+        pts = cached_pixels(
+            ("tile", key, EXCLUDE, art_stamp(f"{TILES}/{level}/0_0.webp"),
+             code_stamp(tile_scan)),
+            lambda: tile_scan(colors, level, tol))
+        _TREES[key] = cKDTree(pts[:, :2] / level) if len(pts) > 300 else None
+    return _TREES[key]
+
+
 def mask_pixels(colors, tol, region):
     """Coordinates of every pixel the mask covers, as an Nx2 array."""
     im, keep_full = map_image()
@@ -397,6 +411,13 @@ def mask_pixels(colors, tol, region):
 ORANGE = (217, 129, 83)     # Metro Local/Rapid orange
 RAPID_RED = (180, 51, 61)   # 720/754/761
 BUSWAY_GRAY = "969CA0"      # J Line 910/950 freeway busway ribbon
+BUSWAY_ORANGE = (243, 123, 33)   # G Line busway ribbon, as printed on the sheet
+BUSWAY_TOL = 30.0
+# The busway mask holds that one ribbon and nothing else, so the snap can
+# reach much further than it dares on the shared orange, and can follow the
+# line closely instead of smoothing whole stretches together.
+BUSWAY_CAPS = (100.0, 50.0, 25.0, 12.0)
+BUSWAY_WIN = 9
 
 # Drawn colors for feeds whose lines can't be color-masked, sampled from the
 # map, so vehicle sprites still match the artwork they ride on.
@@ -583,6 +604,48 @@ def badge_line_color(cx, cy, r=7):
     codes = (fill // 24) @ np.array([10000, 100, 1])       # coarse color bins
     vals, counts = np.unique(codes, return_counts=True)
     return np.median(fill[codes == vals[counts.argmax()]], axis=0)
+
+
+STATION_NEAR = 30.0    # px a printed station name may sit from its own ribbon
+STATION_GATE = 160.0   # px the warp may be out and the name still be that stop's
+
+
+def station_anchors(stops, tree, names, positions, near=STATION_NEAR, gate=STATION_GATE):
+    """Anchors from the station names the map prints, for a line drawn as its
+    own ribbon.
+
+    A numbered route is pinned by its badges, but a rapid-transit line carries
+    station names instead, and the G Line has no badge anywhere on the sheet.
+    Its stations are all labelled, though, so each stop can be matched to its
+    own label and the label to the ribbon beside it.
+
+    The label sits next to the ribbon rather than on it, so the anchor is the
+    nearest mask pixel to the label, not the label itself. Names repeat across
+    the map — "College" appears twenty times — so a candidate has to be both
+    within `near` of this line's ribbon and within `gate` of where the warp
+    puts that stop. Neither test alone is enough: proximity to the ribbon
+    matched Pierce College's stop to Valley College's label, and the warp is
+    too far out in the Valley to be trusted on its own."""
+    if tree is None:
+        return []
+    out = []
+    for sid in stops:
+        name, pos = names.get(sid, ""), positions.get(sid)
+        if not name or pos is None:
+            continue
+        best = None
+        for word in name.replace("/", " ").replace("-", " ").split():
+            if len(word) <= 3:                 # too short to identify a station
+                continue
+            for cx, cy in badge_words().get(word, ()):
+                if math.hypot(cx - pos[0], cy - pos[1]) > gate:
+                    continue
+                d, j = tree.query([cx, cy])
+                if d < near and (best is None or d < best[0]):
+                    best = (d, tuple(tree.data[j]))
+        if best:
+            out.append(best[1])
+    return out
 
 
 def badge_like(token):
@@ -1142,6 +1205,8 @@ def main():
     shapes_raw = {}                 # (feed, shape_id) -> [(x,y)...] px
     shape_ll = {}                   # shape key -> [(lon,lat)...] original
     shape_isnap = {}                # (feed, shape_id) -> (colors, tol, tokens)
+    stops_name = {}                 # (feed, stop_id) -> printed name
+    route_stops = {}                # (feed, route_id) -> {stop_id}
     shape_param = {}                # (feed, shape_id) -> pre-snap polyline,
                                     # its cumulative dist, and that sampled at
                                     # the points simplify() kept
@@ -1173,6 +1238,7 @@ def main():
                            np.array([float(r["stop_lat"]) for r in srows]))
             for r, x, y in zip(srows, xs, ys):
                 stops_px[(feed, r["stop_id"])] = (x, y)
+                stops_name[(feed, r["stop_id"])] = r.get("stop_name", "")
                 stops_ll[(feed, r["stop_id"])] = (float(r["stop_lon"]), float(r["stop_lat"]))
 
         rmeta, badge_tokens, is_dash = {}, {}, {}
@@ -1187,6 +1253,8 @@ def main():
                 color = "B4333D"  # map's Rapid red (GTFS says black; map draws red)
             if row["route_id"].split("-")[0] in ("910", "950"):
                 color, text = BUSWAY_GRAY, "FFFFFF"   # J Line rides the gray busway
+            if row["route_id"].split("-")[0] == "901":
+                color, text = "%02X%02X%02X" % BUSWAY_ORANGE, "FFFFFF"   # G Line's own
             rail = row.get("route_type") in ("0", "1", "2")
             rmeta[row["route_id"]] = (label, color, text or "FFFFFF", rail)
             # tokens as printed on map badges, for anchor lookup
@@ -1216,6 +1284,7 @@ def main():
                 continue
             rid, sid = trip_info[ti]
             sts.sort()
+            route_stops.setdefault((feed, rid), set()).update(s for _, _, s in sts)
             times = [t for _, t, _ in sts]
             stop_seq = tuple(s for _, _, s in sts)
             rkey = (feed, rid)
@@ -1298,22 +1367,36 @@ def main():
                     shape_isnap[(feed, sid)] = ([ROUTE_COLORS[rid]], TOL, toks)
             elif feed == "gtfs_bus":
                 rid0 = (rid or "").split("-")[0]
+                busway = rid0 == "901"
                 if rid0 in ("720", "754", "761"):
                     cols = [RAPID_RED]
                 elif rid0 == "910":
                     cols = None   # J/Silver: drawn color collides with freeway gray
                 else:
-                    cols = [ORANGE]
+                    cols = [BUSWAY_ORANGE] if busway else [ORANGE]
                 if cols is not None:
-                    tree = mask_tree(cols)
+                    # The G Line's own busway ribbon is a hotter orange than the
+                    # streets, but only on the sheet: map.png's downscale mixes
+                    # it with the page until it sits 24 from ordinary Metro
+                    # orange, inside the mask tolerance, so the line had every
+                    # parallel street to choose from and took Vanowen. Read it
+                    # off the tiles, where the two stay 57 apart.
+                    tree = tile_tree(cols, BUSWAY_TOL) if busway else mask_tree(cols)
                     # no color gate: Metro's orange badges render with variable
                     # fade (crisp ~1 px from orange, faded ~70), overlapping
                     # muted foreign badge colors, so a color test drops genuine
                     # ones. Metro's number badges are dense and its anchoring
                     # was already tuned without it.
-                    anc = route_anchors(toks, tree)
+                    anc = (station_anchors(route_stops.get((feed, rid), ()), tree,
+                                           {s: stops_name.get((feed, s), "")
+                                            for s in route_stops.get((feed, rid), ())},
+                                           {s: stops_px.get((feed, s))
+                                            for s in route_stops.get((feed, rid), ())})
+                           if busway else route_anchors(toks, tree))
                     anchored += bool(anc)
-                    out_pts = snap_coherent(pts, tree, anchors=anc)
+                    out_pts = snap_coherent(pts, tree, anchors=anc,
+                                            caps=BUSWAY_CAPS if busway else None,
+                                            win=BUSWAY_WIN if busway else 61)
                     shape_isnap[(feed, sid)] = (cols, 38.0, toks)
             elif agency_tree is not None:
                 anchor_tree = agency_tree
