@@ -808,6 +808,24 @@ def project_stops(shape_px, cum, stop_px):
     return [float(v) for v in dists]
 
 
+INSET_SLACK = 25.0   # inset px a shape may stray outside the frame and still
+                     # count as inside — ~4x the inset fit's median residual
+
+
+def outside_inset(ix, iy, ll):
+    """How far each point falls outside what the inset depicts, in inset px:
+    past the frame rect, or past the geographic bounds converted at the
+    inset's own scale."""
+    x0, y0, x1, y1 = INSET_RECT
+    sx = (x1 - x0) / (INSET_GEO[2] - INSET_GEO[0])
+    sy = (y1 - y0) / (INSET_GEO[3] - INSET_GEO[1])
+    return np.maximum.reduce([
+        x0 - ix, ix - x1, y0 - iy, iy - y1,
+        (INSET_GEO[0] - ll[:, 0]) * sx, (ll[:, 0] - INSET_GEO[2]) * sx,
+        (INSET_GEO[1] - ll[:, 1]) * sy, (ll[:, 1] - INSET_GEO[3]) * sy,
+        np.zeros(len(ix))])
+
+
 def inset_runs(ll, stored_pts, cum, snap_tree=None, anchors=None):
     """Portions of a shape inside the DTLA inset, as runs of inset-px
     polyline. Motion in the inset is computed natively in inset space (the
@@ -825,6 +843,28 @@ def inset_runs(ll, stored_pts, cum, snap_tree=None, anchors=None):
               (ll[:, 1] > INSET_GEO[1]) & (ll[:, 1] < INSET_GEO[3]))
     if not inside.any():
         return None
+    # Both tests above read the raw warp, which is only good to a few pixels,
+    # so a stretch drawn well inside the frame can measure as outside it and
+    # split the shape into two runs. That costs the vehicle its inset sprite
+    # entirely: the renderer wants the stops either side of it to agree on a
+    # run, and when they disagree it draws nothing — the A line disappeared
+    # between Union Station and Little Tokyo, where the warp grazes 7 px past
+    # the frame's right edge. So fill in gaps the route never really left
+    # through. A genuine exit from downtown misses by hundreds of px, not tens,
+    # and still splits the runs, which is what should happen.
+    slack = outside_inset(ix, iy, ll)
+    known = np.nonzero(inside)[0]
+    i = known[0]
+    while i < known[-1]:
+        if inside[i]:
+            i += 1
+            continue
+        j = i
+        while not inside[j]:
+            j += 1
+        if slack[i:j].max() <= INSET_SLACK:
+            inside[i:j] = True
+        i = j
     spans, i, n = [], 0, len(ll)
     while i < n:
         if not inside[i]:
