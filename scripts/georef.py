@@ -3,7 +3,7 @@ to the colored rail lines drawn on the system map.
 
 Writes data/transform.json and a diagnostic overlay to scratch/ if given.
 """
-import csv, json, sys
+import csv, json, os, sys
 from collections import defaultdict
 
 import numpy as np
@@ -12,18 +12,27 @@ from scipy.spatial import cKDTree
 from scipy.optimize import least_squares
 
 MAP = "map.png"
+TILES = "tiles"
+TILE = 512          # tile edge, px (matches make_tiles.py)
 RAIL = "data/gtfs/gtfs_rail"
 
-# GTFS route colors for the six rail lines
+# What the map *draws* for each rail line, sampled off the tile pyramid along
+# the line's georeferenced path. Mostly the GTFS route_color, but not always —
+# the C line is printed a good deal lighter than its branding (88,167,56), far
+# enough that keying the mask off GTFS missed the line entirely once the
+# tolerance was tight. These are for finding artwork; vehicle sprites still
+# take their fill from the feed.
 ROUTE_COLORS = {
-    "801": (0x00, 0x72, 0xBC),  # A
-    "802": (0xEB, 0x13, 0x1B),  # B
-    "803": (0x58, 0xA7, 0x38),  # C
-    "804": (0xFD, 0xB9, 0x13),  # E
-    "805": (0xA0, 0x5D, 0xA5),  # D
-    "807": (0xE5, 0x6D, 0xB1),  # K
+    "801": (2, 114, 186),    # A
+    "802": (238, 30, 38),    # B
+    "803": (110, 194, 102),  # C
+    "804": (254, 186, 18),   # E
+    "805": (158, 94, 166),   # D
+    "807": (230, 114, 174),  # K
 }
-TOL = 60.0  # RGB euclidean tolerance
+TOL = 60.0  # RGB euclidean tolerance, for masks sampled off map.png
+MASK_LEVEL = 2    # tile pyramid level the rail masks are sampled at
+MASK_TOL = 24.0   # RGB tolerance there, where the drawn colors are faithful
 
 # Regions of the image to ignore (legend, insets, title banner), in pixels
 EXCLUDE = [
@@ -35,19 +44,49 @@ EXCLUDE = [
 ]
 
 
-def load_masks():
-    im = np.asarray(Image.open(MAP).convert("RGB"), dtype=np.int32)
-    h, w, _ = im.shape
-    keep = np.ones((h, w), dtype=bool)
-    for x0, y0, x1, y1 in EXCLUDE:
-        keep[y0:y1, x0:x1] = False
-    trees = {}
-    for rid, (r, g, b) in ROUTE_COLORS.items():
-        d2 = (im[:, :, 0] - r) ** 2 + (im[:, :, 1] - g) ** 2 + (im[:, :, 2] - b) ** 2
-        ys, xs = np.nonzero((d2 < TOL * TOL) & keep)
-        print(f"route {rid}: {len(xs)} px")
-        if len(xs) > 100:
-            trees[rid] = cKDTree(np.c_[xs, ys])
+def load_masks(level=MASK_LEVEL, tol=MASK_TOL):
+    """KD-tree of the pixels drawing each rail line, in map-pixel coordinates.
+
+    Sampled from the tile pyramid, not map.png. At 4096 px the narrower ribbons
+    are two or three pixels wide and the downscale blends them with whatever
+    runs alongside: the K line beside the C line through Aviation reads
+    (201,112,155) against the (230,114,174) actually printed there, 35 away. A
+    tolerance loose enough to keep that also admits a neighbouring agency's
+    pink badge chip (43 away) — and the snap, finding the chip nearer than the
+    line, took it, which is what bent the K line east of Aviation north of
+    Mariposa. One pyramid level deeper the same line reads within 6 of its true
+    color, so the mask both aims better and leaves room for a tolerance tight
+    enough to keep foreign chips out.
+
+    Read one tile row at a time: at level 2 the sheet is 8192 px across, and
+    there is no reason to hold all of it at once."""
+    trees, kept = {}, {rid: [] for rid in ROUTE_COLORS}
+    cols, rows = 0, 0
+    while os.path.exists(f"{TILES}/{level}/{cols}_0.webp"):
+        cols += 1
+    while os.path.exists(f"{TILES}/{level}/0_{rows}.webp"):
+        rows += 1
+    if not cols or not rows:
+        sys.exit(f"no tiles under {TILES}/{level} (run make_tiles.py)")
+    for r in range(rows):
+        stripe = [np.asarray(Image.open(f"{TILES}/{level}/{c}_{r}.webp").convert("RGB"))
+                  for c in range(cols)]
+        band = np.hstack(stripe).astype(np.int32)
+        y0 = r * TILE
+        keep = np.ones(band.shape[:2], dtype=bool)
+        for ex0, ey0, ex1, ey1 in EXCLUDE:      # EXCLUDE is in map px
+            keep[max(0, ey0 * level - y0):max(0, ey1 * level - y0),
+                 ex0 * level:ex1 * level] = False
+        for rid, rgb in ROUTE_COLORS.items():
+            d2 = ((band - np.array(rgb)) ** 2).sum(axis=2)
+            ys, xs = np.nonzero((d2 < tol * tol) & keep)
+            if len(xs):
+                kept[rid].append(np.c_[xs, ys + y0] / level)
+    for rid, chunks in kept.items():
+        n = sum(len(c) for c in chunks)
+        print(f"route {rid}: {n} px")
+        if n > 100:
+            trees[rid] = cKDTree(np.vstack(chunks))
     return trees
 
 
