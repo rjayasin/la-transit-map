@@ -12,8 +12,9 @@ Trips crossing midnight (times >= 24:00) are also emitted shifted by -24h so
 the after-midnight portion of "yesterday's" service appears at the start of
 the simulated day.
 """
-import colorsys, csv, json, math, os, sys
+import colorsys, csv, hashlib, inspect, json, math, os, sys
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 
 import numpy as np
@@ -32,6 +33,7 @@ GTFS = "data/gtfs"
 FEEDS = ["gtfs_rail", "gtfs_bus", "bigbluebus", "culvercity", "ladot", "longbeach",
          "foothill", "torrance", "norwalk", "montebello", "gtrans", "pasadena",
          "burbank", "beachcities", "metrolink"]
+WORKERS = min(8, (os.cpu_count() or 4))   # threads for the mask fits
 METRO_BUS_COLOR, METRO_BUS_TEXT = "E16710", "FFFFFF"
 FALLBACK_COLOR, FALLBACK_TEXT = "888888", "FFFFFF"
 
@@ -217,6 +219,21 @@ def box_dilate(m, radius):
     return f > 0
 
 
+_GLYPHS = {}
+
+
+def glyphs(sub):
+    """Pixels that look like label text: near-gray and dark enough. Keyed by
+    region shape and cached — it costs a full-sheet dilation and is the same
+    for every agency, only the "not this agency's own color" part differs."""
+    key = sub.shape
+    if key not in _GLYPHS:
+        mx, mn = sub.max(axis=2), sub.min(axis=2)
+        _GLYPHS[key] = ndi.binary_dilation((mx - mn) < 26,
+                                           np.ones((5, 5), bool)) & (mx < 215)
+    return _GLYPHS[key]
+
+
 def unfade(m, sub, d2a, tol, colors):
     """Re-add drawn-line pixels that a place-name label has dimmed.
 
@@ -243,9 +260,7 @@ def unfade(m, sub, d2a, tol, colors):
     couldn't span this gap anyway — Sunset turns its corner inside the label —
     and it pulled the line low, since dilating "HOLLYWOOD" into the mask hangs
     a word-sized blob of text off the underside of the street."""
-    mx, mn = sub.max(axis=2), sub.min(axis=2)
-    text = ndi.binary_dilation((mx - mn) < 26, np.ones((5, 5), bool)) & (mx < 215)
-    text &= d2a > (tol * 1.6) ** 2         # an agency's own gray line isn't a label
+    text = glyphs(sub) & (d2a > (tol * 1.6) ** 2)  # an agency's own gray line isn't a label
     bgs = bg_palette()
     paper = np.asarray(bgs[-1], dtype=float)   # densest color: the page itself
     ys, xs = np.nonzero(box_dilate(text, LABEL_HALO) & box_dilate(m, LABEL_REACH) & ~m)
@@ -264,15 +279,64 @@ def unfade(m, sub, d2a, tol, colors):
     for c in colors:
         d2, a = fit(c)
         own, lit = np.minimum(own, d2), lit | (a > FADE_MIN)
+    # One independent fit per rival color, min-reduced — the bulk of the build.
+    # numpy drops the GIL for work this size, so threads give real parallelism
+    # and, unlike splitting the pixels up, every fit sees the same arithmetic
+    # it would have alone.
+    rivals = [r for r in np.vstack([bgs, rival_palette()])
+              if min(((np.asarray(c) - r) ** 2).sum() for c in colors) >= 24 * 24
+              and ((r - paper) ** 2).sum() >= 24 * 24]   # not our color, not the page
     rival = np.full(len(P), np.inf)
-    for r in np.vstack([bgs, rival_palette()]):
-        if (min(((np.asarray(c) - r) ** 2).sum() for c in colors) < 24 * 24
-                or ((r - paper) ** 2).sum() < 24 * 24):
-            continue                       # this agency's own color, or the page
-        rival = np.minimum(rival, fit(r)[0])
+    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+        for d2 in pool.map(lambda r: fit(r)[0], rivals):
+            rival = np.minimum(rival, d2)
     ok = lit & (own < (tol * 0.6) ** 2) & (np.sqrt(own) + FADE_MARGIN < np.sqrt(rival))
     out[ys[ok], xs[ok]] = True
     return out
+
+
+MASK_CACHE = "scratch/mask-cache"
+
+
+def art_stamp(*paths):
+    """Cheap identity for the artwork a mask is read from: size and mtime of
+    each file. Digesting the pixels would cost more than some of the masks."""
+    out = []
+    for p in paths:
+        st = os.stat(p)
+        out.append((p, st.st_size, st.st_mtime_ns))
+    return out
+
+
+def code_stamp(*fns):
+    """Identity for the code that produces a mask, so editing any of it
+    invalidates the cache by itself. Beats a version constant nobody remembers
+    to bump, and unrelated edits elsewhere in this file don't disturb it."""
+    src = "".join(inspect.getsource(f) for f in fns)
+    return hashlib.blake2b(src.encode(), digest_size=8).hexdigest()
+
+
+def cached_pixels(key, build):
+    """Coordinates from `build()`, memoized on disk under a digest of `key`.
+
+    The masks depend only on the artwork and the code that reads it — never on
+    a GTFS feed — so they come out identical on every run, and rebuilding all
+    28 of them was ~80% of the build. Only the coordinate array is stored; the
+    KD-tree is rebuilt from it in well under the time it takes to read one."""
+    h = hashlib.blake2b(repr(key).encode(), digest_size=16).hexdigest()
+    path = f"{MASK_CACHE}/{h}.npy"
+    if os.path.exists(path):
+        try:
+            return np.load(path)
+        except Exception:
+            pass                               # truncated or stale format
+    pts = build()
+    os.makedirs(MASK_CACHE, exist_ok=True)
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, "wb") as f:                 # a handle, or np.save would
+        np.save(f, pts)                        # append .npy to the temp name
+    os.replace(tmp, path)                      # atomic, so a killed build can't
+    return pts                                 # leave a half-written entry
 
 
 def mask_tree(colors, tol=38.0, region="main"):
@@ -286,31 +350,48 @@ def mask_tree(colors, tol=38.0, region="main"):
     agency color per shape, so full-image passes dominated the build."""
     key = (tuple(map(tuple, colors)), tol, region)
     if key not in _TREES:
-        im, keep_full = map_image()
-        if region == "inset":
-            x0, y0, x1, y1 = INSET_RECT
-            keep = np.ones((y1 - y0, x1 - x0), dtype=bool)
-            lx0, ly0, lx1, ly1 = INSET_LEGEND
-            keep[ly0 - y0:ly1 - y0, lx0 - x0:lx1 - x0] = False  # sample artwork
-        else:
-            x0, y0 = 0, 0
-            y1, x1 = keep_full.shape
-            keep = keep_full
-        sub = im[y0:y1, x0:x1]
-        d2a = np.full(keep.shape, np.inf)
-        for rgb in colors:
-            d2a = np.minimum(d2a, ((sub - np.array(rgb)) ** 2).sum(axis=2))
-        m = d2a < tol * tol
+        pts = cached_pixels(
+            ("mask", key, art_stamp("map.png"), EXCLUDE,
+             code_stamp(mask_pixels, unfade, box_dilate, bg_palette, rival_palette)),
+            lambda: mask_pixels(colors, tol, region))
+        _TREES[key] = cKDTree(pts) if len(pts) > 300 else None
+    return _TREES[key]
+
+
+def mask_pixels(colors, tol, region):
+    """Coordinates of every pixel the mask covers, as an Nx2 array."""
+    im, keep_full = map_image()
+    if region == "inset":
+        x0, y0, x1, y1 = INSET_RECT
+        keep = np.ones((y1 - y0, x1 - x0), dtype=bool)
+        lx0, ly0, lx1, ly1 = INSET_LEGEND
+        keep[ly0 - y0:ly1 - y0, lx0 - x0:lx1 - x0] = False  # sample artwork
+    else:
+        x0, y0 = 0, 0
+        y1, x1 = keep_full.shape
+        keep = keep_full
+    sub = im[y0:y1, x0:x1]
+    d2a = np.full(keep.shape, np.inf)
+    for rgb in colors:
+        d2a = np.minimum(d2a, ((sub - np.array(rgb)) ** 2).sum(axis=2))
+    m = d2a < tol * tol
+    # The background test only matters where the color test already passed, so
+    # run it on those pixels rather than the sheet — a few hundred thousand
+    # instead of 17 million, and identical either way.
+    ys, xs = np.nonzero(m)
+    if len(ys):
+        P, dc = sub[ys, xs], d2a[ys, xs]
+        ok = np.ones(len(ys), dtype=bool)
         for bg in bg_palette():
             if min(((np.array(c) - bg) ** 2).sum() for c in colors) < 24 * 24:
-                continue                       # bg IS this agency's color; keep
-            m &= d2a < ((sub - bg) ** 2).sum(axis=2)
-        # after the background filter: line dimmed under a label reads as page
-        # color, which every background test above would reject
-        m = m | unfade(m, sub, d2a, tol, colors)
-        ys, xs = np.nonzero(m & keep)
-        _TREES[key] = cKDTree(np.c_[xs + x0, ys + y0]) if len(xs) > 300 else None
-    return _TREES[key]
+                continue                   # bg IS this agency's color; keep
+            ok &= dc < ((P - bg) ** 2).sum(1)
+        m[ys[~ok], xs[~ok]] = False
+    # after the background filter: line dimmed under a label reads as page
+    # color, which every background test above would reject
+    m = m | unfade(m, sub, d2a, tol, colors)
+    ys, xs = np.nonzero(m & keep)
+    return np.c_[xs + x0, ys + y0]
 
 # Metro's drawn line colors (sampled from the map)
 ORANGE = (217, 129, 83)     # Metro Local/Rapid orange
@@ -552,7 +633,9 @@ def route_anchors(tokens, tree, region="main", colors=None, margin=8.0):
         d_to_own = np.sqrt(((pal[:, None, :] - own_arr[None, :, :]) ** 2).sum(2)).min(1)
         rivals = pal[d_to_own > 15]
     pts = []
-    for t in tokens:
+    for t in sorted(tokens):        # sorted: a set of strings iterates in an
+                                    # order that varies with the hash seed, and
+                                    # anchor order decides snap tie-breaks
         for cx, cy in badge_words(region).get(t, ()):
             # >=10: a real badge fill / glyph has dozens of mask pixels here;
             # stray antialiased fringes near a foreign badge have a few
@@ -730,7 +813,7 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
             if near.sum() <= used:             # no badge the last fit couldn't reach
                 break
             used = int(near.sum())
-            order = np.argsort(cum[j[near]])
+            order = np.argsort(cum[j[near]], kind="stable")
             s = cum[j[near]][order]
             D = (A[near] - P[j[near]])[order]
             s, D = trace_anchors(s, D, A[near][order], P, cum, tree)
