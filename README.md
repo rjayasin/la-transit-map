@@ -81,6 +81,8 @@ pipeline order is `georef.py` → `georef_inset.py` → `build_data.py`;
   checking a line against the artwork it should be riding.
 - `scripts/speed_check.py` — ranks the vehicles that move implausibly fast,
   which is how a bad path usually shows itself in the animation.
+- `scripts/orphan_check.py` — lists vehicles labelled with a designation the
+  map never prints, which a rider has no way to look up.
 - `index.html` — the whole client: loader, canvas renderer, and controls.
 
 ## Rebuild data
@@ -143,6 +145,22 @@ means the shape wanders and the vehicle sprints to keep the schedule (a pathing
 error), while ~1 means it really does travel that far and the feed is worth a
 look. Rows are grouped per shape segment, since one bad shape shows up on every
 trip that runs it, and each route prints its `debug_line.py` command.
+
+### Vehicles you can't look up
+
+`orphan_check.py` compares each vehicle's label against every word the map
+prints, and reports the ones a rider could never find.
+
+```sh
+.venv/bin/python scripts/orphan_check.py                 # every orphan, busiest first
+.venv/bin/python scripts/orphan_check.py --mislabelled   # only the fixable ones
+.venv/bin/python scripts/orphan_check.py --min-trips 20
+```
+
+It separates the two causes. Most orphans are honest — the agency's lines
+aren't drawn, or the route is too minor to badge. The interesting ones are
+*mislabelled*: the map does designate the route, just not as we do, so the
+badge is sitting right there to copy.
 
 ## Known limitations
 
