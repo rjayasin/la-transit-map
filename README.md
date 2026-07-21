@@ -11,7 +11,9 @@ python3 -m http.server 8741
 # open http://localhost:8741
 ```
 
-Controls: play/pause, scrubber, speed (30–400×). Drag to pan, wheel to zoom.
+Controls: play/pause, scrubber, speed (30–400×). Drag to pan. On a Mac
+trackpad, gestures follow Maps.app — two-finger swipe pans (with the OS
+momentum glide), pinch zooms; a mouse wheel still zooms.
 URL params: `?t=8:30&speed=150&paused=1`.
 
 ## Approach
