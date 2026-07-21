@@ -3,7 +3,10 @@ where vehicles diverge from the drawn artwork.
 
 The paths drawn are exactly what schedule.json feeds the animation — the poly2
 warp plus whatever line snapping build_data.py managed — so anything that looks
-off here is off in the browser too.
+off here is off in the browser too. Where each vehicle halts is marked, and for
+a rail line the platforms the map draws are outlined around them, since a stop
+landing beside its platform is as much a fault as a path on the wrong street.
+--no-stops leaves just the path.
 
 The background is drawn from the high-resolution WebP tile pyramid (tiles/),
 so zoomed-in crops stay PDF-crisp instead of an upscaled map.png. The deepest
@@ -18,7 +21,7 @@ panel.
 Usage:
     scripts/debug_line.py 720                # Metro Bus 720 (+ inset if any)
     scripts/debug_line.py 2 --system "Big"   # disambiguate a shared number
-    scripts/debug_line.py 720 --stops        # + stop positions along the shape
+    scripts/debug_line.py 720 --no-stops     # just the path, no stop marks
     scripts/debug_line.py 720 --inset        # only the DTLA inset panel
     scripts/debug_line.py 720 --shape 3      # one variant only
     scripts/debug_line.py 720 --png          # cheap map.png background
@@ -201,9 +204,9 @@ def main():
     ap.add_argument("line", help="route label as shown on the map, e.g. 720, A, R10")
     ap.add_argument("--system", help="substring of the system name, to disambiguate")
     ap.add_argument("--shape", type=int, help="draw only the Nth variant (see stdout)")
-    ap.add_argument("--stops", action="store_true",
-                    help="mark stop positions, and outline the station markers "
-                         "the map draws near the route")
+    ap.add_argument("--no-stops", dest="stops", action="store_false",
+                    help="just the path — omit the stop marks and the outlines "
+                         "of the platforms the map draws")
     ap.add_argument("--inset", action="store_true",
                     help="only the DTLA inset panel (default draws it too, as a second file)")
     ap.add_argument("--full", action="store_true", help="whole map, no crop to the path")

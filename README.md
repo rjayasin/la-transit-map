@@ -113,14 +113,15 @@ two are snapped independently, so it writes `..._inset.png` as well.
 ```sh
 .venv/bin/python scripts/debug_line.py 720                     # Metro Bus 720
 .venv/bin/python scripts/debug_line.py 2 --system "Big Blue"   # shared number
-.venv/bin/python scripts/debug_line.py 720 --stops             # + stops and platforms
+.venv/bin/python scripts/debug_line.py 720 --no-stops           # just the path
 .venv/bin/python scripts/debug_line.py 720 --shape 0           # one variant only
 .venv/bin/python scripts/debug_line.py 720 --inset             # only the panel
 ```
 
-`--stops` marks where each vehicle halts and, for a rail line, outlines the
-platforms the map draws — the white shapes with black strokes — so the two can
-be read against each other.
+Where each vehicle halts is marked by default and, for a rail line, the
+platforms the map draws — the white shapes with black strokes — are outlined
+around them, so the two can be read against each other. `--no-stops` leaves
+just the path.
 
 Paths come straight out of `schedule.json`, so what you see is what the
 animation plays back. A shared route label prompts for which system to draw
