@@ -39,7 +39,16 @@ URL params: `?t=8:30&speed=150&paused=1`.
   polynomial warp, median error ~11 px). Result in `data/transform.json`.
 - **Line snapping** — after the warp, every shape is pulled onto its system's
   *drawn* lines so vehicles ride the artwork, not raw geography. Rail snaps to
-  the six rail-color masks. Buses snap per system color (Metro orange, Rapid
+  the six rail-color masks, which are read off the **tile pyramid** rather than
+  `map.png`: at 4096 px the narrower ribbons are two or three pixels wide and
+  the downscale blends them with whatever runs alongside, so the K line beside
+  the C line lands 36 away from its true color — a tolerance loose enough to
+  keep it also admits a neighbouring agency's pink badge chip, and the snap,
+  finding the chip nearer than the line, took it. One level deeper the colors
+  are faithful to within ~6, so the masks key off what the map actually draws
+  (which is *not* always the GTFS `route_color` — the C line is printed much
+  lighter than its branding) at a tolerance tight enough to keep foreign chips
+  out. Buses snap per system color (Metro orange, Rapid
   red, and each municipal agency's color — legend swatches seed the palette,
   refined against pixels along the routes) using a coherence trick: the snap
   displacement is smoothed along the shape so whole stretches move to the same
@@ -105,12 +114,13 @@ scripts/
 │                    polylines straight out of schedule.json, so it shows
 │                    exactly what the animation plays back — snapping included.
 ├── georef.py        Fits the lat/lon → map-pixel transform for the main map by
-│                    color-masking the six drawn rail lines and ICP-aligning
-│                    GTFS rail shapes to them (affine init, then a 2nd-order
-│                    polynomial warp). Writes data/transform.json and a
-│                    diagnostic overlay image. Also owns the shared constants
-│                    build_data.py imports: rail route colors, mask tolerance,
-│                    and the excluded regions of the map image.
+│                    color-masking the six drawn rail lines (off the tile
+│                    pyramid, where the printed colors are faithful) and
+│                    ICP-aligning GTFS rail shapes to them (affine init, then a
+│                    2nd-order polynomial warp). Writes data/transform.json and
+│                    a diagnostic overlay image. Also owns the shared constants
+│                    build_data.py imports: the map's drawn rail colors, mask
+│                    tolerances, and the excluded regions of the map image.
 ├── georef_inset.py  Same fit again, restricted to the Downtown LA inset panel,
 │                    whose rotated grid needs its own transform. Adds an
 │                    "inset" entry to data/transform.json and defines the inset
