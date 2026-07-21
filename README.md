@@ -46,15 +46,25 @@ URL params: `?t=8:30&speed=150&paused=1`.
   drawn street instead of points grabbing different parallels. Two refinements
   keep that from leaving lines a block off: a final short-window pass, capped
   below the spacing of neighboring streets, fixes the sag the wide smoothing
-  leaves at junctions; and place-name labels — which are painted over the
-  artwork and so punch holes in the color masks — are bridged by a
-  morphological closing, since a broken line otherwise loses the snap to
-  whichever parallel street stays continuous (Metro 2 used to land a block
-  south of Sunset under the "WEST HOLLYWOOD" label). Because a whole agency
-  shares one drawn color, the snap is also pinned by *anchors* — the numbered
+  leaves at junctions; and place-name labels — which don't paint the artwork
+  out but *dim* it, knocking the line back toward the page color under the
+  label's halo (Sunset runs under "WEST HOLLYWOOD" at about 40% opacity) — are
+  recovered by reading a pixel as the line color blended over the page, since a
+  broken line otherwise loses the snap to whichever parallel street stays
+  continuous (Metro 2 used to land a block south of Sunset, on Santa Monica).
+  Because a whole agency shares one drawn color, the snap is also pinned by
+  *anchors* — the numbered
   route badges printed on the map, extracted from the PDF: a badge matching the
   route's number that sits on the agency's color mask is a point known to be on
-  that route. Numbers collide across agencies, though (Big Blue Bus 3 and
+  that route. Two badges only pin their own two points, though, and the
+  displacement between them is interpolated straight, which on a schematic
+  stretch can cut across to the next street over; so the stretch between
+  consecutive badges is also *walked* along the drawn mask (a coarse lattice
+  and a shortest path), and that walk sampled into intermediate anchors, so the
+  correction follows the drawn corridor instead of a chord across it. A walk is
+  trusted only when it comes out about as long as the shape says the stretch
+  should be, which rejects shortcuts through the network. Numbers collide
+  across agencies, though (Big Blue Bus 3 and
   Culver CityBus 3 run bundled through Westchester), so a candidate badge is
   kept only if its own chip color is best explained by *this* agency's color
   rather than another's — Culver City's khaki "3" no longer drags Big Blue's
