@@ -12,7 +12,7 @@ Trips crossing midnight (times >= 24:00) are also emitted shifted by -24h so
 the after-midnight portion of "yesterday's" service appears at the start of
 the simulated day.
 """
-import csv, json, math, os, sys
+import colorsys, csv, json, math, os, sys
 from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta
 
@@ -23,7 +23,7 @@ from scipy.sparse.csgraph import dijkstra
 from scipy.spatial import cKDTree
 
 sys.path.insert(0, "scripts")
-from georef import EXCLUDE, ROUTE_COLORS, TOL, load_masks  # noqa: E402
+from georef import EXCLUDE, ROUTE_COLORS, TILE, TILES, TOL, load_masks  # noqa: E402
 from georef_inset import GEO as INSET_GEO, LEGEND as INSET_LEGEND, RECT as INSET_RECT  # noqa: E402
 
 TARGET = date(2026, 7, 22)  # a Wednesday inside the Metro JUNE26 calendar window
@@ -371,6 +371,73 @@ def refine_color(shape_pts, seed, r2=55 * 55, need=250):
     if len(samples) < need:
         return None
     return tuple(np.median(samples, axis=0).astype(int).tolist())
+
+
+SPRITE_LEVEL = 2      # tile pyramid level the sprite colors are read from
+HUE_TOL = 30.0        # deg a sampled pixel may differ from the seed's hue
+_TILES = {}
+
+
+def tile_pixel(x, y, level=SPRITE_LEVEL):
+    """Color at map pixel (x, y) read off the tile pyramid, or None off-sheet.
+    Tiles are cached as uint8; a route touches only a hundred or so."""
+    tx, ty = int(x * level), int(y * level)
+    key = (level, tx // TILE, ty // TILE)
+    im = _TILES.get(key)
+    if im is None:
+        path = f"{TILES}/{level}/{key[1]}_{key[2]}.webp"
+        if not os.path.exists(path):
+            return None
+        im = _TILES[key] = np.asarray(Image.open(path).convert("RGB"))
+    return im[ty % TILE, tx % TILE].astype(np.int32)
+
+
+def drawn_color(shape_pts, seed, r2=55 * 55, need=250, level=SPRITE_LEVEL):
+    """The color the map prints this agency's lines in, for its vehicle sprites.
+
+    Read off the tile pyramid rather than map.png, and taken as the dominant
+    color cluster rather than a median. map.png is a 4096 px reduction of a 47"
+    sheet, so a thin drawn line is mostly edge there and averaging its blend
+    with the page desaturates it: Foothill's evergreen came out (77,102,85), a
+    gray-green, against the (54,103,77) actually printed. The dominant cluster
+    recovers the line's own fill, the same way badge_line_color recovers a
+    chip's, and every agency ends up at least as saturated as before.
+
+    Pixels better explained by a dominant background color are dropped, as in
+    refine_color. Where the seed is a colored line rather than a gray one, two
+    more filters apply, because a dominant cluster is far more outlier-prone
+    than a median: near-neutral pixels go, or the street grays the line crosses
+    outvote it (LADOT's DASH olive came out neutral); and so does anything off
+    the seed's hue, or a foreign line crossing does (LADOT then came out pink).
+    Fading a line into the page keeps its hue, so this costs nothing real.
+
+    The mask colors stay with refine_color: those search map.png, so they want
+    that image's rendering of the line, not the sheet's true ink."""
+    seed = np.array(seed)
+    bgs = [b for b in bg_palette() if ((b - seed) ** 2).sum() > 24 * 24]
+    chroma = int(seed.max() - seed.min())
+    floor = chroma * 0.5 if chroma >= 20 else 0
+    seed_hue = colorsys.rgb_to_hsv(*(seed / 255))[0] * 360
+    samples = []
+    for pts in shape_pts[:20]:
+        for x, y in densify(pts, 10.0):
+            for dx, dy in ((0, 0), (2, 0), (-2, 0), (0, 2), (0, -2)):
+                c = tile_pixel(x + dx, y + dy, level)
+                if c is None or int(c.max() - c.min()) < floor:
+                    continue
+                if floor:
+                    h = colorsys.rgb_to_hsv(*(c / 255))[0] * 360
+                    if min(abs(h - seed_hue) % 360, 360 - abs(h - seed_hue) % 360) > HUE_TOL:
+                        continue
+                d2s = ((c - seed) ** 2).sum()
+                if d2s < r2 and all(((c - b) ** 2).sum() > d2s for b in bgs):
+                    samples.append(c)
+    if len(samples) < need:
+        return None
+    S = np.asarray(samples)
+    bins = (S // 12) @ np.array([10000, 100, 1])
+    vals, counts = np.unique(bins, return_counts=True)
+    return tuple(np.median(S[bins == vals[counts.argmax()]], axis=0).astype(int).tolist())
 
 # ---- route-number badge anchors from the source PDF ----------------------
 # The map draws a numbered badge on every route line. All routes of one agency
@@ -1045,8 +1112,19 @@ def main():
             good = [c for c in refined if c]
             if good:
                 agency_tree = mask_tree(good, 30.0)
-            # sprites take the drawn color even when refinement failed
-            sprite_cols = [c or tuple(s) for c, s in zip(refined, seeds)]
+            # Sprites take the color the sheet actually prints, off the tiles,
+            # falling back to map.png's washed-out reading then the legend
+            # swatch. Where an agency has two seeds they are two liveries, not
+            # two guesses at one, so each is sampled over only the routes drawn
+            # in it — sampling both over everything collapses them onto
+            # whichever is more common, and LADOT lost DASH vs Commuter Express.
+            groups = [list(warped.values())] * len(seeds)
+            if len(seeds) > 1:
+                groups = [[p for sid, p in warped.items()
+                           if is_dash.get(route_by_shape.get(sid, "")) == (i == 0)]
+                          for i in range(len(seeds))]
+            sprite_cols = [drawn_color(g, s) or c or tuple(s)
+                           for g, c, s in zip(groups, refined, seeds)]
             print(f"  {feed} drawn color(s): {good}")
         elif feed in DRAWN_COLORS:
             sprite_cols = [DRAWN_COLORS[feed]]
