@@ -377,6 +377,66 @@ def mask_tree(colors, tol=38.0, region="main"):
     return _TREES[key]
 
 
+STATION_MIN_AREA = 120     # px at MASK_LEVEL; a plain circle is about 220
+STATION_RING_DARK = 0.5    # fraction of a marker's border that must be stroke
+STATION_REACH = 45.0       # px a stop may sit from its drawn platform
+
+
+def station_markers(level=MASK_LEVEL):
+    """Centres of the station markers the map draws, as an Nx3 array of
+    (x, y, area) in map pixels.
+
+    A station is a white shape with a black stroke — usually a circle, a pair
+    of conjoined circles where lines meet, an oblong where more do, and odder
+    oblongs again inside the Downtown panel. All of them share the same two
+    properties, so the shape itself needn't be classified: the fill is pure
+    white where the page around it is cream, and the border is stroke. Nothing
+    else on the sheet is both, at this size — label halos are white but
+    unstroked, and a freeway shield is stroked but is nowhere near a rail line,
+    which is what the caller matches against."""
+    def build():
+        band = []
+        for r in range(tile_rows(level)):
+            band.append(np.hstack([
+                np.asarray(Image.open(f"{TILES}/{level}/{c}_{r}.webp").convert("RGB"))
+                for c in range(tile_cols(level))]))
+        im = np.vstack(band).astype(np.int16)
+        white, dark = im.min(2) >= 244, im.max(2) <= 90
+        lab, n = ndi.label(white)
+        areas = ndi.sum(white, lab, range(1, n + 1))
+        big = np.nonzero(areas >= STATION_MIN_AREA)[0] + 1
+        if not len(big):
+            return np.zeros((0, 3))
+        boxes = ndi.find_objects(lab)
+        cy, cx = np.array(ndi.center_of_mass(white, lab, big)).T
+        out = []
+        for k, idx in enumerate(big):
+            ys, xs = boxes[idx - 1]
+            sub = lab[max(0, ys.start - 4):ys.stop + 4, max(0, xs.start - 4):xs.stop + 4] == idx
+            d = dark[max(0, ys.start - 4):ys.stop + 4, max(0, xs.start - 4):xs.stop + 4]
+            ring = ndi.binary_dilation(sub, np.ones((5, 5), bool)) & ~sub
+            if ring.any() and d[ring].mean() >= STATION_RING_DARK:
+                out.append((cx[k] / level, cy[k] / level, areas[idx - 1] / level ** 2))
+        return np.array(out) if out else np.zeros((0, 3))
+    return cached_pixels(("stations", level, STATION_MIN_AREA, STATION_RING_DARK,
+                          art_stamp(f"{TILES}/{level}/0_0.webp"),
+                          code_stamp(station_markers)), build)
+
+
+def tile_cols(level):
+    n = 0
+    while os.path.exists(f"{TILES}/{level}/{n}_0.webp"):
+        n += 1
+    return n
+
+
+def tile_rows(level):
+    n = 0
+    while os.path.exists(f"{TILES}/{level}/0_{n}.webp"):
+        n += 1
+    return n
+
+
 def tile_tree(colors, tol, level=MASK_LEVEL):
     """KD-tree of pixels matching `colors` read off the tile pyramid, in map
     pixels. For artwork whose printed color map.png's downscale destroys."""
@@ -1489,8 +1549,24 @@ def main():
         return shape_runs[si]
 
     patterns_out = []
+    marker_tree = None
+    if len(station_markers()):
+        marker_tree = cKDTree(station_markers()[:, :2])
+
     for feed, sid, stop_seq in patterns:
         spx = [stops_px[(feed, s)] for s in stop_seq]
+        if feed == "gtfs_rail" and marker_tree is not None:
+            # Rail platforms are drawn: the white shape with the black stroke,
+            # a circle alone or conjoined where lines meet. A stop projected
+            # from its warped position lands beside one rather than on it, so
+            # the train eases to a halt short of the platform or past it. Move
+            # each stop onto its own marker first; the projection below then
+            # measures to where the map says the platform is. Stops with no
+            # marker in reach — under the Downtown panel's own geometry, or a
+            # platform the sheet doesn't draw — keep the warp.
+            dist, j = marker_tree.query(spx)
+            spx = [tuple(marker_tree.data[jj]) if dd < STATION_REACH else p
+                   for p, dd, jj in zip(spx, dist, j)]
         key = (feed, sid)
         if key not in shape_index:            # no shape in feed: polyline through stops
             # key per pattern — distinct stop sequences must not share one

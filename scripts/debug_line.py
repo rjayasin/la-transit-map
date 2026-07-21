@@ -29,6 +29,7 @@ import os
 import sys
 from collections import defaultdict
 
+import numpy as np
 from PIL import Image, ImageDraw
 
 MAP = "map.png"
@@ -140,6 +141,14 @@ def draw_path(dr, pts, color, width):
     dr.line(pts, fill=color, width=width, joint="curve")
 
 
+def draw_ring(dr, xy, r, color=(0, 0, 0)):
+    """Outline a drawn station marker, so a vehicle's stop can be read against
+    where the map actually puts the platform."""
+    x, y = xy
+    for w, col in ((r + 3, color), (r, (255, 255, 255))):
+        dr.ellipse([x - w, y - w, x + w, y + w], outline=col, width=max(2, r // 3))
+
+
 def draw_dot(dr, xy, color, r):
     x, y = xy
     pad = max(1, round(r * 0.25))
@@ -192,7 +201,9 @@ def main():
     ap.add_argument("line", help="route label as shown on the map, e.g. 720, A, R10")
     ap.add_argument("--system", help="substring of the system name, to disambiguate")
     ap.add_argument("--shape", type=int, help="draw only the Nth variant (see stdout)")
-    ap.add_argument("--stops", action="store_true", help="mark stop positions")
+    ap.add_argument("--stops", action="store_true",
+                    help="mark stop positions, and outline the station markers "
+                         "the map draws near the route")
     ap.add_argument("--inset", action="store_true",
                     help="only the DTLA inset panel (default draws it too, as a second file)")
     ap.add_argument("--full", action="store_true", help="whole map, no crop to the path")
@@ -246,6 +257,22 @@ def main():
         render(d, a, variants, inset, out)
 
 
+def stations_near(pts, inset, within=40.0):
+    """Drawn station markers within `within` px of the path, so a crowded
+    corridor doesn't scatter its neighbours' platforms over the crop."""
+    try:
+        sys.path.insert(0, "scripts")
+        from build_data import station_markers
+        from scipy.spatial import cKDTree
+    except Exception:
+        return []
+    M = station_markers()
+    if not len(M) or len(pts) < 2:
+        return []
+    d = cKDTree(np.asarray(pts, dtype=float)).query(M[:, :2])[0]
+    return [(x, y, area) for (x, y, area), dist in zip(M, d) if dist < within]
+
+
 def render(d, a, variants, inset, out):
     """Draw the selected variants over one panel and write it to `out`."""
     # collect draw ops in 4096px base coordinates, then render once the crop
@@ -293,6 +320,9 @@ def render(d, a, variants, inset, out):
     def to_px(p):
         return ((p[0] - box[0]) * scale, (p[1] - box[1]) * scale)
 
+    if a.stops:
+        for x, y, area in stations_near(drawn, inset):
+            draw_ring(dr, to_px((x, y)), max(5, int((area / 3.14) ** 0.5 * scale)))
     for pts, color in paths:
         draw_path(dr, [to_px(p) for p in pts], color, width)
     for xy, color in dots:
