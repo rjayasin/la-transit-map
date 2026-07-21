@@ -54,13 +54,18 @@ python3 -m http.server 8741
     when its own chip color is best explained by this agency's.
   - Shapes whose lines aren't drawn at all (minor routes, the gray-drawn
     agencies, Metrolink) keep the warp.
-  - Snapping only moves a point sideways, so a terminus the warp lands short of
-    leaves the last stretch of drawn track bare — 70 px of it past the E line's
-    Atlantic. Each rail line is therefore walked on past both ends, along its
-    own ink and through the platform markers interrupting it, until the drawn
-    line stops. A walk that has to turn away from the line's heading, or that
-    gets too far, is one where the track carries on rather than ending, and is
-    dropped.
+  - Snapping only moves a point sideways, and it pads the smoothing at the
+    ends, so a rail line finishes wherever the warp left it rather than where
+    the artwork stops — 70 px short of the E line's Atlantic, 24 px past the B
+    line's North Hollywood and out into blank page. Both ends of every rail
+    line are therefore squared up with the drawn line: an overshoot is cut back
+    to the ink, an end left short is walked on along its own ink (and through
+    the platform markers interrupting it) until the drawn line stops, and the
+    end then stands in the middle of the platform it finished at. A walk that
+    has to turn away from the line's heading, or that gets too far, is one
+    where the track carries on rather than ending, and is dropped; a *long* run
+    off the ink is the Downtown call-out, where nothing is drawn for 200 px and
+    the warp is all there is, and is left alone.
 - **Rail platforms** — where a train halts is the white marker the sheet draws,
   not the warped stop, and matching each stop to its nearest one double-books
   platforms wherever the warp lags the artwork by more than the stops are
