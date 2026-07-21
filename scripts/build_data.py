@@ -585,6 +585,20 @@ def badge_line_color(cx, cy, r=7):
     return np.median(fill[codes == vals[counts.argmax()]], axis=0)
 
 
+def badge_like(token):
+    """Whether a route's token could be printed on the map as a badge.
+
+    Tokens come from route_short_name, which for the numbered agencies is the
+    badge itself but for the named ones is prose — "Leimert/Slauson Clockwise"
+    yields "Leimert", "Slauson", "Clockwise". Those are street and place names,
+    and the map is covered in street and place names, so any of them landing on
+    the agency's color anchors the shape to a spot the route never goes near.
+
+    A badge is a code, not a word: it carries a digit (720, 1X, 431B, 20cc) or
+    it is an initialism short enough to fit the chip (LC, SYL, R3)."""
+    return token.isalnum() and (any(c.isdigit() for c in token) or len(token) <= 3)
+
+
 _RIVAL_PALETTE = None
 
 
@@ -633,7 +647,8 @@ def route_anchors(tokens, tree, region="main", colors=None, margin=8.0):
         d_to_own = np.sqrt(((pal[:, None, :] - own_arr[None, :, :]) ** 2).sum(2)).min(1)
         rivals = pal[d_to_own > 15]
     pts = []
-    for t in sorted(tokens):        # sorted: a set of strings iterates in an
+    for t in sorted(t for t in tokens if badge_like(t)):
+                                    # sorted: a set of strings iterates in an
                                     # order that varies with the hash seed, and
                                     # anchor order decides snap tie-breaks
         for cx, cy in badge_words(region).get(t, ()):
@@ -932,8 +947,9 @@ def snap_rail(pts, tree, caps=(45.0, 24.0), wins=(15, 9), max_gap=45, rnd=2):
     return [tuple(p) for p in chaikin(simplify(P, 1.0), rnd)]
 
 
-def simplify(pts, tol=1.2):
-    """Douglas-Peucker."""
+def simplify(pts, tol=1.2, mask=False):
+    """Douglas-Peucker. With mask=True also returns which points survived, so
+    a caller can carry a parameterization of the original through it."""
     pts = np.asarray(pts)
     keep = np.zeros(len(pts), bool)
     keep[[0, -1]] = True
@@ -956,7 +972,7 @@ def simplify(pts, tol=1.2):
             k = i0 + 1 + im
             keep[k] = True
             stack += [(i0, k), (k, i1)]
-    return pts[keep]
+    return (pts[keep], keep) if mask else pts[keep]
 
 
 def project_stops(shape_px, cum, stop_px):
@@ -1126,6 +1142,9 @@ def main():
     shapes_raw = {}                 # (feed, shape_id) -> [(x,y)...] px
     shape_ll = {}                   # shape key -> [(lon,lat)...] original
     shape_isnap = {}                # (feed, shape_id) -> (colors, tol, tokens)
+    shape_param = {}                # (feed, shape_id) -> pre-snap polyline,
+                                    # its cumulative dist, and that sampled at
+                                    # the points simplify() kept
     trips_out = []
     patterns, pattern_idx = [], {}  # key (feed, shape_id, stop_seq)
     stops_px = {}                   # (feed, stop_id) -> (x, y)
@@ -1308,7 +1327,25 @@ def main():
                 shape_isnap[(feed, sid)] = (good, 30.0, toks)
             if out_pts is not None:
                 snapped += 1
-            shapes_raw[(feed, sid)] = simplify(out_pts if out_pts is not None else pts)
+            # Keep the pre-snap polyline alongside the stored one. Stops are
+            # warped, not snapped, so projecting them onto a snapped shape asks
+            # them to find themselves on a line that has moved out from under
+            # them — half a kilometre, at the median. Where the offset rivals
+            # the spacing between stops the monotone projection scrambles, and
+            # the vehicle sprints between the stops it piles up. snap_coherent
+            # displaces the densified polyline point by point, so the two agree
+            # index for index and a stop's place on one is its place on the
+            # other. snap_rail resamples, and falls back to projecting on the
+            # stored shape — rail tracks the artwork closely enough not to care.
+            base = np.array(densify(pts, 4.0), dtype=float)
+            full = np.asarray(out_pts, dtype=float) if out_pts is not None else base
+            if len(full) == len(base):
+                stored, keep = simplify(full, mask=True)
+                cb = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(base, axis=0).T))])
+                shape_param[(feed, sid)] = (base, cb, cb[keep])
+            else:
+                stored = simplify(full)
+            shapes_raw[(feed, sid)] = stored
             p = tmp[sid]
             shape_ll[(feed, sid)] = [(q[1], q[2]) for q in p]
         n_trips = len(trips_out) - n_before
@@ -1364,7 +1401,12 @@ def main():
                 shape_ll[key] = [stops_ll[(feed, s)] for s in stop_seq]
                 add_shape(key, spx)
         si = shape_index[key]
-        d = project_stops(shapes_raw[key], cums[si], spx)
+        prm = shape_param.get(key)
+        if prm is None:
+            d = project_stops(shapes_raw[key], cums[si], spx)
+        else:                     # project before the snap, then carry it over
+            base, cb, cb_kept = prm
+            d = np.interp(project_stops(base, cb, spx), cb_kept, cums[si])
         entry = {"s": si, "d": [round(v) for v in d]}
         runs = runs_for(key, si)
         if runs:
