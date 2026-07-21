@@ -78,6 +78,8 @@ pipeline order is `georef.py` → `georef_inset.py` → `build_data.py`;
   PDF. Only needs rerunning if the PDF changes.
 - `scripts/debug_line.py` — draws one route's stored path over the map, for
   checking a line against the artwork it should be riding.
+- `scripts/speed_check.py` — ranks the vehicles that move implausibly fast,
+  which is how a bad path usually shows itself in the animation.
 - `index.html` — the whole client: loader, canvas renderer, and controls.
 
 ## Rebuild data
@@ -118,6 +120,28 @@ animation plays back. A shared route label prompts for which system to draw
 (`--system` skips it). Each route has several shape variants, listed on stdout
 by trip count and drawn in different colors; the top two are usually the two
 directions of one corridor, so `--shape N` reads them one at a time.
+
+### Finding bad paths without looking for them
+
+`speed_check.py` works the other way round: it scans every stop-to-stop segment
+for vehicles moving faster than a bus can, which is how a bad path shows itself
+in the animation.
+
+```sh
+.venv/bin/python scripts/speed_check.py              # worst 25 over 120 km/h
+.venv/bin/python scripts/speed_check.py --over 300   # only the egregious ones
+.venv/bin/python scripts/speed_check.py --inset      # inside the Downtown panel
+.venv/bin/python scripts/speed_check.py --csv        # every hit, machine-readable
+```
+
+Speed is measured against the timetable the client actually animates,
+de-tying included, so minute-quantized GTFS times don't register as teleports.
+Each row carries a **detour** ratio — path length between the two stops over
+the straight line between them — which separates the two causes: well above 1
+means the shape wanders and the vehicle sprints to keep the schedule (a pathing
+error), while ~1 means it really does travel that far and the feed is worth a
+look. Rows are grouped per shape segment, since one bad shape shows up on every
+trip that runs it, and each route prints its `debug_line.py` command.
 
 ## Known limitations
 
