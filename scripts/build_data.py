@@ -12,7 +12,7 @@ Trips crossing midnight (times >= 24:00) are also emitted shifted by -24h so
 the after-midnight portion of "yesterday's" service appears at the start of
 the simulated day.
 """
-import colorsys, csv, hashlib, inspect, json, math, os, sys
+import colorsys, csv, hashlib, inspect, json, math, os, re, sys
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
@@ -153,7 +153,22 @@ def parse_time(s):
     return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2] if len(parts) > 2 else 0)
 
 
+def printed_on_map(token):
+    """Whether the sheet prints this token anywhere — the test of whether a
+    rider could look a vehicle's label up."""
+    return any(token in badge_words(r) for r in ("main", "inset"))
+
+
 def route_label(short, long_name):
+    """The designation a vehicle carries, kept to four characters.
+
+    A paired short name is badged on the map as its parts: 14/37 is printed
+    "14" here and "37" there, never "1437", so running the halves together
+    labels every one of those buses with something no rider can find. Where a
+    designation splits, prefer whichever form the map actually prints — that
+    keeps 14/37 as "14" while leaving Metrolink's IE-OC alone, since the sheet
+    prints neither "IE" nor "IEOC" and the joined form at least reads as the
+    line's name."""
     s = (short or long_name or "?").strip()
     for pre in ("Metro ", "Metrolink "):
         if s.startswith(pre):
@@ -163,9 +178,12 @@ def route_label(short, long_name):
     tok = s.split()[0]
     if len(tok) <= 4:
         return tok
-    t2 = tok.replace("-", "").replace("/", "")
-    if len(t2) <= 4:
-        return t2
+    joined = tok.replace("-", "").replace("/", "")
+    for part in re.split(r"[/-]", tok):
+        if badge_like(part) and not printed_on_map(joined) and printed_on_map(part):
+            return part
+    if len(joined) <= 4:
+        return joined
     words = [w for w in s.replace("-", " ").split() if w]
     return "".join(w[0] for w in words[:3]).upper() if len(words) > 1 else tok[:3].upper()
 
@@ -658,8 +676,11 @@ def badge_like(token):
     the agency's color anchors the shape to a spot the route never goes near.
 
     A badge is a code, not a word: it carries a digit (720, 1X, 431B, 20cc) or
-    it is an initialism short enough to fit the chip (LC, SYL, R3)."""
-    return token.isalnum() and (any(c.isdigit() for c in token) or len(token) <= 3)
+    it is an initialism short enough to fit the chip (LC, SYL, R3). Case
+    settles the rest — a chip is set in capitals, so "Bay", "Del" and "Los"
+    are prose out of a route's name however short they are."""
+    return token.isalnum() and (any(c.isdigit() for c in token)
+                                or (token.isupper() and len(token) <= 3))
 
 
 _RIVAL_PALETTE = None
