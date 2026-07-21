@@ -101,14 +101,16 @@ cd data/gtfs && for z in *.zip; do unzip -o "$z" -d "${z%.zip}"; done && cd ../.
 
 `debug_line.py` answers "why is this bus off its street?". It writes
 `scratch/debug_<system>_<line>.png`, cropped to the route, drawn on the
-high-resolution tiles so badges and labels under the line stay legible.
+high-resolution tiles so badges and labels under the line stay legible. A route
+reaching downtown is drawn on both the main map and the call-out panel, and the
+two are snapped independently, so it writes `..._inset.png` as well.
 
 ```sh
 .venv/bin/python scripts/debug_line.py 720                     # Metro Bus 720
 .venv/bin/python scripts/debug_line.py 2 --system "Big Blue"   # shared number
 .venv/bin/python scripts/debug_line.py 720 --stops             # + stop positions
 .venv/bin/python scripts/debug_line.py 720 --shape 0           # one variant only
-.venv/bin/python scripts/debug_line.py 720 --inset             # the Downtown panel
+.venv/bin/python scripts/debug_line.py 720 --inset             # only the panel
 ```
 
 Paths come straight out of `schedule.json`, so what you see is what the
