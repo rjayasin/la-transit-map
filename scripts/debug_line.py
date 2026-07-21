@@ -10,11 +10,16 @@ so zoomed-in crops stay PDF-crisp instead of an upscaled map.png. The deepest
 level whose output fits within a size cap is chosen automatically; pass --png
 to fall back to map.png, or --level to force one.
 
+A route that reaches downtown is drawn on both the main map and the rotated
+call-out panel, and the two are snapped independently, so it writes both
+images: debug_<system>_<line>.png and ..._inset.png. --inset draws only the
+panel.
+
 Usage:
-    scripts/debug_line.py 720                # Metro Bus 720
+    scripts/debug_line.py 720                # Metro Bus 720 (+ inset if any)
     scripts/debug_line.py 2 --system "Big"   # disambiguate a shared number
     scripts/debug_line.py 720 --stops        # + stop positions along the shape
-    scripts/debug_line.py 720 --inset        # the DTLA inset panel instead
+    scripts/debug_line.py 720 --inset        # only the DTLA inset panel
     scripts/debug_line.py 720 --shape 3      # one variant only
     scripts/debug_line.py 720 --png          # cheap map.png background
 """
@@ -188,13 +193,16 @@ def main():
     ap.add_argument("--system", help="substring of the system name, to disambiguate")
     ap.add_argument("--shape", type=int, help="draw only the Nth variant (see stdout)")
     ap.add_argument("--stops", action="store_true", help="mark stop positions")
-    ap.add_argument("--inset", action="store_true", help="draw the DTLA inset runs")
+    ap.add_argument("--inset", action="store_true",
+                    help="only the DTLA inset panel (default draws it too, as a second file)")
     ap.add_argument("--full", action="store_true", help="whole map, no crop to the path")
     ap.add_argument("--width", type=int, default=5, help="path stroke width in base px (default 5)")
     ap.add_argument("--png", action="store_true", help="use map.png instead of the tile pyramid")
     ap.add_argument("--level", type=int, choices=(2, 4, 8),
                     help="force a tile level instead of choosing by crop size")
-    ap.add_argument("-o", "--out", help=f"output path (default {OUTDIR}/debug_<line>.png)")
+    ap.add_argument("-o", "--out",
+                    help=f"output path (default {OUTDIR}/debug_<system>_<line>.png); "
+                         "the inset panel gets the same name with _inset appended")
     a = ap.parse_args()
 
     d = load()
@@ -218,13 +226,35 @@ def main():
             sys.exit(f"--shape must be 0..{len(variants) - 1}")
         variants = [variants[a.shape]]
 
+    slug = "".join(c if c.isalnum() else "-" for c in system.lower()).strip("-")
+    while "--" in slug:
+        slug = slug.replace("--", "-")
+
+    # A route through downtown is drawn twice on the sheet — once on the main
+    # map and once, at a different scale and rotation, inside the call-out
+    # panel — and the two are snapped separately, so a path can be right on one
+    # and wrong on the other. Draw whichever panels this route actually appears
+    # in, so a plain invocation never silently omits half the evidence.
+    panels = [True] if a.inset else [False]
+    if not a.inset and any(d["insets"][si] for si, _ in variants):
+        panels.append(True)
+    for inset in panels:
+        out = a.out or os.path.join(OUTDIR, f"debug_{slug}_{a.line}.png")
+        if inset and not (a.inset and a.out):   # an explicit -o for --inset
+            root, ext = os.path.splitext(out)   # alone is taken at face value
+            out = f"{root}_inset{ext}"
+        render(d, a, variants, inset, out)
+
+
+def render(d, a, variants, inset, out):
+    """Draw the selected variants over one panel and write it to `out`."""
     # collect draw ops in 4096px base coordinates, then render once the crop
     # box and tile level are known
     paths, dots, drawn = [], [], []
     for n, (si, (ntrips, pi)) in enumerate(variants):
         color = COLORS[n % len(COLORS)]
         pat = d["patterns"][pi]
-        if a.inset:
+        if inset:
             for r, run in enumerate(d["insets"][si] or []):
                 pts = pairs(run)
                 paths.append((pts, color))
@@ -242,10 +272,10 @@ def main():
                     dots.append((point_at(pts, dist), color))
 
     if not drawn:
-        sys.exit("nothing to draw" + (" — this route has no inset runs" if a.inset else ""))
+        sys.exit("nothing to draw" + (" — this route has no inset runs" if inset else ""))
 
     W, H = 4096, 4139
-    if a.inset:
+    if inset:
         box = tuple(d["insetRect"])
     elif a.full:
         box = (0, 0, W, H)
@@ -268,15 +298,11 @@ def main():
     for xy, color in dots:
         draw_dot(dr, to_px(xy), color, radius)
 
-    slug = "".join(c if c.isalnum() else "-" for c in system.lower()).strip("-")
-    while "--" in slug:
-        slug = slug.replace("--", "-")
-    out = a.out or os.path.join(
-        OUTDIR, f"debug_{slug}_{a.line}{'_inset' if a.inset else ''}.png")
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     im.save(out)
     src = "map.png" if scale == 1 else f"tiles L{scale}"
-    print(f"crop {box} via {src} -> {out} ({im.width}x{im.height})")
+    label = "inset" if inset else "main"
+    print(f"{label:5s} crop {box} via {src} -> {out} ({im.width}x{im.height})")
 
 
 if __name__ == "__main__":
