@@ -36,7 +36,12 @@ MASK_TOL = 24.0   # RGB tolerance there, where the drawn colors are faithful
 
 # Regions of the image to ignore (legend, insets, title banner), in pixels
 EXCLUDE = [
-    (0, 0, 4096, 740),        # title banner
+    # Title banner. Its fill is within mask tolerance of Metro orange, so the
+    # cut has to clear the band's antialiased edge (last tainted row is 707) —
+    # but no further: it used to stop at 740, hiding 32 rows of live map along
+    # with the badges on them, which cost Metro 690 the anchor at its Olive
+    # View terminus and left the tail running up into the banner.
+    (0, 0, 4096, 708),
     (3200, 2400, 4096, 3650),  # DTLA inset
     (2400, 3020, 3300, 3650),  # legend
     (180, 1600, 700, 1930),    # G line detour inset

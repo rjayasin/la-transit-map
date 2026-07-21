@@ -660,8 +660,29 @@ def trace_anchors(s, D, A, P, cum, tree):
     return np.concatenate(out_s), np.concatenate(out_D)
 
 
+ANCHOR_PASSES = 3     # times the anchor fit may be re-run to pick up more badges
+
+
+def maskable(P, region="main"):
+    """Which points lie where a mask could have artwork to offer: on the sheet,
+    outside the regions the masks deliberately skip. Points under the title
+    banner or a call-out box have nothing to snap to no matter how well the
+    route is drawn, so they must not count against it."""
+    x, y = P[:, 0], P[:, 1]
+    if region == "inset":
+        x0, y0, x1, y1 = INSET_RECT
+        lx0, ly0, lx1, ly1 = INSET_LEGEND
+        return ((x >= x0) & (x < x1) & (y >= y0) & (y < y1) &
+                ~((x >= lx0) & (x < lx1) & (y >= ly0) & (y < ly1)))
+    h, w = map_image()[1].shape
+    ok = (x >= 0) & (x < w) & (y >= 0) & (y < h)
+    for ex0, ey0, ex1, ey1 in EXCLUDE:
+        ok &= ~((x >= ex0) & (x < ex1) & (y >= ey0) & (y < ey1))
+    return ok
+
+
 def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
-                  anchor_gate=120.0, min_frac=0.5, tail=(10.0, 11)):
+                  anchor_gate=120.0, min_frac=0.5, tail=(10.0, 11), region="main"):
     """Snap a warped polyline onto a drawn-line mask. The displacement field is
     smoothed along the line so whole stretches move to the same drawn street
     instead of individual points grabbing different parallels. Returns None if
@@ -673,6 +694,16 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
     between anchors — `trace_anchors` filling in the stretches between them by
     walking the drawn line — then snap with tighter caps so the corrected line
     can't wander back onto a neighboring route.
+
+    The anchor fit is re-run while it keeps reaching new badges. A badge only
+    counts for a shape it passes within `anchor_gate` of, and where the warp is
+    poor the badges that would fix it start out beyond that: Metro 690 runs 190
+    px north of drawn Foothill Blvd in the far valley, out of reach of the two
+    badges at the ends of the error. One fit on the badges it can see brings the
+    rest within reach, and the second pass lands every one of them. Re-fitting
+    is self-limiting in a way that simply widening the gate is not — a badge on
+    another branch of the route stays far from the corrected line and never
+    joins in.
 
     tail: (cap, window) for one last pass with a short smoothing window. The
     wide window that keeps whole stretches together also averages the
@@ -689,19 +720,23 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
     if default_caps:
         caps = (40.0, 26.0, 14.0)
     if anchors:
-        cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(P, axis=0).T))])
         A = np.asarray(anchors, dtype=float)
-        d2 = ((P[None, :, :] - A[:, None, :]) ** 2).sum(2)
-        j = d2.argmin(1)
-        near = np.sqrt(d2[np.arange(len(A)), j]) < anchor_gate  # badge serves this shape
-        if near.any():
+        used = 0
+        for _ in range(ANCHOR_PASSES):
+            cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(P, axis=0).T))])
+            d2 = ((P[None, :, :] - A[:, None, :]) ** 2).sum(2)
+            j = d2.argmin(1)
+            near = np.sqrt(d2[np.arange(len(A)), j]) < anchor_gate  # badge serves this shape
+            if near.sum() <= used:             # no badge the last fit couldn't reach
+                break
+            used = int(near.sum())
             order = np.argsort(cum[j[near]])
             s = cum[j[near]][order]
             D = (A[near] - P[j[near]])[order]
             s, D = trace_anchors(s, D, A[near][order], P, cum, tree)
             P = P + np.c_[np.interp(cum, s, D[:, 0]), np.interp(cum, s, D[:, 1])]
-            if default_caps:
-                caps = (26.0, 14.0)        # anchors pin the street; stay tight
+        if used and default_caps:
+            caps = (26.0, 14.0)            # anchors pin the street; stay tight
     idx = np.arange(n)
     passes = [(cap, win) for cap in caps] + ([tail] if tail else [])
     for ci, (cap, pwin) in enumerate(passes):
@@ -709,8 +744,15 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
         is_tail = bool(tail) and ci == len(passes) - 1
         d, j = tree.query(P)
         ok = d < cap
-        if ci == 0 and ok.sum() < n * min_frac:
-            return None                    # mostly undrawn: keep the warp
+        if ci == 0:
+            # "mostly undrawn" is judged only over the stretch a mask could
+            # cover. Metro 690 runs a third of its length under the title
+            # banner, which every mask excludes; counting that against it
+            # failed the whole route out of snapping and left it on a warp
+            # that strays 190 px north of the Foothill Blvd it is drawn on.
+            cov = maskable(P, region)
+            if (ok & cov).sum() < max(1, cov.sum()) * min_frac:
+                return None                # keep the warp
         if ok.sum() < 4:
             if is_tail:
                 break                      # nothing close enough to refine; keep it
@@ -957,7 +999,7 @@ def inset_runs(ll, stored_pts, cum, snap_tree=None, anchors=None):
             # chips on the other street of a one-way couplet from matching
             sc = snap_coherent([tuple(p) for p in pts], snap_tree,
                                caps=(60.0, 30.0, 14.0), win=25, anchors=anchors,
-                               anchor_gate=75.0, min_frac=0.35)
+                               anchor_gate=75.0, min_frac=0.35, region="inset")
             if sc is not None:
                 pts = np.asarray(sc)
         # drop edge-hugging slivers that never meaningfully enter the frame

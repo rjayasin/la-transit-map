@@ -570,7 +570,7 @@ function frame(now) {
     while (hi - lo > 1) { const m = (lo + hi) >> 1; (times[m] <= tc ? lo = m : hi = m); }
     const dist = distAt(times, d, lo, hi, tc);
     const [x, y] = posAlong(shapes[pat.s], dist);
-    if (x < -15 || x > map.width + 15 || y < 700 || y > map.height + 15) continue;  // off the drawn map
+    if (x < -15 || x > map.width + 15 || y < 708 || y > map.height + 15) continue;  // off the drawn map (708 = under the title banner)
     const sp = sprites[tr.r];
     if (a < 1) ctx.globalAlpha = a;
     ctx.drawImage(sp.img, x - sp.half * s, y - sp.half * s, sp.img.width / 2 * s, sp.img.height / 2 * s);
