@@ -64,8 +64,25 @@ def load_masks(level=MASK_LEVEL, tol=MASK_TOL):
     enough to keep foreign chips out.
 
     Read one tile row at a time: at level 2 the sheet is 8192 px across, and
-    there is no reason to hold all of it at once."""
-    trees, kept = {}, {rid: [] for rid in ROUTE_COLORS}
+    there is no reason to hold all of it at once. The result is memoized on
+    disk, since it depends only on the tiles and this function."""
+    import build_data                    # late: build_data imports this module
+    stamp = (level, tol, ROUTE_COLORS, EXCLUDE,
+             build_data.code_stamp(load_masks),
+             build_data.art_stamp(f"{TILES}/{level}/0_0.webp"))
+    out = build_data.cached_pixels(("rail", stamp), lambda: _rail_pixels(level, tol))
+    trees = {}
+    for rid in sorted(ROUTE_COLORS):
+        pts = out[out[:, 2] == int(rid)][:, :2]
+        print(f"route {rid}: {len(pts)} px")
+        if len(pts) > 100:
+            trees[rid] = cKDTree(pts / level)
+    return trees
+
+
+def _rail_pixels(level, tol):
+    """Every rail-mask pixel as (x, y, route id), in tile pixels."""
+    kept = []
     cols, rows = 0, 0
     while os.path.exists(f"{TILES}/{level}/{cols}_0.webp"):
         cols += 1
@@ -86,13 +103,8 @@ def load_masks(level=MASK_LEVEL, tol=MASK_TOL):
             d2 = ((band - np.array(rgb)) ** 2).sum(axis=2)
             ys, xs = np.nonzero((d2 < tol * tol) & keep)
             if len(xs):
-                kept[rid].append(np.c_[xs, ys + y0] / level)
-    for rid, chunks in kept.items():
-        n = sum(len(c) for c in chunks)
-        print(f"route {rid}: {n} px")
-        if n > 100:
-            trees[rid] = cKDTree(np.vstack(chunks))
-    return trees
+                kept.append(np.c_[xs, ys + y0, np.full(len(xs), int(rid))])
+    return np.vstack(kept) if kept else np.zeros((0, 3), dtype=int)
 
 
 def load_shapes():

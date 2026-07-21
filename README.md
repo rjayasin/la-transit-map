@@ -177,6 +177,14 @@ cd data/gtfs && for z in *.zip; do unzip -o "$z" -d "${z%.zip}"; done && cd ../.
 .venv/bin/python scripts/make_tiles.py
 ```
 
+The color masks depend only on the artwork and the code that reads it, never
+on a feed, so they are memoized under `scratch/mask-cache/` — keyed by a digest
+of the map's size/mtime plus the source of the functions that build them, so
+editing any of that invalidates the entry by itself. A rebuild is **~30 s**
+warm against **~80 s** cold; delete the directory to force a cold one. The
+build is deterministic: the same inputs give a byte-identical `schedule.json`,
+so a diff between runs shows exactly what a change did.
+
 ## Known limitations
 
 - Missing systems: Glendale Beeline (download blocked), OCTA / AVTA / Santa
