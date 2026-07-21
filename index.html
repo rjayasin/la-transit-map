@@ -254,10 +254,52 @@ function zoomAt(cx, cy, f) {
   view.k = Math.min(8 / DPR, Math.max(0.08, view.k * f));  // cap at deepest tile level's 1:1
   view.x = mx - cx / view.k; view.y = my - cy / view.k;
 }
+// Trackpad gestures follow Maps.app: a two-finger swipe pans, a pinch zooms
+// about the pointer. macOS keeps sending wheel events through the momentum
+// phase after the fingers lift, so panning off them glides to a stop on its
+// own — a hand-rolled easing would only fight the one the OS already applies.
+//
+// A pinch arrives as a wheel event with ctrlKey set (Chrome, Firefox, Edge);
+// Safari sends its own gesture events instead, handled below, and no ctrl
+// wheel, so the two paths can't both fire. A real mouse wheel still zooms, as
+// it does in Maps.app: it arrives in coarse whole-number notches on one axis,
+// where a trackpad sends fine-grained deltas and usually some sideways drift.
+// The test is only applied to the first event of a gesture and then held for
+// the rest of it, because mid-swipe a hard flick can throw a delta as coarse
+// as any mouse notch, and a swipe that changed its mind halfway would be far
+// worse than one misread from the start. A pause ends the gesture; macOS runs
+// the momentum tail straight on from the fingers, well inside the gap.
+const WHEEL_NOTCH = 40;      // px of deltaY below which it can't be a mouse notch
+const WHEEL_GAP = 150;       // ms of quiet that ends a gesture
+let wheelMode = null, wheelAt = 0;
+function isMouseWheel(e) {
+  return e.deltaMode !== 0 ||
+         (e.deltaX === 0 && Number.isInteger(e.deltaY) && Math.abs(e.deltaY) >= WHEEL_NOTCH);
+}
 cv.addEventListener("wheel", e => {
   e.preventDefault();
-  zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.0015));
+  const now = performance.now();
+  if (now - wheelAt > WHEEL_GAP) wheelMode = null;
+  wheelAt = now;
+  if (e.ctrlKey) {                                   // a pinch identifies itself
+    wheelMode = null;
+    zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.01));
+    return;
+  }
+  if (wheelMode === null) wheelMode = isMouseWheel(e) ? "zoom" : "pan";
+  if (wheelMode === "zoom") zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.0015));
+  else { view.x += e.deltaX / view.k; view.y += e.deltaY / view.k; }
 }, { passive: false });
+
+// Safari: trackpad pinch as WebKit gesture events, scale being cumulative
+let pinchScale = 1;
+cv.addEventListener("gesturestart", e => { e.preventDefault(); pinchScale = e.scale || 1; });
+cv.addEventListener("gesturechange", e => {
+  e.preventDefault();
+  if (pinchScale > 0 && e.scale > 0) zoomAt(e.clientX, e.clientY, e.scale / pinchScale);
+  pinchScale = e.scale;
+});
+cv.addEventListener("gestureend", e => e.preventDefault());
 
 // touch: one finger pans, two fingers pinch-zoom around the pinch midpoint
 let touches = new Map();
