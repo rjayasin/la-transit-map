@@ -1062,6 +1062,67 @@ TAIL_BLOCK = 16.0    # px around the stretch already covered, kept off the walk
 TAIL_FREE = 30.0     # px of line by the end left unblocked, so the walk can start
 TAIL_AHEAD = 0.75    # cosine of the widest cone off the line's heading a
                      # terminus may be found in
+TRIM_LIMIT = 60.0    # px an end may overshoot the drawn line and still be cut
+                     # back to it, rather than read as artwork that isn't there
+
+
+def rail_heading(pts, end):
+    """Unit vector out of one end of a line, along the way it was running when
+    it got there, or None if the line doubles back on itself in TAIL_FREE px."""
+    D = np.asarray(pts, dtype=float)
+    if end == 0:
+        D = D[::-1]
+    cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(D, axis=0).T))])
+    out = D[-1] - D[np.searchsorted(cum, cum[-1] - TAIL_FREE)]
+    n = np.hypot(*out)
+    return out / n if n > 1e-6 else None
+
+
+def rail_trim(P, tree, end, limit=TRIM_LIMIT):
+    """How many points to drop from one end of a snapped rail line that
+    overshoots the artwork.
+
+    The snap smooths its displacement along the line and pads that smoothing at
+    the ends, so the last points inherit the shift of their neighbours and slide
+    on along the line's own heading — past the end of the drawn line, out into
+    blank page. The B line ran 24 px beyond North Hollywood that way. Points
+    lying on neither ribbon nor platform are cut back to the artwork.
+
+    Only a short overrun, though: where a line crosses the Downtown call-out
+    nothing is drawn for 200 px and the warp is all there is to go on, so a long
+    run off the ink is the artwork's absence rather than the snap's error."""
+    D = P[::-1] if end == 0 else P
+    off = tree.query(D)[0] >= TAIL_REACH
+    mt = marker_tree()
+    if mt is not None:
+        off &= mt.query(D)[0] >= TAIL_MARKER
+    n = 0
+    while n < len(off) - 1 and off[-1 - n]:
+        n += 1
+    return n if n and np.hypot(*(D[-1] - D[-1 - n])) <= limit else 0
+
+
+def rail_platform(P, end):
+    """Finish one end in the middle of the platform the map draws there.
+
+    A drawn platform interrupts its own ribbon, so a line laid along the ink
+    stops at the marker's edge, and one cut back off a blank-page overshoot
+    stops at the other — but the middle of the marker is where the map says the
+    train stands, so whichever side it finished on, the points inside the
+    marker give way to its centre."""
+    mt = marker_tree()
+    if mt is None:
+        return P
+    D = P[::-1] if end == 0 else P
+    md, mj = mt.query(D[-1])
+    c = mt.data[mj]
+    if md >= TAIL_MARKER:
+        return P
+    k = len(D)
+    while k > 2 and np.hypot(*(D[k - 1] - c)) < TAIL_MARKER:
+        k -= 1
+    D = np.vstack([D[:k], c])
+    return D[::-1] if end == 0 else D
 
 
 def centre_on_ink(pts, tree, r=7.0, need=4):
@@ -1099,8 +1160,8 @@ def rail_tail(pts, tree, end, limit=TAIL_LIMIT):
     rather than doubling back along it; and a drawn platform counts as track,
     since the white marker interrupts its own ribbon (16 px of it at East LA
     Civic Center) and the walk has to cross that to reach the terminus behind
-    it. The farthest inked cell ahead of the endpoint is the target, and the
-    platform it stands in, if any, finishes the line off.
+    it. The farthest inked cell ahead of the endpoint is the target; standing
+    the line in the platform there is rail_platform()'s job.
 
     Two gates keep the walk from inventing track. Only ink inside a narrow cone
     off the heading the line arrived on counts as the line carrying on, so
@@ -1114,10 +1175,9 @@ def rail_tail(pts, tree, end, limit=TAIL_LIMIT):
         D = D[::-1]
     a = D[-1]
     cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(D, axis=0).T))])
-    out = a - D[np.searchsorted(cum, cum[-1] - TAIL_FREE)]
-    if np.hypot(*out) < 1e-6:
+    out = rail_heading(pts, end)
+    if out is None:
         return np.zeros((0, 2))
-    out /= np.hypot(*out)
 
     span = limit + 30.0
     lo, hi = a - span, a + span
@@ -1160,15 +1220,7 @@ def rail_tail(pts, tree, end, limit=TAIL_LIMIT):
     walk = [ib]
     while walk[-1] != ia:
         walk.append(pred[walk[-1]])
-    tail = centre_on_ink(cells[walk[-2::-1]], tree)
-    if not len(tail):                            # the endpoint was already there
-        return tail
-    if mt is not None:            # finish in the middle of the terminal platform
-        md, mj = mt.query(tail[-1])
-        c = mt.data[mj]
-        if md < TAIL_MARKER and (c - a) @ out > (tail[-1] - a) @ out:
-            tail = np.vstack([tail[np.hypot(*(tail - c).T) >= TAIL_MARKER], c])
-    return tail
+    return centre_on_ink(cells[walk[-2::-1]], tree)
 
 
 def snap_rail(pts, tree, caps=(45.0, 24.0), wins=(15, 9), max_gap=45, rnd=2):
@@ -1216,8 +1268,16 @@ def snap_rail(pts, tree, caps=(45.0, 24.0), wins=(15, 9), max_gap=45, rnd=2):
     dist, j = tree.query(P)                      # final tight re-snap on the track
     close = dist < 8
     P[close] = tree.data[j[close]]
-    head, tail = (rail_tail(P, tree, e) for e in (0, -1))   # out to the terminus
+    # line both ends up with where the map stops drawing the line: cut back an
+    # overshoot, run out to a terminus the warp fell short of, then stand the
+    # end in the middle of the platform it finished at
+    lo, hi = (rail_trim(P, tree, e) for e in (0, -1))
+    if lo + hi + 4 < len(P):
+        P = P[lo:len(P) - hi]
+    head, tail = (rail_tail(P, tree, e) for e in (0, -1))
     P = np.vstack([head[::-1], P, tail])
+    for e in (0, -1):
+        P = rail_platform(P, e)
     return [tuple(p) for p in chaikin(simplify(P, 1.0), rnd)]
 
 
