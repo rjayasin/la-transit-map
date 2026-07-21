@@ -451,17 +451,27 @@ function segSpeed(times, d, i) {
 // adjacent segments' speeds, so velocity is continuous across stop times —
 // per-segment easing (the old smoothstep) made every vehicle pulse to a halt
 // at each stop, which read as rhythmic jerking at low speed multipliers.
-function distAt(times, d, lo, hi, t) {
+// `halt` makes the vehicle come to rest at each stop instead of carrying its
+// speed through: zero tangents turn the cubic into a smoothstep, so it pulls
+// away, runs, and brakes to a standstill at the platform, all within the
+// scheduled time. Trains stop at stations you can see on the map — the white
+// circles — and gliding through one at line speed reads as wrong; buses call
+// at unmarked kerbside stops every couple of blocks, where halting at each
+// would just look like a stutter.
+function distAt(times, d, lo, hi, t, halt) {
   const span = times[hi] - times[lo];
   if (span <= 0) return d[lo];
   const f = (t - times[lo]) / span;
   const delta = (d[hi] - d[lo]) / span;
   if (delta === 0) return d[lo];
-  let m0 = lo > 0 ? (segSpeed(times, d, lo - 1) + delta) / 2 : delta;
-  let m1 = hi < times.length - 1 ? (delta + segSpeed(times, d, hi)) / 2 : delta;
-  // Fritsch–Carlson clamp keeps the cubic monotone (no backing up / overshoot)
-  m0 = Math.min(Math.max(m0 / delta, 0), 3) * delta;
-  m1 = Math.min(Math.max(m1 / delta, 0), 3) * delta;
+  let m0 = 0, m1 = 0;
+  if (!halt) {
+    m0 = lo > 0 ? (segSpeed(times, d, lo - 1) + delta) / 2 : delta;
+    m1 = hi < times.length - 1 ? (delta + segSpeed(times, d, hi)) / 2 : delta;
+    // Fritsch–Carlson clamp keeps the cubic monotone (no backing up / overshoot)
+    m0 = Math.min(Math.max(m0 / delta, 0), 3) * delta;
+    m1 = Math.min(Math.max(m1 / delta, 0), 3) * delta;
+  }
   const f2 = f * f, f3 = f2 * f;
   return (2*f3 - 3*f2 + 1) * d[lo] + (f3 - 2*f2 + f) * span * m0
        + (3*f2 - 2*f3) * d[hi] + (f3 - f2) * span * m1;
@@ -491,7 +501,7 @@ function vehiclePos(tr, t) {
   const times = tr.times, d = pat.d;
   let lo = 0, hi = times.length - 1;
   while (hi - lo > 1) { const m = (lo + hi) >> 1; (times[m] <= t ? lo = m : hi = m); }
-  return posAlong(shapes[pat.s], distAt(times, d, lo, hi, t));
+  return posAlong(shapes[pat.s], distAt(times, d, lo, hi, t, data.routes[tr.r].rail));
 }
 
 // index of the running vehicle under a screen point, or -1 if none is close enough
@@ -568,7 +578,7 @@ function frame(now) {
     const times = tr.times, d = pat.d;
     let lo = 0, hi = times.length - 1;
     while (hi - lo > 1) { const m = (lo + hi) >> 1; (times[m] <= tc ? lo = m : hi = m); }
-    const dist = distAt(times, d, lo, hi, tc);
+    const dist = distAt(times, d, lo, hi, tc, data.routes[tr.r].rail);
     const [x, y] = posAlong(shapes[pat.s], dist);
     if (x < -15 || x > map.width + 15 || y < 708 || y > map.height + 15) continue;  // off the drawn map (708 = under the title banner)
     const sp = sprites[tr.r];

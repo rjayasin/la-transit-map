@@ -56,8 +56,9 @@ python3 -m http.server 8741
     agencies, Metrolink) keep the warp.
 - **Rendering** (`index.html`, vanilla canvas) — each vehicle is a labeled
   circle in the color the map draws its line in, so every sprite matches the
-  artwork it rides on. Motion eases in and out at each stop, rail draws above
-  buses, vehicles off the drawn map are hidden, and the day loops
+  artwork it rides on. Trains pull away, run, and brake to a stand at each
+  station, inside the scheduled time; buses keep their speed through the
+  kerbside stops the map doesn't mark. Rail draws above buses, vehicles off the drawn map are hidden, and the day loops
   midnight→midnight.
 
 ## Source files
