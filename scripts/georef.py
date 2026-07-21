@@ -80,8 +80,14 @@ def load_masks(level=MASK_LEVEL, tol=MASK_TOL):
     return trees
 
 
-def _rail_pixels(level, tol):
-    """Every rail-mask pixel as (x, y, route id), in tile pixels."""
+def tile_scan(colors, level, tol, labels=None):
+    """Every pixel within `tol` of one of `colors`, as (x, y, label) rows in
+    tile pixels, read one tile row at a time so the sheet is never held whole.
+
+    Any mask that needs the printed color rather than map.png's blend of it
+    goes through here: at 4096 px a thin ribbon is mixed with whatever runs
+    alongside, and colors that are tens apart on the sheet collapse together."""
+    labels = list(range(len(colors))) if labels is None else labels
     kept = []
     cols, rows = 0, 0
     while os.path.exists(f"{TILES}/{level}/{cols}_0.webp"):
@@ -99,12 +105,19 @@ def _rail_pixels(level, tol):
         for ex0, ey0, ex1, ey1 in EXCLUDE:      # EXCLUDE is in map px
             keep[max(0, ey0 * level - y0):max(0, ey1 * level - y0),
                  ex0 * level:ex1 * level] = False
-        for rid, rgb in ROUTE_COLORS.items():
+        for lab, rgb in zip(labels, colors):
             d2 = ((band - np.array(rgb)) ** 2).sum(axis=2)
             ys, xs = np.nonzero((d2 < tol * tol) & keep)
             if len(xs):
-                kept.append(np.c_[xs, ys + y0, np.full(len(xs), int(rid))])
+                kept.append(np.c_[xs, ys + y0, np.full(len(xs), lab)])
     return np.vstack(kept) if kept else np.zeros((0, 3), dtype=int)
+
+
+def _rail_pixels(level, tol):
+    """Every rail-mask pixel as (x, y, route id), in tile pixels."""
+    rids = sorted(ROUTE_COLORS)
+    return tile_scan([ROUTE_COLORS[r] for r in rids], level, tol,
+                     labels=[int(r) for r in rids])
 
 
 def load_shapes():
