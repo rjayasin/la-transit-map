@@ -18,7 +18,8 @@ from datetime import date, datetime, timedelta
 
 import numpy as np
 from PIL import Image
-from scipy import ndimage as ndi
+from scipy import ndimage as ndi, sparse
+from scipy.sparse.csgraph import dijkstra
 from scipy.spatial import cKDTree
 
 sys.path.insert(0, "scripts")
@@ -200,33 +201,78 @@ def bg_palette(k=12):
         _BG = np.c_[top // 1024, (top // 32) % 32, top % 32] * 8 + 4
     return _BG
 
-LABEL_BRIDGE = 28   # px; half-width of the largest label gap worth closing
+LABEL_HALO = 24     # px; how far a label's knockout reaches past its glyphs
+LABEL_REACH = 28    # px; how far into a gap the artwork is worth recovering
+FADE_MIN = 0.30     # faintest line-over-page blend still read as drawn line
+FADE_MARGIN = 6.0   # how much better this agency's blend must fit than a rival's
 
 
-def bridge_label_gaps(m, sub, d2a, tol, radius=LABEL_BRIDGE):
-    """Re-add drawn-line pixels that a place-name label is painted over.
+def box_dilate(m, radius):
+    """Binary dilation by a (2*radius+1)² box. Separable running sums, so the
+    cost doesn't grow with the radius the way a flat structuring element does —
+    these radii are tens of pixels across the whole sheet."""
+    f = m.astype(np.float32)
+    for axis in (0, 1):
+        f = ndi.uniform_filter1d(f, 2 * radius + 1, axis=axis, mode="constant")
+    return f > 0
 
-    Labels sit on top of the artwork, so a color mask breaks wherever a name
-    crosses a line — "WEST HOLLYWOOD" puts a ~40 px hole in Metro 2's Sunset
-    line. The snap then locks onto whichever parallel street stays unbroken
-    (Metro 2 was landing a block south). Morphologically close the mask and
-    keep the filled pixels only where label text actually is, so gaps get
-    bridged but genuine line ends stay ends.
 
-    Label text is gray, and so are several agencies' drawn lines (Torrance,
-    Big Blue Bus, Beach Cities). Pixels anywhere near the color being masked
-    are therefore not eligible as "text", or an agency's own artwork would be
-    read as a label and dilated into the mask wholesale."""
+def unfade(m, sub, d2a, tol, colors):
+    """Re-add drawn-line pixels that a place-name label has dimmed.
+
+    Labels sit on top of the artwork, and a color mask breaks wherever a name
+    crosses a line — "WEST HOLLYWOOD" puts a ~45 px hole in Metro 2's Sunset
+    line, and the snap then locks onto whichever parallel street stays unbroken
+    (Metro 2 was landing a block south, on Santa Monica). But the label isn't
+    painting the line out: under its halo the map knocks the artwork back
+    toward the page, and Sunset crosses "WEST HOLLYWOOD" at roughly 40%
+    opacity. The line is still there, just too pale for the mask's tolerance.
+
+    So inside the halo, take a pixel that reads as this agency's color painted
+    over the page at partial opacity: near the segment from the page color to
+    the line color, and at least FADE_MIN of the way along it. Muted line
+    colors dim into ordinary map grays, so — as in the mask itself — a pixel
+    counts only when this agency's blend explains it better than any background
+    or rival agency's does; without that test Big Blue Bus's gray claimed every
+    light gray on the sheet. Recovery stays within LABEL_REACH of real artwork,
+    since the point is to close gaps in drawn lines, not to find new ones.
+
+    Glyphs still interrupt what's recovered, but only by a stroke width at a
+    time, which nearest-pixel snapping rides straight over. Bridging those too
+    (a morphological closing kept where text is) was tried and removed: it
+    couldn't span this gap anyway — Sunset turns its corner inside the label —
+    and it pulled the line low, since dilating "HOLLYWOOD" into the mask hangs
+    a word-sized blob of text off the underside of the street."""
     mx, mn = sub.max(axis=2), sub.min(axis=2)
     text = ndi.binary_dilation((mx - mn) < 26, np.ones((5, 5), bool)) & (mx < 215)
-    text &= d2a > (tol * 1.6) ** 2
-    k = 2 * radius + 1
-    closed = m
-    for st in (np.ones((1, k), bool), np.ones((k, 1), bool)):
-        closed = ndi.binary_dilation(closed, st)
-    for st in (np.ones((1, k), bool), np.ones((k, 1), bool)):
-        closed = ndi.binary_erosion(closed, st)
-    return m | (closed & text)
+    text &= d2a > (tol * 1.6) ** 2         # an agency's own gray line isn't a label
+    bgs = bg_palette()
+    paper = np.asarray(bgs[-1], dtype=float)   # densest color: the page itself
+    ys, xs = np.nonzero(box_dilate(text, LABEL_HALO) & box_dilate(m, LABEL_REACH) & ~m)
+    out = np.zeros_like(m)
+    if not len(ys):
+        return out
+    P = sub[ys, xs].astype(float) - paper
+
+    def fit(c):
+        """(distance², fraction of the way to `c`) for the page→c blend line."""
+        d = np.asarray(c, dtype=float) - paper
+        a = np.clip((P @ d) / (d @ d), 0, 1)
+        return ((P - a[:, None] * d) ** 2).sum(1), a
+
+    own, lit = np.full(len(P), np.inf), np.zeros(len(P), bool)
+    for c in colors:
+        d2, a = fit(c)
+        own, lit = np.minimum(own, d2), lit | (a > FADE_MIN)
+    rival = np.full(len(P), np.inf)
+    for r in np.vstack([bgs, rival_palette()]):
+        if (min(((np.asarray(c) - r) ** 2).sum() for c in colors) < 24 * 24
+                or ((r - paper) ** 2).sum() < 24 * 24):
+            continue                       # this agency's own color, or the page
+        rival = np.minimum(rival, fit(r)[0])
+    ok = lit & (own < (tol * 0.6) ** 2) & (np.sqrt(own) + FADE_MARGIN < np.sqrt(rival))
+    out[ys[ok], xs[ok]] = True
+    return out
 
 
 def mask_tree(colors, tol=38.0, region="main"):
@@ -259,9 +305,9 @@ def mask_tree(colors, tol=38.0, region="main"):
             if min(((np.array(c) - bg) ** 2).sum() for c in colors) < 24 * 24:
                 continue                       # bg IS this agency's color; keep
             m &= d2a < ((sub - bg) ** 2).sum(axis=2)
-        # after the background filter: bridged pixels are label gray, which
-        # every background test would reject
-        m = bridge_label_gaps(m, sub, d2a, tol)
+        # after the background filter: line dimmed under a label reads as page
+        # color, which every background test above would reject
+        m = m | unfade(m, sub, d2a, tol, colors)
         ys, xs = np.nonzero(m & keep)
         _TREES[key] = cKDTree(np.c_[xs + x0, ys + y0]) if len(xs) > 300 else None
     return _TREES[key]
@@ -456,6 +502,97 @@ def route_anchors(tokens, tree, region="main", colors=None, margin=8.0):
     return pts
 
 
+TRACE_STEP = 4.0          # px; lattice pitch for walking the drawn line
+TRACE_PAD = 60.0          # px of slack around the two badges, for a bowed line
+TRACE_REACH = 5.0         # px; how close a lattice cell must be to drawn pixels,
+                          # loose enough to step over the glyphs crossing a line
+TRACE_SPAN = (60.0, 700.0)   # px between badges worth walking between
+TRACE_DETOUR = (0.75, 1.35)  # trusted band of walked length / shape length
+TRACE_SAMPLE = 30.0       # px of walked line per intermediate anchor
+
+_PATHS = {}   # keyed by tree identity, safe because _TREES holds every tree
+              # for the life of the process, so no id is ever reused
+
+
+def mask_path(a, b, tree, step=TRACE_STEP, pad=TRACE_PAD, reach=TRACE_REACH):
+    """(polyline, length) of the shortest route from a to b that stays on the
+    drawn mask, or (None, None) if the mask doesn't connect them.
+
+    A coarse lattice over the two points' bounding box, cells kept where drawn
+    pixels are within `reach`, 8-connected, Dijkstra. The lattice is
+    deliberately blunt: drawn lines are ~8 px wide, so a 4 px pitch keeps every
+    corridor connected while leaving only a few thousand nodes to search. The
+    walk is only ever used to aim the snap, which then refines onto the pixels."""
+    key = (id(tree), round(a[0]), round(a[1]), round(b[0]), round(b[1]))
+    if key in _PATHS:                  # a route's variants share their badges
+        return _PATHS[key]
+    a, b = np.asarray(a, float), np.asarray(b, float)
+    lo, hi = np.minimum(a, b) - pad, np.maximum(a, b) + pad
+    nx, ny = (int(np.ceil((hi[k] - lo[k]) / step)) + 1 for k in (0, 1))
+    C = np.stack(np.meshgrid(lo[0] + step * np.arange(nx),
+                             lo[1] + step * np.arange(ny), indexing="ij"), -1)
+    free = (tree.query(C.reshape(-1, 2))[0] < reach).reshape(nx, ny)
+    ia, ib = (int(np.abs(C - p).sum(2).argmin()) for p in (a, b))
+    free.flat[[ia, ib]] = True         # the badges themselves are on the line
+    idx = np.arange(nx * ny).reshape(nx, ny)
+    rows, cols, w = [], [], []
+    for dx, dy in ((1, 0), (0, 1), (1, 1), (1, -1)):
+        s0 = idx[max(0, -dx):nx - max(0, dx), max(0, -dy):ny - max(0, dy)]
+        s1 = idx[max(0, dx):nx - max(0, -dx), max(0, dy):ny - max(0, -dy)]
+        ok = free.flat[s0] & free.flat[s1]
+        rows.append(s0[ok])
+        cols.append(s1[ok])
+        w.append(np.full(int(ok.sum()), step * math.hypot(dx, dy)))
+    G = sparse.coo_matrix((np.concatenate(w),
+                           (np.concatenate(rows), np.concatenate(cols))),
+                          shape=(nx * ny, nx * ny))
+    dist, pred = dijkstra(G + G.T, indices=ia, return_predecessors=True)
+    if not np.isfinite(dist[ib]):
+        _PATHS[key] = (None, None)
+        return _PATHS[key]
+    walk = [ib]
+    while walk[-1] != ia:
+        walk.append(pred[walk[-1]])
+    _PATHS[key] = (C.reshape(-1, 2)[walk[::-1]], float(dist[ib]))
+    return _PATHS[key]
+
+
+def trace_anchors(s, D, A, P, cum, tree):
+    """Add intermediate anchors by walking the drawn line between badges.
+
+    Two badges of a route bracket a stretch of its drawn line, but the
+    displacement between them is interpolated straight — and where the map is
+    schematic, that straight guess lands on the wrong street. Metro 2's warp
+    runs up to 60 px south of the drawn Sunset through West Hollywood, wider
+    than the block, so the interpolation settled it onto Santa Monica. Walking
+    the mask from badge to badge recovers the corridor itself; sampling that
+    walk pins the stretch to it, close enough for the snap passes to finish.
+
+    The walk is trusted only when it comes out about as long as the shape says
+    the stretch should be. The drawn lines are one connected web, so a walk
+    that cuts a corner the route actually turns shows up as conspicuously
+    shorter than the shape; anything outside the band keeps the straight
+    interpolation."""
+    out_s, out_D = [s[:1]], [D[:1]]
+    for i in range(len(s) - 1):
+        ds = s[i + 1] - s[i]
+        if ds > 0 and TRACE_SPAN[0] < math.dist(A[i], A[i + 1]) < TRACE_SPAN[1]:
+            walk, length = mask_path(A[i], A[i + 1], tree)
+            if walk is not None and TRACE_DETOUR[0] * ds < length < TRACE_DETOUR[1] * ds:
+                wcum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(walk, axis=0).T))])
+                k = max(1, round(length / TRACE_SAMPLE))
+                t = np.arange(1, k) / k
+                q = np.c_[np.interp(t * wcum[-1], wcum, walk[:, 0]),
+                          np.interp(t * wcum[-1], wcum, walk[:, 1])]
+                sv = s[i] + t * ds
+                out_s.append(sv)
+                out_D.append(q - np.c_[np.interp(sv, cum, P[:, 0]),
+                                       np.interp(sv, cum, P[:, 1])])
+        out_s.append(s[i + 1:i + 2])
+        out_D.append(D[i + 1:i + 2])
+    return np.concatenate(out_s), np.concatenate(out_D)
+
+
 def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
                   anchor_gate=120.0, min_frac=0.5, tail=(10.0, 11)):
     """Snap a warped polyline onto a drawn-line mask. The displacement field is
@@ -466,8 +603,9 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
     anchors: points known to lie on this route's drawn line (its map badges).
     The global warp's local error can exceed the spacing of parallel drawn
     streets, so first shift the polyline by a displacement field interpolated
-    between anchors, then snap with tighter caps so the corrected line can't
-    wander back onto a neighboring route.
+    between anchors — `trace_anchors` filling in the stretches between them by
+    walking the drawn line — then snap with tighter caps so the corrected line
+    can't wander back onto a neighboring route.
 
     tail: (cap, window) for one last pass with a short smoothing window. The
     wide window that keeps whole stretches together also averages the
@@ -493,6 +631,7 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
             order = np.argsort(cum[j[near]])
             s = cum[j[near]][order]
             D = (A[near] - P[j[near]])[order]
+            s, D = trace_anchors(s, D, A[near][order], P, cum, tree)
             P = P + np.c_[np.interp(cum, s, D[:, 0]), np.interp(cum, s, D[:, 1])]
             if default_caps:
                 caps = (26.0, 14.0)        # anchors pin the street; stay tight
