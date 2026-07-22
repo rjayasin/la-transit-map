@@ -153,6 +153,18 @@ def parse_time(s):
     return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2] if len(parts) > 2 else 0)
 
 
+# Designations the sheet prints that the feed never says. An agency that brands
+# a route instead of numbering it gets badged with the brand, and nothing in its
+# GTFS carries that: Foothill's 707 is the Silver Streak, badged SS in eighteen
+# places, and route_url is the only field that even hints at it. Labelling it
+# 707 costs twice over — a rider sees a designation the map never prints, and
+# the badges are also the anchors, so the shape has nothing pinning it to its
+# own drawn line and wanders onto whichever Foothill green runs nearest.
+MAP_LABELS = {
+    ("foothill", "20707"): "SS",   # Silver Streak
+}
+
+
 def printed_on_map(token):
     """Whether the sheet prints this token anywhere — the test of whether a
     rider could look a vehicle's label up."""
@@ -1668,7 +1680,8 @@ def main():
 
         rmeta, badge_tokens, is_dash = {}, {}, {}
         for row in read_csv(feed, "routes.txt"):
-            label = route_label(row.get("route_short_name", ""), row.get("route_long_name", ""))
+            label = MAP_LABELS.get((feed, row["route_id"])) or route_label(
+                row.get("route_short_name", ""), row.get("route_long_name", ""))
             color = (row.get("route_color") or "").strip()
             text = (row.get("route_text_color") or "").strip()
             is_dash[row["route_id"]] = "DASH" in (row.get("route_long_name") or "")
