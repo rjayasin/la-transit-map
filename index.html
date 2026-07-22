@@ -371,24 +371,34 @@ function drawSprite(g, route, px) {
   g.fillText(label, half, half + 0.5);
 }
 
-// One bitmap per route per zoom. `view.k` only changes when the user zooms, so
-// during playback this is a straight cache hit; a zoom throws the set away and
-// re-renders at the new size.
-// Keyed on the zoom, not on the pixel size: rail and bus sprites are different
-// sizes at the same zoom, so keying on size alone would throw the set away
-// twice a frame.
-let spriteBmp = [], spriteBmpK = -1;
+// One reused bitmap per route, resized in place when the size it needs changes.
+//
+// Keyed on the integer pixel size `spriteSize` rounds to — NOT on `view.k`.
+// Keying on `view.k` meant any change to that float dropped the whole set and
+// built a fresh <canvas> per visible route, even when the rounded size was
+// identical: a trackpad zoom's momentum tail nudges `view.k` every frame for a
+// second after the fingers lift, so a single gesture churned thousands of
+// canvas elements. Firefox frees canvas backing on GC, and a canvas looks tiny
+// to the JS heap while its buffer is large, so the buffers outran collection
+// until an allocation failed inside frame() — which, with requestAnimationFrame
+// as its last line, killed the render loop. The tab froze, and the exhausted
+// graphics memory lived in the content process, so a reload didn't clear it but
+// closing the tab did. Reusing the element and resizing only on a real size
+// change (a cache hit through the whole momentum tail, and through playback,
+// where the size is constant) frees the old buffer synchronously and caps the
+// live canvases at one per route. Rail and bus sizes coexist without thrashing
+// because each route keeps its own bitmap and checks its own size.
+const spriteBmp = [];
 
 function spriteAt(i, px) {
-  if (spriteBmpK !== view.k) { spriteBmp = []; spriteBmpK = view.k; }
   let s = spriteBmp[i];
-  if (!s || s.width !== px) {
-    s = document.createElement("canvas");
-    s.width = s.height = px;
-    drawSprite(s.getContext("2d"), data.routes[i], px);
-    spriteBmp[i] = s;
+  if (!s) s = spriteBmp[i] = { cv: document.createElement("canvas"), px: -1 };
+  if (s.px !== px) {
+    s.cv.width = s.cv.height = px;          // resize in place; frees the old buffer
+    drawSprite(s.cv.getContext("2d"), data.routes[i], px);
+    s.px = px;
   }
-  return s;
+  return s.cv;
 }
 
 // geometry only — the bitmap is made on demand at the size the frame needs
