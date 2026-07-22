@@ -914,6 +914,70 @@ def trace_anchors(s, D, A, P, cum, tree):
 
 
 ANCHOR_PASSES = 3     # times the anchor fit may be re-run to pick up more badges
+ANCHOR_SLIDE = 48.0   # px the shape may be slid bodily before its badges are read
+ANCHOR_PITCH = (8.0, 2.0)   # px; the slide is searched coarse, then refined
+ANCHOR_DRAG = 0.15    # px of residual charged per px of slide, per badge
+ANCHOR_GAIN = 0.7     # of the badge residual a slide must clear to be believed
+CROSSED_APART = 20.0  # px between two badges before they are different streets
+CROSSED_SPAN = 30.0   # px along the shape within which they'd be the same stretch
+
+
+def crossed_badges(A, cum, j):
+    """Whether two badges on different streets are claiming the same stretch.
+
+    A badge is read as belonging to whichever point of the shape is nearest it,
+    which asks the warp to be closer to the truth than the streets are to each
+    other. Where it isn't, a route running out and back on parallel streets
+    hands both streets' badges to whichever leg the warp favours — and the
+    shape carries one line through that stretch, so at most one of them can be
+    right. Two badges a street apart on the sheet claiming the same few px
+    along the shape is that failure, visible without knowing which is wrong."""
+    if len(A) < 2:
+        return False
+    order = np.argsort(cum[j])
+    s, pos = cum[j][order], A[order]
+    return bool(((np.diff(s) < CROSSED_SPAN) &
+                 (np.hypot(*np.diff(pos, axis=0).T) > CROSSED_APART)).any())
+
+
+def anchor_slide(P, A, gate):
+    """The translation of the whole shape that best explains its badges.
+
+    GTrans 2 is a loop north on Normandie and Vermont and back south on
+    Western, three drawn lines 30 and 56 px apart, and the warp puts all three
+    25-40 px east of their ink: every badge on a northbound street came out
+    nearest the southbound leg instead, and the fit dragged each leg across the
+    loop onto the other one's street.
+
+    The warp's error varies slowly over a few miles of map, so a shape's legs
+    are all out by much the same vector — slide the shape by it and each badge
+    is nearest its own leg again. The slide is searched on a coarse grid, then
+    refined, and is charged for its length, so the smallest slide that sorts
+    the badges out is the one taken. It only decides which point of the shape
+    each badge speaks for; the displacement fitted afterwards is still measured
+    from the unslid shape, so the correction it carries is the whole error,
+    slide included.
+
+    Two ways of refusing: a slide that wants to run past the search bound is
+    one the badges don't agree on a direction for, and a slide that leaves most
+    of the residual behind hasn't explained the badges, it has only nudged
+    them. Only a slide that takes the shape from missing its badges to running
+    through them is worth re-reading them against."""
+    kd = cKDTree(P)
+    base = np.minimum(kd.query(A)[0], gate).sum()
+    t, resid = np.zeros(2), base
+    span = ANCHOR_SLIDE
+    for pitch in ANCHOR_PITCH:
+        g = np.arange(-span, span + pitch / 2, pitch)
+        T = t + np.stack(np.meshgrid(g, g, indexing="ij"), -1).reshape(-1, 2)
+        d = kd.query((A[:, None, :] - T[None, :, :]).reshape(-1, 2))[0]
+        r = np.minimum(d.reshape(len(A), len(T)), gate).sum(0)
+        k = int((r + ANCHOR_DRAG * np.hypot(*T.T) * len(A)).argmin())
+        t, resid = T[k], r[k]
+        span = pitch
+    if np.hypot(*t) >= ANCHOR_SLIDE or resid > ANCHOR_GAIN * base:
+        return np.zeros(2)
+    return t
 
 
 def maskable(P, region="main"):
@@ -980,6 +1044,13 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
             d2 = ((P[None, :, :] - A[:, None, :]) ** 2).sum(2)
             j = d2.argmin(1)
             near = np.sqrt(d2[np.arange(len(A)), j]) < anchor_gate  # badge serves this shape
+            if crossed_badges(A[near], cum, j[near]):
+                # the warp is out by more than the streets are apart; read the
+                # badges again against a shape slid onto them
+                S = A - anchor_slide(P, A, anchor_gate)
+                d2 = ((P[None, :, :] - S[:, None, :]) ** 2).sum(2)
+                j = d2.argmin(1)
+                near = np.sqrt(d2[np.arange(len(A)), j]) < anchor_gate
             if near.sum() <= used:             # no badge the last fit couldn't reach
                 break
             used = int(near.sum())

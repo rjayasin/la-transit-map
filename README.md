@@ -52,6 +52,18 @@ python3 -m http.server 8741
     correction follows the drawn corridor rather than a chord across it.
   - Route numbers collide across agencies, so a candidate badge is kept only
     when its own chip color is best explained by this agency's.
+  - A badge belongs to the point of the shape nearest it, which asks the warp
+    to be closer to the truth than the streets are to each other. On a route
+    that runs out and back on parallel streets it isn't: GTrans 2 loops north
+    on Normandie and Vermont and south on Western, drawn 30 and 56 px apart,
+    and the warp puts all three 25-40 px east of their ink, so every
+    northbound badge came out nearest the southbound leg and the fit dragged
+    each leg across the loop onto the other's street. Two badges a street
+    apart claiming the same stretch is that failure showing, and the badges
+    are then re-read against the shape slid bodily onto them — the warp's
+    error varies slowly enough that one vector covers every leg. The slide is
+    charged for its length and refused unless it clears most of the residual,
+    so it only decides which badge speaks for which leg.
   - Shapes whose lines aren't drawn at all (minor routes, the gray-drawn
     agencies, Metrolink) keep the warp.
   - Snapping only moves a point sideways, and it pads the smoothing at the
