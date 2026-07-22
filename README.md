@@ -37,6 +37,9 @@ python3 -m http.server 8741
   - Each system's lines are masked by color. Rail colors are read off the tile
     pyramid, where the printed ink is faithful; bus colors are seeded from the
     legend swatches and refined against pixels along the routes.
+  - Metro and LADOT snap to the sheet's *vectors* rather than to that mask —
+    see below; the mask still finds their badges, which are chips filled with
+    the line color rather than strokes of it.
   - The snap displacement is smoothed along the shape, so whole stretches move
     onto the same street instead of individual points grabbing different
     parallels, with a short-window pass afterwards to take up the slack at
@@ -72,16 +75,38 @@ python3 -m http.server 8741
     passes nearest it: a shape keeps a badge while it is about as near as the
     nearest variant gets, and loses it when another explains it far better.
     On the shared trunk every variant is equally close and they all keep it.
-  - Metrolink is the one drawn network a color mask can't find: the railroad
-    hatch is inked in the same gray the sheet uses for place labels and minor
-    street art, so masking that color selects most of the page. It is read out
-    of the PDF's vectors instead — the railroad is its own stroke style, a
-    thin centreline under a dashed tick pattern, in a gray no other style
-    uses. Taking the solid stroke alone gives the line itself, without the
-    ticks that stick out sideways from it. That mask holds railroads and
-    nothing else, so it snaps with the same long reach as the busway ribbon.
+  - A color mask can only find a line the raster shows, and the sheet draws
+    lines it doesn't. Those lines are read out of the PDF's vectors instead,
+    where every route is a stroke in its agency's ink — no tolerance, no rival
+    colors, nothing to recover from a rendering. Three networks need it:
+    - **Metrolink** rides the crosshatched railroad, inked in the same gray the
+      sheet uses for place labels and minor street art, so masking that color
+      selects most of the page.
+    - **LADOT** is the same story in olive: its mask comes back 278k pixels,
+      mostly label glyphs, and every LADOT route snapped to the nearest word.
+    - **Part-time services** are drawn as thin dashed lines, and at 4096 px
+      those dashes blend into the page or vanish under a heavier line alongside
+      — Metro 233 through the Sepulveda Pass is dashed orange laid against the
+      761's red ribbon, and none of it reaches the raster at all.
+  - Where two liveries share one ink they are two stroke styles of it, so the
+    dash pattern tells them apart: the railroad's centreline under its dashed
+    ticks (the ticks stick out sideways and would only pull a shape off the
+    line), and LADOT's solid DASH against its dashed Commuter Express, which
+    keeps either from being dragged onto the other's streets.
+  - A mask smears a line across its casing, its badges and the fringe of
+    whatever is drawn beside it, so a shape can sit on the mask while its own
+    line is a good way off — 233 was resting against the 761 ribbon 25 px west
+    of its ink. Snapping to a centreline therefore keeps the full coarse-to-
+    fine ladder even once anchored, rather than the two tight passes the mask
+    settles for.
+  - The sheet writes a Commuter Express number as plain text beside its line
+    rather than on a chip, so those anchors are taken by distance to the ink
+    instead of by the agency's color under the word.
   - Shapes whose lines aren't drawn at all (minor routes, the gray-drawn
-    agencies) keep the warp.
+    agencies) keep the warp. So does any stretch crossing the Downtown
+    call-out: the panel replaces 200 px of every route with a ghosted
+    schematic, so there is nothing there to reach for, and interpolating a
+    correction across it piled 534's downtown end onto the 409's Figueroa.
   - Snapping only moves a point sideways, and it pads the smoothing at the
     ends, so a rail line finishes wherever the warp left it rather than where
     the artwork stops — 70 px short of the E line's Atlantic, 24 px past the B
@@ -171,10 +196,12 @@ around them, so the two can be read against each other. `--no-stops` leaves
 just the path.
 
 Paths come straight out of `schedule.json`, so what you see is what the
-animation plays back. A shared route label prompts for which system to draw
-(`--system` skips it). Each route has several shape variants, listed on stdout
-by trip count and drawn in different colors; the top two are usually the two
-directions of one corridor, so `--shape N` reads them one at a time.
+animation plays back. A label shared across systems prompts for which one to
+draw (`--system` skips it); one shared *within* a system is drawn as the map
+draws it, all of them together — the sheet's "437" is LADOT's Marina del Rey
+and Playa Vista workings alike. Each route has several shape variants, listed
+on stdout by trip count and drawn in different colors; the top two are usually
+the two directions of one corridor, so `--shape N` reads them one at a time.
 
 ### Finding bad paths without looking for them
 
@@ -222,14 +249,16 @@ badge is sitting right there to copy.
 - **Stale feeds** — Torrance Transit's newest public GTFS is from Jan 2024;
   Culver City / Montebello / GTrans calendars end just before the target date.
   Those systems animate their busiest covered Wednesday instead.
-- **Metrolink** snaps to the railroad lines read out of the PDF vectors, so
-  its trains sit on the drawn track (a median 1 px off it). The
-  Inland Empire-Orange County line is the exception: most of its length has no
-  railroad drawn near it, so it keeps the warp.
+- **Metrolink, Metro bus and LADOT** snap to lines read out of the PDF vectors,
+  so they sit on the drawn line: a median 1.0, 0.9 and 1.1 px off it. Two
+  exceptions keep the warp — Metrolink's Inland Empire-Orange County line, most
+  of whose length has no railroad drawn near it, and LADOT's Commuter Express
+  142, which the sheet doesn't draw where the warp puts it.
 - **Schematic corners** — the map distorts the far San Fernando Valley and the
   far east, where buses can drift off their drawn streets.
 - **Downtown** is a ghosted call-out box on the source map; vehicles pass over
-  it on the main map and are mirrored into the panel.
+  it on the main map on the warp alone, since nothing is drawn under the panel
+  to snap to, and are mirrored into the panel.
 
 ## Data sources
 

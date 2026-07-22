@@ -180,7 +180,15 @@ def route_label(short, long_name):
     designation splits, prefer whichever form the map actually prints — that
     keeps 14/37 as "14" while leaving Metrolink's IE-OC alone, since the sheet
     prints neither "IE" nor "IEOC" and the joined form at least reads as the
-    line's name."""
+    line's name.
+
+    A lettered working of a numbered route goes the same way. LADOT runs 437A
+    round Marina del Rey and 437B through Playa Vista, and the sheet draws one
+    line badged "437" — so both suffixes cost twice over, exactly as 14/37
+    does: a rider sees a designation the map never prints, and the badges are
+    also the anchors, so the shape has nothing pinning it to its own drawn
+    line. 437A's run down Via Marina, where the warp is 130 px out, needed
+    them."""
     s = (short or long_name or "?").strip()
     for pre in ("Metro ", "Metrolink "):
         if s.startswith(pre):
@@ -188,6 +196,9 @@ def route_label(short, long_name):
     if s.endswith(" Line"):
         s = s[:-5]
     tok = s.split()[0]
+    stem = re.match(r"(\d+)[A-Za-z]+$", tok)
+    if stem and not printed_on_map(tok) and printed_on_map(stem.group(1)):
+        return stem.group(1)
     if len(tok) <= 4:
         return tok
     joined = tok.replace("-", "").replace("/", "")
@@ -642,49 +653,85 @@ def drawn_color(shape_pts, seed, r2=55 * 55, need=250, level=SPRITE_LEVEL):
     vals, counts = np.unique(bins, return_counts=True)
     return tuple(np.median(S[bins == vals[counts.argmax()]], axis=0).astype(int).tolist())
 
-# ---- railroad centrelines from the source PDF ----------------------------
-# Metrolink rides the crosshatched railroad lines, and those are the one drawn
-# network a color mask can't find. The hatch is inked in the same gray the sheet
-# uses for its place labels and minor street art, so masking that color selects
-# most of the page — 141k pixels spread over the whole sheet at the tolerance
-# the other agencies use.
+# ---- drawn lines from the source PDF's vectors ---------------------------
+# A color mask can only find a line the raster actually shows, and the sheet
+# draws lines it does not. The two ways that happens both leave a shape snapped
+# to whatever *is* visible nearby, which is a neighbouring street:
 #
-# But the sheet is a vector PDF, and the railroad is drawn as its own stroke
-# style: a thin centreline with a dashed tick pattern over it, both in one gray
-# that no other style uses. Reading those paths out of the PDF gives the drawn
-# line exactly, instead of trying to recover it from pixels — no tolerance, no
-# rival colors, and the ticks (which stick out sideways from the line and would
-# only pull a shape off it) can be left behind by taking the solid stroke alone.
+#  - The color is the page's own furniture. Metrolink rides the crosshatched
+#    railroad, inked in the same gray the sheet uses for place labels and minor
+#    street art, so masking that color selects most of the page — 141k pixels
+#    spread over the whole sheet. LADOT's olive is the same story: its mask
+#    comes back 278k pixels, most of them label glyphs, and every LADOT route
+#    snaps to the nearest word instead of to its own line.
+#  - The line is too slight to survive the rendering. A part-time service is
+#    drawn as a thin dashed line, and at 4096 px those dashes blend into the
+#    page or vanish under a heavier line drawn alongside — Metro 233 through
+#    the Sepulveda Pass is dashed orange laid against the 761's red ribbon, and
+#    nothing of it reaches the raster at all.
+#
+# But the sheet is a vector PDF, and every route on it is a stroke in its
+# agency's ink: no tolerance, no rival colors, no rendering to recover it from.
+# Where two liveries share one ink they are two stroke styles of it — the
+# railroad's centreline under its dashed ticks, LADOT's solid DASH against its
+# dashed Commuter Express — so the dash pattern selects between them too.
 
 PDF = "26-1720_blt_system_map_47x47.5-2.pdf"
-RAIL_INK = (0.655, 0.664, 0.673)   # the railroad stroke's color, as the PDF has it
-RAIL_STEP = 3.0     # px between samples along a railroad path
+INK_STEP = 3.0      # px between samples along a stroke read from the PDF
+
+# The inks, as the PDF has them. An agency's lines are laid down in two colors
+# a rounding apart, so each is listed with both.
+RAIL_INK = [(0.655, 0.664, 0.673)]
+ORANGE_INK = [(0.961, 0.513, 0.272)]                       # Metro Local/Rapid
+RAPID_RED_INK = [(0.493, 0.116, 0.229), (0.499, 0.12, 0.232)]
+LADOT_INK = [(0.409, 0.398, 0.173), (0.419, 0.4, 0.164)]   # DASH + Commuter Express
+
 # The mask holds railroads and nothing else, so — as with the busway ribbon —
 # the snap can reach much further than it dares on a shared color. It needs to:
 # the warp sits a median 18-59 px off the drawn track, and 90% of it inside 60.
 RAIL_CAPS = (100.0, 50.0, 25.0, 12.0)
 RAIL_WIN = 9
+# A mask smears each line across its casing, its badges and the fringe of
+# whatever is drawn beside it, so a shape can sit on the mask while its own
+# line is a good way off — through the Sepulveda Pass Metro 233 is drawn 25 px
+# east of the 761 ribbon it was resting against. Ink is the centreline alone,
+# and answering for that distance takes the coarse-to-fine ladder rather than
+# the two tight passes anchored snapping settles for on the mask.
+INK_CAPS = (40.0, 26.0, 14.0)
 
-_RAIL = None
+# Each LADOT livery's ink holds that livery and nothing else, so its snap can
+# reach as far as the railroad's. It needs to: the warp is a median 20 px off
+# the drawn line, but out at Marina del Rey it is 100, and a shorter reach left
+# 437's run down Via Marina with nothing in range and piled it up on Admiralty.
+LADOT_CAPS = RAIL_CAPS
+LADOT_WIN = 9
+
+_INK = {}
 
 
-def rail_ink():
-    """Points along every railroad centreline the sheet draws, in map px.
+def pdf_ink(colors, dashed=None, step=INK_STEP):
+    """Points along every stroke the sheet draws in one of `colors`, in map px.
 
-    Beziers are sampled rather than taken at their control points: the railroad
-    follows long curves, and the endpoints alone leave gaps a snap falls into."""
-    global _RAIL
-    if _RAIL is None:
-        _RAIL = cached_pixels(("pdf-rail", art_stamp(PDF), code_stamp(rail_ink)),
-                              _rail_build)
-    return _RAIL
+    dashed picks the stroke style: False for the solid strokes, True for the
+    dashed ones, None for either. Beziers are sampled rather than taken at
+    their control points: a drawn line follows long curves, and the endpoints
+    alone leave gaps a snap falls into. Points inside the regions the masks
+    skip are dropped, so a shape on the main map can't reach ink drawn in the
+    legend or inside the Downtown call-out."""
+    key = (tuple(map(tuple, colors)), dashed, step)
+    if key not in _INK:
+        _INK[key] = cached_pixels(
+            ("pdf-ink", key, art_stamp(PDF), EXCLUDE, CALLOUT,
+             code_stamp(pdf_ink, _ink_build, inside_callout)),
+            lambda: _ink_build(colors, dashed, step))
+    return _INK[key]
 
 
-def _rail_build():
+def _ink_build(colors, dashed, step):
     try:
         import fitz
     except Exception as e:
-        print(f"railroad extraction unavailable: {e}")
+        print(f"PDF ink extraction unavailable: {e}")
         return np.zeros((0, 2))
     doc = fitz.open(PDF)
     page = doc[0]
@@ -692,10 +739,10 @@ def _rail_build():
     runs = []
     for it in page.get_drawings():
         c = it.get("color")
-        # the solid centreline only; the dashed style is the ticks across it
-        if c is None or (it.get("dashes") or "[] 0") != "[] 0":
+        if c is None or not any(sum((a - b) ** 2 for a, b in zip(c, k)) < 1e-4
+                                for k in colors):
             continue
-        if sum((a - b) ** 2 for a, b in zip(c, RAIL_INK)) > 1e-4:
+        if dashed is not None and ((it.get("dashes") or "[] 0") != "[] 0") != dashed:
             continue
         for seg in it["items"]:
             if seg[0] == "l":
@@ -709,20 +756,31 @@ def _rail_build():
     out = []
     for r in runs:
         if len(r) > 1:
-            out += densify(r, RAIL_STEP)
+            out += densify(r, step)
     P = np.asarray(out, dtype=float) if out else np.zeros((0, 2))
-    h, w = map_image()[1].shape
-    return P[(P[:, 0] >= 0) & (P[:, 0] < w) & (P[:, 1] >= 0) & (P[:, 1] < h)]
+    keep = map_image()[1]
+    h, w = keep.shape
+    P = P[(P[:, 0] >= 0) & (P[:, 0] < w) & (P[:, 1] >= 0) & (P[:, 1] < h)]
+    P = P[keep[P[:, 1].astype(int), P[:, 0].astype(int)]]
+    return P[~inside_callout(P)]
 
 
-_RAIL_TREE = []
+_INK_TREES = {}
+
+
+def ink_tree(colors, dashed=None):
+    """KD-tree over one ink's strokes, or None where the sheet draws too few."""
+    key = (tuple(map(tuple, colors)), dashed)
+    if key not in _INK_TREES:
+        P = pdf_ink(colors, dashed)
+        _INK_TREES[key] = cKDTree(P) if len(P) > 300 else None
+    return _INK_TREES[key]
 
 
 def rail_line_tree():
-    if not _RAIL_TREE:
-        P = rail_ink()
-        _RAIL_TREE.append(cKDTree(P) if len(P) else None)
-    return _RAIL_TREE[0]
+    # the solid centreline only; the dashed style is the ticks across it, and
+    # they stick out sideways from the line and would only pull a shape off it
+    return ink_tree(RAIL_INK, dashed=False)
 
 
 # ---- route-number badge anchors from the source PDF ----------------------
@@ -867,12 +925,24 @@ def rival_palette():
     return _RIVAL_PALETTE
 
 
-def route_anchors(tokens, tree, region="main", colors=None, margin=8.0):
+BADGE_NEAR_INK = 25.0   # px a plain-text route number may stand from its line
+
+
+def route_anchors(tokens, tree, region="main", colors=None, margin=8.0, near=None):
     """Badge positions for any of the route's number tokens that lie on the
     agency's drawn-line mask (rejects same-number badges of other agencies,
     highway shields, street labels). The agency color must be present AT the
     word itself (badge fill / colored glyph strokes), not merely nearby —
     another agency's badge drawn against this agency's line must not match.
+
+    near: for a tree of PDF strokes rather than mask pixels, the px a word may
+    stand from the line to belong to it. The presence test above counts the
+    agency's *pixels* under the word, which is how a badge chip reads — but a
+    line's strokes are sampled along its length, so a handful of them fall
+    under a word however squarely it sits on the line. And a number the sheet
+    sets as plain text beside its line, which is how it writes a Commuter
+    Express, never stands on the line at all. Distance to the ink covers both,
+    and being one agency's ink it is already the test the colors stood in for.
 
     colors: the agency's drawn color(s). A route number can belong to several
     agencies (Big Blue Bus 3 and Culver CityBus 3 run bundled through
@@ -902,9 +972,12 @@ def route_anchors(tokens, tree, region="main", colors=None, margin=8.0):
                                     # order that varies with the hash seed, and
                                     # anchor order decides snap tie-breaks
         for cx, cy in badge_words(region).get(t, ()):
+            if near is not None:
+                if tree.query([[cx, cy]])[0][0] > near:
+                    continue
             # >=10: a real badge fill / glyph has dozens of mask pixels here;
             # stray antialiased fringes near a foreign badge have a few
-            if len(tree.query_ball_point([cx, cy], 6.0)) < 10:
+            elif len(tree.query_ball_point([cx, cy], 6.0)) < 10:
                 continue
             if own:
                 bc = badge_line_color(cx, cy)
@@ -1106,6 +1179,23 @@ def anchor_slide(P, A, gate):
     return t
 
 
+# The Downtown call-out, as the PDF draws it: a cream panel laid over downtown
+# at an angle, carrying a ghosted schematic in place of the network it covers.
+# Not one route that crosses downtown is drawn inside it, so it is a hole in
+# every mask — the panel is the reason EXCLUDE can't say so, being the one
+# region of the sheet that isn't square with the page.
+CALLOUT = [(1731, 1774), (1609, 1993), (1731, 2061), (1853, 1841)]
+
+
+def inside_callout(P):
+    """Which points fall inside the Downtown call-out panel."""
+    Q = np.asarray(CALLOUT, dtype=float)
+    E = np.roll(Q, -1, axis=0) - Q
+    D = P[:, None, :] - Q[None, :, :]
+    side = E[None, :, 0] * D[:, :, 1] - E[None, :, 1] * D[:, :, 0]
+    return (side >= 0).all(1) | (side <= 0).all(1)   # same side of every edge
+
+
 def maskable(P, region="main"):
     """Which points lie where a mask could have artwork to offer: on the sheet,
     outside the regions the masks deliberately skip. Points under the title
@@ -1121,7 +1211,7 @@ def maskable(P, region="main"):
     ok = (x >= 0) & (x < w) & (y >= 0) & (y < h)
     for ex0, ey0, ex1, ey1 in EXCLUDE:
         ok &= ~((x >= ex0) & (x < ex1) & (y >= ey0) & (y < ey1))
-    return ok
+    return ok & ~inside_callout(P)
 
 
 SOLID_R = 2.5      # px; radius a mask pixel must be crowded within
@@ -1143,7 +1233,11 @@ def solid_pixels(tree):
     that pixel is a speck, neighbouring points get pinned to different specks
     and the line arrives jagged. So that last pass only lands on a pixel with
     company. A drawn line is at least a few pixels wide, so its pixels are
-    crowded; a speck's are not."""
+    crowded; a speck's are not.
+
+    Only masks read out of the raster speckle; a tree of PDF strokes is the
+    drawn line itself, sampled along its length rather than across its width,
+    and would fail this test everywhere — see snap_coherent's `speckled`."""
     key = id(tree)
     if key not in _SOLID:
         n = min(SOLID_MIN, len(tree.data))
@@ -1152,7 +1246,8 @@ def solid_pixels(tree):
 
 
 def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
-                  anchor_gate=120.0, min_frac=0.5, tail=(10.0, 11), region="main"):
+                  anchor_gate=120.0, min_frac=0.5, tail=(10.0, 11), region="main",
+                  speckled=True):
     """Snap a warped polyline onto a drawn-line mask. The displacement field is
     smoothed along the line so whole stretches move to the same drawn street
     instead of individual points grabbing different parallels. Returns None if
@@ -1181,7 +1276,10 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
     off the artwork wherever parallel routes crowd it (Sunset through West
     Hollywood). The cap is kept below the spacing of neighboring drawn streets
     so this can only refine within the corridor the wide passes chose, never
-    hop to the next one."""
+    hop to the next one.
+
+    speckled: whether the tree came out of the raster, and so needs the final
+    landing guarded against stray pixels. A tree of PDF strokes does not."""
     P = np.array(densify(pts, 4.0), dtype=float)
     n = len(P)
     if n < 8 or tree is None:
@@ -1220,15 +1318,22 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
         pwin = min(pwin, max(3, (n // 2) * 2 - 1))
         is_tail = bool(tail) and ci == len(passes) - 1
         d, j = tree.query(P)
-        ok = d < cap
+        # A point where no mask could hold artwork is not a point that failed to
+        # find any: it is one the sheet never drew. Interpolating a correction
+        # into it carries the last one the line had off into blank page, and
+        # the stretch piles up against whatever is nearest the far side —
+        # LADOT 534's downtown end was dragged 110 px across the call-out and
+        # crushed onto the 409's Figueroa. Those points keep the warp, and the
+        # smoothing below ramps the correction down to them.
+        cov = maskable(P, region)
+        ok = (d < cap) & cov
         if ci == 0:
             # "mostly undrawn" is judged only over the stretch a mask could
             # cover. Metro 690 runs a third of its length under the title
             # banner, which every mask excludes; counting that against it
             # failed the whole route out of snapping and left it on a warp
             # that strays 190 px north of the Foothill Blvd it is drawn on.
-            cov = maskable(P, region)
-            if (ok & cov).sum() < max(1, cov.sum()) * min_frac:
+            if ok.sum() < max(1, cov.sum()) * min_frac:
                 return None                # keep the warp
         if ok.sum() < 4:
             if is_tail:
@@ -1239,10 +1344,13 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
         k = np.ones(pwin) / pwin
         for c in (0, 1):
             col = np.interp(idx, idx[~np.isnan(disp[:, c])], disp[:, c][~np.isnan(disp[:, c])])
+            col[~cov] = 0.0
             disp[:, c] = np.convolve(np.pad(col, pwin // 2, mode="edge"), k, "valid")
         P = P + disp
     d, j = tree.query(P)                   # final tight snap + light smoothing
-    ok = (d < 8) & solid_pixels(tree)[j]   # onto artwork, never onto a speck
+    ok = (d < 8) & maskable(P, region)
+    if speckled:
+        ok &= solid_pixels(tree)[j]        # onto artwork, never onto a speck
     P[ok] = tree.data[j[ok]]
     k = np.ones(7) / 7
     for c in (0, 1):
@@ -1973,6 +2081,13 @@ def main():
                     # parallel street to choose from and took Vanowen. Read it
                     # off the tiles, where the two stay 57 apart.
                     tree = tile_tree(cols, BUSWAY_TOL) if busway else mask_tree(cols)
+                    # Snap on the strokes, anchor on the pixels. The badges are
+                    # chips filled with the line color, not strokes of it, so
+                    # they stand on the mask and not on the ink.
+                    snap_tree, ink = tree, None
+                    if not busway:
+                        ink = ink_tree(RAPID_RED_INK if cols == [RAPID_RED] else ORANGE_INK)
+                        snap_tree = ink or tree
                     # no color gate: Metro's orange badges render with variable
                     # fade (crisp ~1 px from orange, faded ~70), overlapping
                     # muted foreign badge colors, so a color test drops genuine
@@ -1986,16 +2101,40 @@ def main():
                            if busway else branch_anchors(route_anchors(toks, tree),
                                                          sid, route_sids[rid], kd_for))
                     anchored += bool(anc)
-                    out_pts = snap_coherent(pts, tree, anchors=anc,
-                                            caps=BUSWAY_CAPS if busway else None,
-                                            win=BUSWAY_WIN if busway else 61)
+                    out_pts = snap_coherent(pts, snap_tree, anchors=anc,
+                                            caps=(BUSWAY_CAPS if busway else
+                                                  INK_CAPS if ink else None),
+                                            win=BUSWAY_WIN if busway else 61,
+                                            speckled=ink is None)
                     shape_isnap[(feed, sid)] = (cols, 38.0, toks)
             elif feed == "metrolink":
                 # no badges anywhere on the sheet, so nothing to anchor with;
                 # the railroad mask is sparse enough to snap on its own
                 tree = rail_line_tree()
                 if tree is not None:
-                    out_pts = snap_coherent(pts, tree, caps=RAIL_CAPS, win=RAIL_WIN)
+                    out_pts = snap_coherent(pts, tree, caps=RAIL_CAPS, win=RAIL_WIN,
+                                            speckled=False)
+            elif feed == "ladot":
+                # LADOT's two liveries are two stroke styles of one olive ink —
+                # DASH solid, Commuter Express dashed — so each snaps to its own
+                # network and neither can be dragged onto the other's streets.
+                dash = bool(is_dash.get(rid))
+                tree = ink_tree(LADOT_INK, dashed=not dash)
+                # Commuter Express needs pinning where the warp is worst: at
+                # Marina del Rey it is 130 px out, further than the run down
+                # Via Marina is long, and the leg had no way to tell which end
+                # of the drawn line was which. DASH doesn't get anchors — its
+                # loops are drawn continuously and the ink alone puts them on
+                # the street, and its designations are single letters the sheet
+                # also gives Metro's rail lines.
+                anc = ([] if dash else
+                       branch_anchors(route_anchors(toks, tree, near=BADGE_NEAR_INK),
+                                      sid, route_sids[rid], kd_for))
+                anchored += bool(anc)
+                if tree is not None:
+                    out_pts = snap_coherent(pts, tree, anchors=anc, caps=LADOT_CAPS,
+                                            win=LADOT_WIN, speckled=False)
+                shape_isnap[(feed, sid)] = (good, 30.0, toks)
             elif agency_tree is not None:
                 anchor_tree = agency_tree
                 anchor_cols = list(good)

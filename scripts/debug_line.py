@@ -60,7 +60,13 @@ def load():
 
 
 def find_route(d, label, system):
-    """Route indices whose label matches, narrowed by a system substring."""
+    """The routes a designation covers, narrowed by a system substring.
+
+    One designation can be several routes: the map badges LADOT's Marina del
+    Rey and Playa Vista workings alike as "437", so the sheet's 437 is both.
+    Every route the label covers within one system is drawn together, since
+    together is how the map draws them; only a clash *across* systems has to
+    be resolved, and that one is asked about."""
     hits = [i for i, r in enumerate(d["routes"]) if r["n"].lower() == label.lower()]
     if system:
         s = system.lower()
@@ -68,9 +74,10 @@ def find_route(d, label, system):
     if not hits:
         sys.exit(f"no route labeled {label!r}"
                  + (f" in a system matching {system!r}" if system else ""))
-    if len(hits) > 1:
-        return pick_system(d, label, hits)
-    return hits[0]
+    systems = {d["routes"][i]["sy"] for i in hits}
+    if len(systems) > 1:
+        hits = [pick_system(d, label, hits)]
+    return hits
 
 
 def pick_system(d, label, hits):
@@ -103,10 +110,12 @@ def pick_system(d, label, hits):
 
 
 def shapes_for(d, ridx):
-    """{shape index: (trip count, one pattern using it)}, busiest first."""
+    """{shape index: (trip count, one pattern using it)}, busiest first.
+    ridx is one route index or several sharing a printed designation."""
+    want = {ridx} if isinstance(ridx, int) else set(ridx)
     trips_per_pattern = defaultdict(int)
     for t in d["trips"]:
-        if t[0] == ridx:
+        if t[0] in want:
             trips_per_pattern[t[1]] += 1
     per_shape = defaultdict(lambda: [0, None])
     for pi, n in trips_per_pattern.items():
@@ -221,7 +230,7 @@ def main():
 
     d = load()
     ridx = find_route(d, a.line, a.system)
-    route = d["routes"][ridx]
+    route = d["routes"][ridx[0]]
     system = d["systems"][route["sy"]]
     per_shape = shapes_for(d, ridx)
     if not per_shape:
