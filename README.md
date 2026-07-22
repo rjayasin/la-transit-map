@@ -64,6 +64,14 @@ python3 -m http.server 8741
     error varies slowly enough that one vector covers every leg. The slide is
     charged for its length and refused unless it clears most of the residual,
     so it only decides which badge speaks for which leg.
+  - A route's badges cover the whole route, but a shape is one *variant* of
+    it, so where a route forks, the badges on one fork are still inside the
+    gate of a variant taking the other and drag it bodily across. Metro 487's
+    Rosemead Blvd workings were pulled 143 px west onto the San Gabriel
+    branch. A badge is printed on one line, so it goes to whichever variant
+    passes nearest it: a shape keeps a badge while it is about as near as the
+    nearest variant gets, and loses it when another explains it far better.
+    On the shared trunk every variant is equally close and they all keep it.
   - Shapes whose lines aren't drawn at all (minor routes, the gray-drawn
     agencies, Metrolink) keep the warp.
   - Snapping only moves a point sideways, and it pads the smoothing at the
