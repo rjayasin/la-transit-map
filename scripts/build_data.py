@@ -990,18 +990,44 @@ def route_anchors(tokens, tree, region="main", colors=None, margin=8.0, near=Non
     return pts
 
 
-# Hand-placed anchors, in map px, for a terminus the badges can't pin. A route
-# ending on a shared hub prints no badge of its own there — the hub's routes are
-# listed once, in the municipal gray, so the sheet's "2" at the UCLA gateway is
-# Big Blue Bus's, not Metro's, and route_anchors rightly ignores a gray chip off
-# the orange line. With nothing pinning the end, the snap drifts the last stretch
-# onto whichever orange corridor runs nearest: Metro 2 came down Hilgard as drawn
-# but was then dragged bodily west onto the 602/Westwood corridor and wandered
-# around the hub instead of ending at it. One anchor on the route's own drawn
-# line at the terminus — clear of the gray it overlaps there — holds the end.
+# Hand-placed hubs, in map px, where a route the badges can't pin terminates.
+#
+# A shared transit hub prints each of its routes once, in the municipal gray, so
+# the sheet's "2" at the UCLA gateway is Big Blue Bus's, not Metro's, and
+# route_anchors rightly ignores a gray chip off the orange line. Metro 2 is then
+# left with nothing pinning its west end, and two things go wrong: the snap
+# drifts the last stretch off the Hilgard it is drawn on, bodily west onto the
+# 602/Westwood corridor; and the schematic ends the route at the hub while the
+# GTFS runs on ~80 px past it to the real layover, which the snap chases down
+# toward Wilshire. A hub point fixes both — trim_terminus cuts the overshoot back
+# to it, and it anchors the snap so the trimmed end stays on the drawn line.
 HUB_ANCHORS = {
-    ("gtfs_bus", "2"): [(1024, 1798)],   # Metro 2 into the UCLA hub off Hilgard
+    ("gtfs_bus", "2"): [(1001, 1801)],   # Metro 2 west end at the UCLA hub
 }
+
+TERMINUS_REACH = 35.0   # px a shape must pass within of a hub to be cut to it
+TERMINUS_TAIL = 110.0   # px of overshoot past the hub that gets trimmed off
+
+
+def trim_terminus(pts, hubs):
+    """Cut a shape back to a hub it overshoots. The schematic ends a route at
+    its hub; the GTFS runs on to a layover the map omits, and snapping that tail
+    onto whatever line runs past the hub leaves the vehicle wandering beyond its
+    drawn end. Where the shape passes close to a hub with only a short tail
+    beyond, drop the tail so the shape ends at the hub."""
+    P = np.asarray(densify(pts, 4.0), dtype=float)
+    for hx, hy in hubs or ():
+        d = np.hypot(P[:, 0] - hx, P[:, 1] - hy)
+        j = int(d.argmin())
+        if d[j] > TERMINUS_REACH:
+            continue
+        cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(P, axis=0).T))])
+        head, tail = cum[j], cum[-1] - cum[j]
+        if head < tail and head <= TERMINUS_TAIL:
+            P = P[j:]
+        elif tail < head and tail <= TERMINUS_TAIL:
+            P = P[:j + 1]
+    return [tuple(p) for p in P]
 
 
 BRANCH_SLACK = 2.0     # times the nearest variant's distance a badge may sit
@@ -2075,6 +2101,9 @@ def main():
             out_pts = None
             rid = route_by_shape.get(sid)
             toks = badge_tokens.get(rid, set())
+            hubs = HUB_ANCHORS.get((feed, (rid or "").split("-")[0]))
+            if hubs:
+                pts = trim_terminus(pts, hubs)   # end at the drawn hub, not past it
             if feed == "gtfs_rail":
                 tree = rail_trees.get(rid)
                 if tree is not None:
