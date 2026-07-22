@@ -72,8 +72,16 @@ python3 -m http.server 8741
     passes nearest it: a shape keeps a badge while it is about as near as the
     nearest variant gets, and loses it when another explains it far better.
     On the shared trunk every variant is equally close and they all keep it.
+  - Metrolink is the one drawn network a color mask can't find: the railroad
+    hatch is inked in the same gray the sheet uses for place labels and minor
+    street art, so masking that color selects most of the page. It is read out
+    of the PDF's vectors instead — the railroad is its own stroke style, a
+    thin centreline under a dashed tick pattern, in a gray no other style
+    uses. Taking the solid stroke alone gives the line itself, without the
+    ticks that stick out sideways from it. That mask holds railroads and
+    nothing else, so it snaps with the same long reach as the busway ribbon.
   - Shapes whose lines aren't drawn at all (minor routes, the gray-drawn
-    agencies, Metrolink) keep the warp.
+    agencies) keep the warp.
   - Snapping only moves a point sideways, and it pads the smoothing at the
     ends, so a rail line finishes wherever the warp left it rather than where
     the artwork stops — 70 px short of the E line's Atlantic, 24 px past the B
@@ -214,15 +222,10 @@ badge is sitting right there to copy.
 - **Stale feeds** — Torrance Transit's newest public GTFS is from Jan 2024;
   Culver City / Montebello / GTrans calendars end just before the target date.
   Those systems animate their busiest covered Wednesday instead.
-- **Metrolink** keeps the warp, so its trains drift off the crosshatched
-  railroad lines the sheet draws — worst in the far east, where the warp is
-  loosest. Its trips.txt leaves shape_id empty but shapes.txt does carry
-  per-line geometry, which `METROLINK_SHAPES` pairs up, so the paths are real
-  and only the snapping is missing. Snapping them needs a mask, and the
-  railroad hatch is drawn in the same grey the sheet inks its labels and minor
-  street art in: masking that colour selects most of the page. Telling the
-  hatch apart means matching its *pattern* — a line under regular
-  perpendicular ticks — rather than its colour.
+- **Metrolink** snaps to the railroad lines read out of the PDF vectors, so
+  its trains sit on the drawn track (a median 1 px off it). The
+  Inland Empire-Orange County line is the exception: most of its length has no
+  railroad drawn near it, so it keeps the warp.
 - **Schematic corners** — the map distorts the far San Fernando Valley and the
   far east, where buses can drift off their drawn streets.
 - **Downtown** is a ghosted call-out box on the source map; vehicles pass over
