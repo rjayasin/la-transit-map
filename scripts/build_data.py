@@ -642,6 +642,89 @@ def drawn_color(shape_pts, seed, r2=55 * 55, need=250, level=SPRITE_LEVEL):
     vals, counts = np.unique(bins, return_counts=True)
     return tuple(np.median(S[bins == vals[counts.argmax()]], axis=0).astype(int).tolist())
 
+# ---- railroad centrelines from the source PDF ----------------------------
+# Metrolink rides the crosshatched railroad lines, and those are the one drawn
+# network a color mask can't find. The hatch is inked in the same gray the sheet
+# uses for its place labels and minor street art, so masking that color selects
+# most of the page — 141k pixels spread over the whole sheet at the tolerance
+# the other agencies use.
+#
+# But the sheet is a vector PDF, and the railroad is drawn as its own stroke
+# style: a thin centreline with a dashed tick pattern over it, both in one gray
+# that no other style uses. Reading those paths out of the PDF gives the drawn
+# line exactly, instead of trying to recover it from pixels — no tolerance, no
+# rival colors, and the ticks (which stick out sideways from the line and would
+# only pull a shape off it) can be left behind by taking the solid stroke alone.
+
+PDF = "26-1720_blt_system_map_47x47.5-2.pdf"
+RAIL_INK = (0.655, 0.664, 0.673)   # the railroad stroke's color, as the PDF has it
+RAIL_STEP = 3.0     # px between samples along a railroad path
+# The mask holds railroads and nothing else, so — as with the busway ribbon —
+# the snap can reach much further than it dares on a shared color. It needs to:
+# the warp sits a median 18-59 px off the drawn track, and 90% of it inside 60.
+RAIL_CAPS = (100.0, 50.0, 25.0, 12.0)
+RAIL_WIN = 9
+
+_RAIL = None
+
+
+def rail_ink():
+    """Points along every railroad centreline the sheet draws, in map px.
+
+    Beziers are sampled rather than taken at their control points: the railroad
+    follows long curves, and the endpoints alone leave gaps a snap falls into."""
+    global _RAIL
+    if _RAIL is None:
+        _RAIL = cached_pixels(("pdf-rail", art_stamp(PDF), code_stamp(rail_ink)),
+                              _rail_build)
+    return _RAIL
+
+
+def _rail_build():
+    try:
+        import fitz
+    except Exception as e:
+        print(f"railroad extraction unavailable: {e}")
+        return np.zeros((0, 2))
+    doc = fitz.open(PDF)
+    page = doc[0]
+    s = map_image()[0].shape[1] / page.rect.width
+    runs = []
+    for it in page.get_drawings():
+        c = it.get("color")
+        # the solid centreline only; the dashed style is the ticks across it
+        if c is None or (it.get("dashes") or "[] 0") != "[] 0":
+            continue
+        if sum((a - b) ** 2 for a, b in zip(c, RAIL_INK)) > 1e-4:
+            continue
+        for seg in it["items"]:
+            if seg[0] == "l":
+                runs.append([(seg[1].x * s, seg[1].y * s), (seg[2].x * s, seg[2].y * s)])
+            elif seg[0] == "c":
+                p = [np.array([q.x * s, q.y * s]) for q in seg[1:5]]
+                t = np.linspace(0, 1, 12)[:, None]
+                b = ((1 - t) ** 3 * p[0] + 3 * (1 - t) ** 2 * t * p[1]
+                     + 3 * (1 - t) * t ** 2 * p[2] + t ** 3 * p[3])
+                runs.append([tuple(q) for q in b])
+    out = []
+    for r in runs:
+        if len(r) > 1:
+            out += densify(r, RAIL_STEP)
+    P = np.asarray(out, dtype=float) if out else np.zeros((0, 2))
+    h, w = map_image()[1].shape
+    return P[(P[:, 0] >= 0) & (P[:, 0] < w) & (P[:, 1] >= 0) & (P[:, 1] < h)]
+
+
+_RAIL_TREE = []
+
+
+def rail_line_tree():
+    if not _RAIL_TREE:
+        P = rail_ink()
+        _RAIL_TREE.append(cKDTree(P) if len(P) else None)
+    return _RAIL_TREE[0]
+
+
 # ---- route-number badge anchors from the source PDF ----------------------
 # The map draws a numbered badge on every route line. All routes of one agency
 # share a drawn color, so mask snapping alone can lock a shape onto a parallel
@@ -1880,6 +1963,12 @@ def main():
                                             caps=BUSWAY_CAPS if busway else None,
                                             win=BUSWAY_WIN if busway else 61)
                     shape_isnap[(feed, sid)] = (cols, 38.0, toks)
+            elif feed == "metrolink":
+                # no badges anywhere on the sheet, so nothing to anchor with;
+                # the railroad mask is sparse enough to snap on its own
+                tree = rail_line_tree()
+                if tree is not None:
+                    out_pts = snap_coherent(pts, tree, caps=RAIL_CAPS, win=RAIL_WIN)
             elif agency_tree is not None:
                 anchor_tree = agency_tree
                 anchor_cols = list(good)
