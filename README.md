@@ -206,8 +206,15 @@ badge is sitting right there to copy.
 - **Stale feeds** — Torrance Transit's newest public GTFS is from Jan 2024;
   Culver City / Montebello / GTrans calendars end just before the target date.
   Those systems animate their busiest covered Wednesday instead.
-- **Metrolink** has no shape geometry in its feed, so its trains run
-  station-to-station straight lines.
+- **Metrolink** keeps the warp, so its trains drift off the crosshatched
+  railroad lines the sheet draws — worst in the far east, where the warp is
+  loosest. Its trips.txt leaves shape_id empty but shapes.txt does carry
+  per-line geometry, which `METROLINK_SHAPES` pairs up, so the paths are real
+  and only the snapping is missing. Snapping them needs a mask, and the
+  railroad hatch is drawn in the same grey the sheet inks its labels and minor
+  street art in: masking that colour selects most of the page. Telling the
+  hatch apart means matching its *pattern* — a line under regular
+  perpendicular ticks — rather than its colour.
 - **Schematic corners** — the map distorts the far San Fernando Valley and the
   far east, where buses can drift off their drawn streets.
 - **Downtown** is a ghosted call-out box on the source map; vehicles pass over
