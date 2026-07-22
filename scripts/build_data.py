@@ -1124,6 +1124,33 @@ def maskable(P, region="main"):
     return ok
 
 
+SOLID_R = 2.5      # px; radius a mask pixel must be crowded within
+SOLID_MIN = 8      # neighbours inside it before the pixel counts as artwork
+_SOLID = {}
+
+
+def solid_pixels(tree):
+    """Which of a mask's pixels sit in real artwork rather than in speckle.
+
+    The muted agency colors sit close to the gray the sheet antialiases its
+    text and line casings with, so every mask carries a rim of stray pixels
+    around the labels: half of Torrance's is blobs under ten pixels, and the
+    median blob across every agency is a single pixel.
+
+    The coarse passes are unbothered — they move the line by a displacement
+    smoothed over tens of points, so a stray pixel is outvoted. The final pass
+    is not: it sets each point *onto* the mask pixel nearest it, and where
+    that pixel is a speck, neighbouring points get pinned to different specks
+    and the line arrives jagged. So that last pass only lands on a pixel with
+    company. A drawn line is at least a few pixels wide, so its pixels are
+    crowded; a speck's are not."""
+    key = id(tree)
+    if key not in _SOLID:
+        n = min(SOLID_MIN, len(tree.data))
+        _SOLID[key] = tree.query(tree.data, k=n)[0][:, -1] <= SOLID_R
+    return _SOLID[key]
+
+
 def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
                   anchor_gate=120.0, min_frac=0.5, tail=(10.0, 11), region="main"):
     """Snap a warped polyline onto a drawn-line mask. The displacement field is
@@ -1215,7 +1242,7 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
             disp[:, c] = np.convolve(np.pad(col, pwin // 2, mode="edge"), k, "valid")
         P = P + disp
     d, j = tree.query(P)                   # final tight snap + light smoothing
-    ok = d < 8
+    ok = (d < 8) & solid_pixels(tree)[j]   # onto artwork, never onto a speck
     P[ok] = tree.data[j[ok]]
     k = np.ones(7) / 7
     for c in (0, 1):
