@@ -1937,7 +1937,10 @@ def main():
             if not color:
                 color, text = (METRO_BUS_COLOR, METRO_BUS_TEXT) if is_metro else (FALLBACK_COLOR, FALLBACK_TEXT)
             if color == "000000" and is_metro:
-                color = "B4333D"  # map's Rapid red (GTFS says black; map draws red)
+                # GTFS says black; the map draws 720/754/761 in its Rapid-red
+                # ribbon, so the sprite takes that ribbon's own ink — the same
+                # red these shapes now snap onto (RAPID_RED_INK).
+                color = "%02X%02X%02X" % tuple(round(v * 255) for v in RAPID_RED_INK[0])
             if row["route_id"].split("-")[0] in ("910", "950"):
                 color, text = BUSWAY_GRAY, "FFFFFF"   # J Line rides the gray busway
             if row["route_id"].split("-")[0] == "901":
