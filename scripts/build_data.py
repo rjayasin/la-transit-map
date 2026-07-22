@@ -834,6 +834,37 @@ def route_anchors(tokens, tree, region="main", colors=None, margin=8.0):
     return pts
 
 
+BRANCH_SLACK = 2.0     # times the nearest variant's distance a badge may sit
+BRANCH_FLOOR = 20.0    # px of slack under that, so near-ties stay shared
+
+
+def branch_anchors(anchors, sid, sids, kd_for):
+    """The badges that belong to *this* variant of a route.
+
+    route_anchors finds every badge the sheet prints for a route, and a shape
+    gets all of them. But a shape is one variant, and where a route forks, the
+    badges standing on one fork still fall inside the anchor gate of a variant
+    that takes the other. The fit then drags that variant bodily across: Metro
+    487's Rosemead Blvd workings were pulled 143 px west onto the San Gabriel
+    branch, which is the chord cutting across San Gabriel — its own warp was
+    on the drawn line before the badges got hold of it.
+
+    A badge is printed on one line, so it speaks for whichever variant passes
+    nearest it. Keep it for this shape while this shape is about as near as the
+    nearest variant gets, and drop it when another explains it far better. On
+    the trunk, where every variant runs the same street and is equally close,
+    that keeps the badge for all of them; it only bites where the route forks.
+    A route with one shape has nothing to compare against and keeps the lot."""
+    if not anchors or len(sids) < 2:
+        return anchors
+    A = np.asarray(anchors, dtype=float)
+    dists = [kd_for(s).query(A)[0] for s in sids]
+    best = np.min(np.vstack(dists), axis=0)
+    mine = dists[sids.index(sid)]
+    keep = mine <= np.maximum(best * BRANCH_SLACK, best + BRANCH_FLOOR)
+    return [a for a, k in zip(anchors, keep) if k]
+
+
 TRACE_STEP = 4.0          # px; lattice pitch for walking the drawn line
 TRACE_PAD = 60.0          # px of slack around the two badges, for a bowed line
 TRACE_REACH = 5.0         # px; how close a lattice cell must be to drawn pixels,
@@ -1755,6 +1786,18 @@ def main():
             x, y = to_px(np.array([q[1] for q in p]), np.array([q[2] for q in p]))
             warped[sid] = list(zip(x, y))
 
+        # the shapes each route runs, and their warps as trees, so a badge can
+        # be handed to the variant that actually passes it (branch_anchors)
+        route_sids = defaultdict(list)
+        for sid in warped:
+            route_sids[route_by_shape.get(sid)].append(sid)
+        _kd = {}
+
+        def kd_for(sid):
+            if sid not in _kd:
+                _kd[sid] = cKDTree(np.asarray(densify(warped[sid], 4.0), dtype=float))
+            return _kd[sid]
+
         # snap shapes onto the drawn lines of this system where they exist
         agency_tree, sprite_cols = None, None
         if feed in LEGEND_SEEDS and warped:
@@ -1830,7 +1873,8 @@ def main():
                                             for s in route_stops.get((feed, rid), ())},
                                            {s: stops_px.get((feed, s))
                                             for s in route_stops.get((feed, rid), ())})
-                           if busway else route_anchors(toks, tree))
+                           if busway else branch_anchors(route_anchors(toks, tree),
+                                                         sid, route_sids[rid], kd_for))
                     anchored += bool(anc)
                     out_pts = snap_coherent(pts, tree, anchors=anc,
                                             caps=BUSWAY_CAPS if busway else None,
@@ -1842,7 +1886,8 @@ def main():
                 if feed in BADGE_FILLS:
                     anchor_cols = good + [BADGE_FILLS[feed]]
                     anchor_tree = mask_tree(anchor_cols, 30.0)
-                anc = route_anchors(toks, anchor_tree, colors=anchor_cols)
+                anc = branch_anchors(route_anchors(toks, anchor_tree, colors=anchor_cols),
+                                     sid, route_sids[rid], kd_for)
                 anchored += bool(anc)
                 out_pts = snap_coherent(pts, agency_tree, anchors=anc)
                 shape_isnap[(feed, sid)] = (good, 30.0, toks)
