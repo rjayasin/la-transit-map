@@ -990,6 +990,20 @@ def route_anchors(tokens, tree, region="main", colors=None, margin=8.0, near=Non
     return pts
 
 
+# Hand-placed anchors, in map px, for a terminus the badges can't pin. A route
+# ending on a shared hub prints no badge of its own there — the hub's routes are
+# listed once, in the municipal gray, so the sheet's "2" at the UCLA gateway is
+# Big Blue Bus's, not Metro's, and route_anchors rightly ignores a gray chip off
+# the orange line. With nothing pinning the end, the snap drifts the last stretch
+# onto whichever orange corridor runs nearest: Metro 2 came down Hilgard as drawn
+# but was then dragged bodily west onto the 602/Westwood corridor and wandered
+# around the hub instead of ending at it. One anchor on the route's own drawn
+# line at the terminus — clear of the gray it overlaps there — holds the end.
+HUB_ANCHORS = {
+    ("gtfs_bus", "2"): [(1024, 1798)],   # Metro 2 into the UCLA hub off Hilgard
+}
+
+
 BRANCH_SLACK = 2.0     # times the nearest variant's distance a badge may sit
 BRANCH_FLOOR = 20.0    # px of slack under that, so near-ties stay shared
 
@@ -2101,8 +2115,9 @@ def main():
                                             for s in route_stops.get((feed, rid), ())},
                                            {s: stops_px.get((feed, s))
                                             for s in route_stops.get((feed, rid), ())})
-                           if busway else branch_anchors(route_anchors(toks, tree),
-                                                         sid, route_sids[rid], kd_for))
+                           if busway else branch_anchors(
+                               route_anchors(toks, tree) + HUB_ANCHORS.get((feed, rid0), []),
+                               sid, route_sids[rid], kd_for))
                     anchored += bool(anc)
                     out_pts = snap_coherent(pts, snap_tree, anchors=anc,
                                             caps=(BUSWAY_CAPS if busway else
