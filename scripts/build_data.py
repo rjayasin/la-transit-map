@@ -682,8 +682,8 @@ INK_STEP = 3.0      # px between samples along a stroke read from the PDF
 # The inks, as the PDF has them. An agency's lines are laid down in two colors
 # a rounding apart, so each is listed with both.
 RAIL_INK = [(0.655, 0.664, 0.673)]
-ORANGE_INK = [(0.961, 0.513, 0.272)]                       # Metro Local/Rapid
-RAPID_RED_INK = [(0.493, 0.116, 0.229), (0.499, 0.12, 0.232)]
+ORANGE_INK = [(0.961, 0.513, 0.272)]                       # Metro Local
+RAPID_RED_INK = [(0.844, 0.086, 0.207)]                    # 720/754/761 rapid ribbon
 LADOT_INK = [(0.409, 0.398, 0.173), (0.419, 0.4, 0.164)]   # DASH + Commuter Express
 
 # The mask holds railroads and nothing else, so — as with the busway ribbon —
