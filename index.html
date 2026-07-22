@@ -343,24 +343,65 @@ cv.addEventListener("touchend", endTouch);
 cv.addEventListener("touchcancel", endTouch);
 
 // ---- sprites ----
-function makeSprite(route) {
-  const rail = route.rail, R = rail ? 12 : 9.5;
-  const label = route.n;
-  const s = document.createElement("canvas");
-  const scale = 2;
-  s.width = s.height = (R + 2) * 2 * scale;
-  const g = s.getContext("2d");
-  g.scale(scale, scale);
-  const c = (R + 2);
-  g.beginPath(); g.arc(c, c, R, 0, 7);
+// Drawn at exactly the size they will occupy in device pixels, so drawImage
+// copies 1:1 instead of resampling.
+//
+// A sprite rendered once at a fixed size and then scaled to fit is only clean
+// where that scale lands on a whole ratio. This one used to be a (R+2)*4 px
+// bitmap drawn at (R+2)*2*DPR*min(2.2, sqrt(k)) device px, which is 1:1 only at
+// k = 1 and k = 4; at every zoom in between the ratio is a fraction like
+// 46 -> 65.05, and as a vehicle translates sub-pixel the filter keeps
+// reshuffling which source pixels land on which screen pixels. That reads as
+// the sprite twitching rather than gliding, and it comes and goes with zoom —
+// smooth at the whole ratios, jittery between them. Rendering to the size
+// actually needed removes the resample entirely; motion stays sub-pixel, which
+// is what makes it look smooth.
+function drawSprite(g, route, px) {
+  const rail = route.rail, R = rail ? 12 : 9.5, half = R + 2;
+  const k = px / (half * 2);          // device px per map-unit of sprite
+  g.scale(k, k);
+  g.beginPath(); g.arc(half, half, R, 0, 7);
   g.fillStyle = route.c; g.fill();
   g.lineWidth = rail ? 2 : 1.2; g.strokeStyle = "rgba(255,255,255,.9)"; g.stroke();
   g.fillStyle = route.t;
-  let fs = label.length <= 2 ? 12 : label.length === 3 ? 9.5 : 7;
+  const label = route.n;
+  const fs = label.length <= 2 ? 12 : label.length === 3 ? 9.5 : 7;
   g.font = `bold ${fs}px -apple-system, Arial`;
   g.textAlign = "center"; g.textBaseline = "middle";
-  g.fillText(label, c, c + 0.5);
-  return { img: s, half: c };
+  g.fillText(label, half, half + 0.5);
+}
+
+// One bitmap per route per zoom. `view.k` only changes when the user zooms, so
+// during playback this is a straight cache hit; a zoom throws the set away and
+// re-renders at the new size.
+// Keyed on the zoom, not on the pixel size: rail and bus sprites are different
+// sizes at the same zoom, so keying on size alone would throw the set away
+// twice a frame.
+let spriteBmp = [], spriteBmpK = -1;
+
+function spriteAt(i, px) {
+  if (spriteBmpK !== view.k) { spriteBmp = []; spriteBmpK = view.k; }
+  let s = spriteBmp[i];
+  if (!s || s.width !== px) {
+    s = document.createElement("canvas");
+    s.width = s.height = px;
+    drawSprite(s.getContext("2d"), data.routes[i], px);
+    spriteBmp[i] = s;
+  }
+  return s;
+}
+
+// geometry only — the bitmap is made on demand at the size the frame needs
+function makeSprite(route) {
+  const R = route.rail ? 12 : 9.5;
+  return { half: R + 2 };
+}
+
+// The device-pixel size a sprite occupies this frame, and the map-unit size
+// that lands on exactly that many device pixels.
+function spriteSize(half, s) {
+  const px = Math.max(6, Math.round(half * 2 * s * DPR * view.k));
+  return [px, px / (DPR * view.k)];
 }
 
 // ---- load ----
@@ -583,7 +624,8 @@ function frame(now) {
     if (x < -15 || x > map.width + 15 || y < 708 || y > map.height + 15) continue;  // off the drawn map (708 = under the title banner)
     const sp = sprites[tr.r];
     if (a < 1) ctx.globalAlpha = a;
-    ctx.drawImage(sp.img, x - sp.half * s, y - sp.half * s, sp.img.width / 2 * s, sp.img.height / 2 * s);
+    const [spx, sw] = spriteSize(sp.half, s);
+    ctx.drawImage(spriteAt(tr.r, spx), x - sw / 2, y - sw / 2, sw, sw);
     if (i === followTrip) {   // ring around the followed vehicle
       ctx.beginPath(); ctx.arc(x, y, (sp.half + 4) * s, 0, 7);
       ctx.lineWidth = 2 * s; ctx.strokeStyle = "#111"; ctx.stroke();
@@ -612,7 +654,7 @@ function frame(now) {
         const fp = span > 0 ? Math.min(1, Math.max(0, (dist - d[lo]) / span))
                  : tspan > 0 ? (tc - times[lo]) / tspan : 0;
         const [ix, iy] = posAlong(insetRuns[pat.s][run], i0 + (i1 - i0) * fp);
-        insetDraws.push(sp, ix, iy, a);
+        insetDraws.push(tr.r, ix, iy, a);
       }
     }
   }
@@ -622,9 +664,10 @@ function frame(now) {
     ctx.rect(insetRect[0], insetRect[1], insetRect[2] - insetRect[0], insetRect[3] - insetRect[1]);
     ctx.clip();
     for (let k = 0; k < insetDraws.length; k += 4) {
-      const sp = insetDraws[k], x = insetDraws[k+1], y = insetDraws[k+2], a = insetDraws[k+3];
+      const ri = insetDraws[k], x = insetDraws[k+1], y = insetDraws[k+2], a = insetDraws[k+3];
       if (a < 1) ctx.globalAlpha = a;
-      ctx.drawImage(sp.img, x - sp.half * s, y - sp.half * s, sp.img.width / 2 * s, sp.img.height / 2 * s);
+      const [spx, sw] = spriteSize(sprites[ri].half, s);
+      ctx.drawImage(spriteAt(ri, spx), x - sw / 2, y - sw / 2, sw, sw);
       if (a < 1) ctx.globalAlpha = 1;
     }
     ctx.restore();
