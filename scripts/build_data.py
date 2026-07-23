@@ -1030,6 +1030,61 @@ def trim_terminus(pts, hubs):
     return [tuple(p) for p in P]
 
 
+# Hand-drawn geometry that replaces warp+snap over a stretch the snapper cannot
+# reconstruct. Keyed by (feed, route): a `box` that brackets the stretch (the
+# shape must pass through it exactly once) and a `path` tracing the drawn line
+# across it. Both are map px; the box is matched against the pre-snap warp, so
+# it goes where the shape is *before* snapping, not where the ink is drawn.
+#
+# Metro 761 turns south from Sunset onto Hilgard into UCLA, and three things
+# defeat the machinery at once: the georeference warp lands the corner ~45 px
+# southwest of the drawn red and non-uniformly compresses Hilgard; the 761's red
+# ink is broken by the UCLA station-box marker, so the badge-to-badge corridor
+# walk can't cross it; and the 45 px error scrambles anchor order (the UCLA chip
+# attaches to a Sunset warp point inside the anchor gate). The snap then
+# fragments the squared corner into a diagonal cut with a loop past it. The
+# corner is short and unambiguous on the sheet, so it is drawn by hand — the box
+# sits south and west of the drawn corridor, where the warp lands the shape.
+OVERRIDE_PATHS = {
+    ("gtfs_bus", "761"): {
+        "box": (930, 1786, 1002, 1861),
+        "path": [
+            (930, 1744), (985, 1744), (1010, 1744), (1022, 1745), (1030, 1750),
+            (1035, 1755), (1038, 1765), (1038, 1778), (1037, 1789), (1035, 1795),
+            (1029, 1800), (1019, 1804), (1010, 1806), (1003, 1808), (1001, 1816),
+            (1001, 1830), (1001, 1845), (1001, 1858),
+        ],   # Sunset -> Hilgard corner -> down into the UCLA gateway
+    },
+}
+
+
+def apply_override(full, base, spec):
+    """Splice a hand-drawn corridor into a snapped shape.
+
+    `full` (snapped) and `base` (warped) are equal-length and index-aligned, so
+    stops keep projecting onto the warp and carrying over. `spec["box"]` (warp
+    px) brackets the stretch to replace; the run of the shape inside it is
+    swapped for `spec["path"]`, resampled to the same point count and oriented
+    to the shape's direction of travel, so the alignment — and the stop timing —
+    hold. A shape that doesn't enter the box is left untouched."""
+    B = np.asarray(base, dtype=float)
+    x0, y0, x1, y1 = spec["box"]
+    inside = np.where((B[:, 0] >= x0) & (B[:, 0] <= x1)
+                      & (B[:, 1] >= y0) & (B[:, 1] <= y1))[0]
+    if len(inside) < 2:
+        return full
+    lo, hi = int(inside[0]), int(inside[-1])
+    path = np.asarray(spec["path"], dtype=float)
+    seg = (path if np.hypot(*(B[lo] - path[0])) <= np.hypot(*(B[lo] - path[-1]))
+           else path[::-1])                # start the corridor where the shape enters
+    d = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(seg, axis=0).T))])
+    t = np.linspace(0, d[-1], hi - lo + 1)
+    res = np.c_[np.interp(t, d, seg[:, 0]), np.interp(t, d, seg[:, 1])]
+    out = np.array(full, dtype=float)
+    out[lo:hi + 1] = res
+    return [tuple(p) for p in out]
+
+
 BRANCH_SLACK = 2.0     # times the nearest variant's distance a badge may sit
 BRANCH_FLOOR = 20.0    # px of slack under that, so near-ties stay shared
 
@@ -2207,6 +2262,9 @@ def main():
             # stored shape — rail tracks the artwork closely enough not to care.
             base = np.array(densify(pts, 4.0), dtype=float)
             full = np.asarray(out_pts, dtype=float) if out_pts is not None else base
+            override = OVERRIDE_PATHS.get((feed, (rid or "").split("-")[0]))
+            if override is not None and len(full) == len(base):
+                full = np.asarray(apply_override(full, base, override), dtype=float)
             if len(full) == len(base):
                 stored, keep = simplify(full, mask=True)
                 cb = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(base, axis=0).T))])
