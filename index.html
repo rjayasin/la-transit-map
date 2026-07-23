@@ -196,27 +196,49 @@ bumpBar();
 
 // ---- hi-res tile pyramid (pre-rendered from the PDF; levels 2x and 4x the base PNG) ----
 const TILE = 512;
-// Decoded tiles are this page's largest graphics allocation — 512x512x4 is 1 MB
-// apiece, they live in the content process, and Firefox frees them on GC — so
-// the cache has to be bounded, or panning at depth outruns collection until an
-// allocation fails and wedges the tab in a way only closing it clears.
+// Decoded tiles are this page's largest graphics allocation: 512x512x4 is 1 MB
+// apiece and the pyramid holds 5488 of them, so only a fraction is ever
+// resident. What matters is not only how many the cache holds but whether
+// letting one go actually gives the memory back.
 //
-// But it must never be bounded *below one frame's working set*. The cascade can
-// draw three levels at once, so a deep zoom on a wide display wants 200+ tiles
-// in a single frame; a smaller budget evicts tiles that same frame is still
-// drawing, so every frame re-creates hundreds of Images and the ones that
-// haven't finished decoding don't paint at all. That is not a slow cache, it is
-// one that misses every time, and it reads as stutter. A fixed 160 did exactly
-// this against a measured demand of 215 — 800k evictions and visible juddering.
+// It didn't. Tiles used to be <img> elements, and an <img> does not own its
+// decoded surface — it names one in the browser's image cache, which is keyed
+// by URL, lives in the content process, and is not tied to the document.
+// Dropping the element and clearing src releases a reference, nothing more: the
+// surface returns to a cache that decides for itself when to let go, and at
+// panning speed it never keeps up. A session that evicted 2359 tiles had handed
+// back 2.3 GB that way, on top of the 282 MB it was holding live, and froze
+// with a render loop that was still running clean — no slow frames, no
+// exceptions. It also explains the symptom that otherwise makes no sense:
+// reloading didn't help because those surfaces were never the document's to
+// free, and only closing the tab took the content process down with them.
+//
+// ImageBitmap is the one decoded image whose lifetime this page controls.
+// close() releases the surface then and there, so an eviction is a free and the
+// live set is what the cache says it is. Fetching the bytes here also means the
+// only thing left in a browser cache is the compressed WebP — 44 MB for the
+// entire pyramid, versus 4.1 GB if every tile in it were decoded at once.
+//
+// The budget still must never fall below one frame's working set. The cascade
+// can draw three levels at once, so a deep zoom on a wide display wants 200+
+// tiles in a single frame; a smaller budget evicts tiles that same frame is
+// still drawing, so every frame re-fetches hundreds of them and the ones that
+// haven't decoded don't paint at all. That is not a slow cache, it is one that
+// misses every time, and it reads as stutter. A fixed 160 did exactly this
+// against a measured demand of 215 — 800k evictions and visible juddering.
 //
 // So the budget follows demand rather than being guessed: twice the recent
-// peak, which keeps the whole working set resident with room to pan, floored so
-// a small viewport still caches usefully and capped so it can't run away.
-// Eviction is least-recently-*used*, and drops the evicted tile's src so the
-// decoder releases that surface then rather than waiting for GC.
-const TILE_FLOOR = 192, TILE_CEIL = 640;
-const tileCache = new Map();   // "level/c_r" -> Image, held in LRU order
+// peak, floored so a small viewport still caches usefully, and capped in the
+// megabytes the cap is actually protecting — the old ceiling of 640 tiles read
+// like a count and meant 640 MB. Eviction is least-recently-*used*.
+const TILE_FLOOR = 192;        // tiles; a small viewport still caches usefully
+const TILE_CEIL = 256;         // tiles, and 1 MB each: the live-memory ceiling
+const TILE_INFLIGHT = 12;      // concurrent decodes — see pumpTiles
+const tileCache = new Map();   // "level/c_r" -> tile, held in LRU order
+const tileQueue = [];          // tiles waiting for a decode slot, oldest first
 let tilesDrawn = 0, tileEvictions = 0, tileDemand = 0;
+let tileDecodes = 0, tileDiscards = 0, tileErrors = 0, tileInflight = 0;
+let tilePx = 0, peakTileMB = 0;   // live decoded tile pixels, and the high-water mark
 
 function tileBudget() {
   const capped = Math.min(TILE_CEIL, Math.max(TILE_FLOOR, Math.ceil(tileDemand * 2)));
@@ -226,30 +248,94 @@ function tileBudget() {
   // and in re-decoded surfaces, than the memory the cap was protecting.
   return Math.max(capped, Math.ceil(tileDemand * 1.25));
 }
+
+// Release a tile's decoded surface now, and abandon a fetch still on its way.
+function dropTile(t) {
+  t.dead = true;
+  t.state = "dead";
+  if (t.bmp) { tilePx -= t.bmp.width * t.bmp.height; t.bmp.close(); t.bmp = null; }
+  if (t.ctl) { t.ctl.abort(); t.ctl = null; }
+}
+
+function evictTiles(budget) {
+  if (tileCache.size < budget) return;
+  const keep = Math.floor(budget * 0.75);  // still comfortably above one frame
+  for (const [k, t] of tileCache) {        // insertion order, so the front of the
+    tileCache.delete(k);                   // map is the least recently used tile
+    dropTile(t);
+    tileEvictions++;
+    if (tileCache.size <= keep) break;
+  }
+}
+
 function getTile(level, c, r) {
   const key = `${level}/${c}_${r}`;
-  let img = tileCache.get(key);
-  if (img) {                              // re-insert: Map iterates in insertion
+  let t = tileCache.get(key);
+  if (t) {                                // re-insert: Map iterates in insertion
     tileCache.delete(key);                // order, so this is the LRU bookkeeping
-    tileCache.set(key, img);
-    return img;
+    tileCache.set(key, t);
+    return t;
   }
-  const budget = tileBudget();
-  if (tileCache.size >= budget) {
-    const keep = Math.floor(budget * 0.75);  // still comfortably above one frame
-    for (const [k, old] of tileCache) {
-      tileCache.delete(k);
-      old.removeAttribute("src");         // release the decoded surface now
-      tileEvictions++;
-      if (tileCache.size <= keep) break;
-    }
-  }
-  img = new Image();
-  img.onload = () => { bgDirty = true; };   // a newly arrived tile must repaint
-  img.src = `tiles/${level}/${c}_${r}.webp`;
-  tileCache.set(key, img);
-  return img;
+  evictTiles(tileBudget());
+  t = { level, c, r, key, bmp: null, ctl: null, state: "queued", dead: false };
+  tileCache.set(key, t);
+  tileQueue.push(t);
+  pumpTiles();
+  return t;
 }
+
+// A pan asks for tiles far faster than they decode, and every decode in flight
+// is another megabyte allocated at once — the peak, not the resident set, is
+// what runs a process out of image memory. So decodes are rationed, and the
+// queue is served newest-first: the newest request is what the current view is
+// waiting on, while anything still queued from a view two gestures ago has
+// usually been evicted already and is skipped on sight.
+function pumpTiles() {
+  if (tileQueue.length > 4 * TILE_CEIL) {   // compact away the evicted backlog
+    let n = 0;
+    for (const t of tileQueue) if (t.state === "queued") tileQueue[n++] = t;
+    tileQueue.length = n;
+  }
+  while (tileInflight < TILE_INFLIGHT && tileQueue.length) {
+    const t = tileQueue.pop();
+    if (t.state === "queued") fetchTile(t);
+  }
+}
+
+async function fetchTile(t) {
+  t.state = "loading";
+  t.ctl = new AbortController();
+  tileInflight++;
+  try {
+    const res = await fetch(`tiles/${t.level}/${t.c}_${t.r}.webp`, { signal: t.ctl.signal });
+    if (!res.ok) throw new Error(`tile ${t.key}: HTTP ${res.status}`);
+    const bmp = await createImageBitmap(await res.blob());
+    if (t.dead) { bmp.close(); tileDiscards++; return; }   // evicted mid-flight
+    t.bmp = bmp; t.state = "ready";
+    tilePx += bmp.width * bmp.height;
+    const liveMB = tilePx * 4 / 1048576;
+    if (liveMB > peakTileMB) peakTileMB = +liveMB.toFixed(1);
+    tileDecodes++;
+    bgDirty = true;                       // a newly arrived tile must repaint
+  } catch (err) {
+    // An evicted tile aborts its own fetch, so only a real failure counts. A
+    // tile that failed stays in the cache as an error rather than retrying, so
+    // one missing file can't turn into a fetch storm; eviction clears it.
+    if (!t.dead) { t.state = "error"; tileErrors++; }
+  } finally {
+    tileInflight--;
+    t.ctl = null;
+    pumpTiles();
+  }
+}
+
+// These surfaces are the page's to free, so a reload starts from nothing
+// instead of stacking a second set on top of the first.
+addEventListener("pagehide", () => {
+  for (const t of tileCache.values()) dropTile(t);
+  tileCache.clear();
+  tileQueue.length = 0;
+});
 // the tile column/row range covering the viewport, for a tile size in map px
 function tileRange(ts) {
   return [
@@ -264,10 +350,8 @@ function tileRange(ts) {
 function levelReady(level) {
   const [c0, r0, c1, r1] = tileRange(TILE / level);
   for (let r = r0; r <= r1; r++)
-    for (let c = c0; c <= c1; c++) {
-      const img = getTile(level, c, r);                // also kicks off the load
-      if (!(img.complete && img.naturalWidth)) return false;
-    }
+    for (let c = c0; c <= c1; c++)
+      if (getTile(level, c, r).state !== "ready") return false;   // also queues the load
   return true;
 }
 
@@ -302,9 +386,10 @@ function drawTiles(g) {
     const [c0, r0, c1, r1] = tileRange(ts);
     for (let r = r0; r <= r1; r++)
       for (let c = c0; c <= c1; c++) {
-        const img = getTile(level, c, r);
-        if (img.complete && img.naturalWidth) {
-          g.drawImage(img, c * ts, r * ts, img.naturalWidth / level, img.naturalHeight / level);
+        const t = getTile(level, c, r);
+        if (t.state === "ready") {
+          const b = t.bmp;    // its own size: the last row and column are cropped
+          g.drawImage(b, c * ts, r * ts, b.width / level, b.height / level);
           tilesDrawn++;
         }
       }
@@ -752,33 +837,68 @@ function handleTap(cx, cy) {
 // end of the animation, and the reason is reported here.
 //
 // What to look for when it does fire: this page's memory is almost entirely
-// decoded images. Tiles dominate (see the cache above), map.png holds ~68 MB,
-// and the sprite bitmaps are a rounding error beside them. Those surfaces sit
-// in the content process, which is why an exhausted tab survives a reload and
-// only closing it helps. resourceStats() is on window as transitDebug() so the
-// numbers can be read straight from the console at any time.
+// decoded images. Tiles dominate (see the cache above), map.png holds ~65 MB,
+// and the sprite bitmaps are a rounding error beside them.
+//
+// A freeze also doesn't have to come through here at all. The one that
+// prompted this reported zero frame errors and zero slow frames, because the
+// loop really was fine — it was the content process underneath that had run
+// out of image surfaces, holding every tile the page thought it had evicted.
+// So the snapshot leads with fps and with live megabytes: a log still arriving
+// while fps reads 0 means the loop stopped, and one arriving at 60 over a
+// frozen picture means it didn't. resourceStats() is on window as
+// transitDebug() so the numbers can be read from the console at any time.
 const DEBUG = qp.has("debug");
 const SLOW_FRAME_MS = 500;   // a frame this long is thrashing, not drawing
 let frameErrors = 0, slowFrames = 0, lastSlowLog = -1e9;
+let frames = 0, lastFrameAt = performance.now();
+// Baselines for the per-second rates below, refreshed by every snapshot: the
+// rates a snapshot reports are since the *previous* snapshot, whoever took it.
+let statsAt = 0, statsFrames = 0, statsComposes = 0, statsEvictions = 0, statsDecodes = 0;
 
 function resourceStats() {
   let spriteCanvases = 0, spritePx = 0;
   for (const s of spriteBmp) if (s && s.px > 0) { spriteCanvases++; spritePx += s.px * s.px; }
   const mb = px => +(px * 4 / 1048576).toFixed(1);
-  return {
+  const now = performance.now();
+  const secs = statsAt ? (now - statsAt) / 1000 : 0;
+  const rate = n => secs > 0 ? Math.round(n / secs) : 0;
+  const s = {
+    // Read fps first. The render loop and this log run off separate clocks, so
+    // a log that keeps arriving while fps sits at 0 means frames stopped, and
+    // one arriving at 60 fps over a picture that isn't moving means they
+    // didn't — the frames are being drawn and something below the page is
+    // failing to put them on screen. The old log couldn't tell those apart:
+    // it reported no errors and no slow frames for both.
+    fps: rate(frames - statsFrames), sinceFrameMs: Math.round(now - lastFrameAt),
     // tilesDrawn/tileDemand are per frame: if demand ever approaches the budget
     // the cache is thrashing, and evictions will be climbing by thousands/sec.
-    // bgComposes counts background recompositions — it should sit still while
-    // the view is still; climbing at frame rate means the blit cache is missing.
     tilesCached: tileCache.size, tilesDrawn, tileDemand: Math.round(tileDemand),
-    tileBudget: tileBudget(), tileEvictions, bgComposes,
+    tileBudget: tileBudget(), tileQueued: tileQueue.length, tileInflight,
+    // Every decode is a megabyte allocated, so decodes are the churn that used
+    // to run away invisibly — before tiles owned their surfaces, each one also
+    // stayed allocated. Over a still view both rates should fall to zero; if
+    // decodesPerSec tracks evictsPerSec instead, the cache is re-fetching tiles
+    // it just dropped and the budget is under the working set.
+    tileDecodes, decodesPerSec: rate(tileDecodes - statsDecodes),
+    tileEvictions, evictsPerSec: rate(tileEvictions - statsEvictions),
+    tileDiscards, tileErrors,
+    // bgComposes should sit still while the view is still; climbing at frame
+    // rate means the blit cache is missing and every frame recomposites.
+    bgComposes, composesPerSec: rate(bgComposes - statsComposes),
     bgMB: mb(bg.width * bg.height),
-    tileMB: mb(tileCache.size * TILE * TILE),
+    tileMB: mb(tilePx), peakTileMB,
     mapMB: map ? mb(map.width * map.height) : 0,
     spriteCanvases, spriteMB: mb(spritePx),
     canvasMB: mb(cv.width * cv.height),
     zoom: +view.k.toFixed(3), dpr: DPR, frameErrors, slowFrames,
   };
+  // The one number that matters for a freeze, and now a true one: every decoded
+  // surface here is held by this page and released when the page releases it.
+  s.imageMB = +(s.tileMB + s.bgMB + s.mapMB + s.spriteMB + s.canvasMB).toFixed(1);
+  statsAt = now; statsFrames = frames; statsComposes = bgComposes;
+  statsEvictions = tileEvictions; statsDecodes = tileDecodes;
+  return s;
 }
 
 // A freeze doesn't arrive out of nowhere: frame times climb first, as the
@@ -789,8 +909,8 @@ function noteSlowFrame(ms, at) {
   if (slowFrames > 6 || at - lastSlowLog < 3000) return;
   lastSlowLog = at;
   console.warn(`[transit] frame took ${ms | 0} ms. If this keeps climbing the tab is `
-             + "thrashing on decoded image memory, which ends in a freeze no reload "
-             + "clears. Snapshot:", resourceStats());
+             + "thrashing on decoded image memory — check tileMB and decodesPerSec. "
+             + "Snapshot:", resourceStats());
 }
 window.transitDebug = resourceStats;
 
@@ -799,22 +919,39 @@ function noteFrameError(err) {
   if (frameErrors > 3) return;          // a bad frame usually repeats; don't spam
   console.error("[transit] frame aborted — the simulation would have stopped here:", err);
   console.warn("[transit] probable cause: graphics memory exhausted by decoded image "
-             + "surfaces (tiles dominate; they outlive the page, so a reload won't "
-             + "clear it — close the tab). Snapshot:", resourceStats());
+             + "surfaces — tiles dominate, so read tileMB and peakTileMB first. "
+             + "Snapshot:", resourceStats());
   if (frameErrors === 3) console.warn("[transit] further frame errors suppressed");
 }
 
 if (DEBUG) {
   console.log("[transit] debug on — transitDebug() for live resource stats. "
-            + `Tile budget tracks demand, ${TILE_FLOOR}-${TILE_CEIL} tiles; if tileDemand `
-            + "ever reaches tileBudget the cache is thrashing and evictions will run away.");
+            + `Tile budget tracks demand, ${TILE_FLOOR}-${TILE_CEIL} tiles at 1 MB each; `
+            + "if tileDemand ever reaches tileBudget the cache is thrashing and evictions "
+            + "and decodes will run away together.");
   setInterval(() => console.log("[transit]", resourceStats()), 5000);
 }
+
+// Without ?debug nothing is logged at all, and running out of image memory
+// doesn't announce itself — the frame loop stays clean right up to the freeze.
+// So one cheap watchdog runs always and says the only thing worth saying
+// beforehand: how much decoded image memory is live, and what is holding it.
+// Under ?debug the 5-second log above owns the rate baselines instead.
+const MEM_WARN_MB = 480;
+let memWarnings = 0;
+setInterval(() => {
+  if (DEBUG || memWarnings >= 3) return;
+  const s = resourceStats();
+  if (s.imageMB < MEM_WARN_MB) return;
+  memWarnings++;
+  console.warn(`[transit] ${s.imageMB} MB of decoded images live. Snapshot:`, s);
+}, 10000);
 
 // Scheduling the next frame is deliberately outside the try: a thrown frame
 // must not be able to end the loop.
 function frame(now) {
   const t0 = performance.now();
+  frames++; lastFrameAt = t0;      // liveness, so a snapshot can report real fps
   try {
     drawFrame(now);
   } catch (err) {
