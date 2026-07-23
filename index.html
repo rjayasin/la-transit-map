@@ -97,7 +97,13 @@ const FADE_SEC = 0.16;  // how long a vehicle takes to fade on appear/disappear
 let sprites = [];       // per route: {img, w, h}
 let simT = 0;           // seconds since midnight
 let playing = true;
-let followTrip = -1;    // index into trips of the vehicle being followed, or -1
+let pathTrip = -1;      // index into trips whose path is shown while paused, or -1
+// The sheet already draws every route in its own ink, so tracing a path in that
+// same color loses it in the line underneath — and which line the vehicle is on
+// is the whole question. A fixed bright stroke reads against the map's muted
+// palette instead; magenta is what scripts/debug_line.py reaches for first, so
+// the browser and the offline tool draw a path the same way.
+const PATH_INK = "#FF00FF";
 let lastFrame = performance.now();
 const speedSel = document.getElementById("speed");
 const scrub = document.getElementById("scrub");
@@ -110,7 +116,10 @@ if (qp.get("t")) { const [h, m] = qp.get("t").split(":").map(Number); simT = h *
 if (qp.get("speed")) speedSel.value = qp.get("speed");
 if (qp.get("paused")) { playing = false; playBtn.textContent = "▶"; }
 
-function togglePlay() { playing = !playing; playBtn.textContent = playing ? "⏸" : "▶"; }
+function togglePlay() {
+  playing = !playing; playBtn.textContent = playing ? "⏸" : "▶";
+  if (playing) pathTrip = -1;   // the path inspector lives only while paused
+}
 playBtn.onclick = togglePlay;
 scrub.oninput = () => { simT = +scrub.value; };
 // space always plays/pauses — never re-activates the last-clicked control
@@ -239,7 +248,7 @@ cv.addEventListener("mousedown", e => {
 });
 addEventListener("mouseup", e => {
   dragging = false; cv.classList.remove("drag");
-  // a press that didn't turn into a drag is a click: (de)select for follow mode
+  // a press that didn't turn into a drag is a click: show/hide a vehicle's path
   if (pressOnMap && Math.hypot(e.clientX - downX, e.clientY - downY) < 5) handleTap(e.clientX, e.clientY);
   pressOnMap = false;
 });
@@ -550,6 +559,16 @@ function posAlong(shape, dist) {
           pts[2*lo+1] + (pts[2*hi+1] - pts[2*lo+1]) * f];
 }
 
+// trace a shape's polyline into the current path (used by the path inspector)
+function strokeShape(shape) {
+  const pts = shape.pts, n = pts.length >> 1;
+  if (n < 2) return;
+  ctx.beginPath();
+  ctx.moveTo(pts[0], pts[1]);
+  for (let i = 1; i < n; i++) ctx.lineTo(pts[2*i], pts[2*i+1]);
+  ctx.stroke();
+}
+
 // on-screen sprite size factor: constant when zoomed out, grows gently with deep zoom
 function spriteScale() {
   return 1 / view.k * Math.min(1, view.k * 2.3) * Math.min(2.2, Math.max(1, Math.sqrt(view.k)));
@@ -584,10 +603,11 @@ function pickVehicle(cx, cy) {
   return best;
 }
 
-// follow mode: while paused, tapping a vehicle follows it; tapping empty space clears it
+// path inspector: while paused, tapping a vehicle shows the line it runs;
+// tapping another switches to it, tapping empty space hides the path
 function handleTap(cx, cy) {
   if (playing) return;
-  followTrip = pickVehicle(cx, cy);
+  pathTrip = pickVehicle(cx, cy);
 }
 
 function frame(now) {
@@ -596,13 +616,6 @@ function frame(now) {
     simT += dt * +speedSel.value;
     if (simT >= 86400) simT -= 86400;
     scrub.value = simT | 0;
-  }
-  // follow mode: keep the tracked vehicle centered (zoom stays under user control)
-  if (followTrip >= 0) {
-    const tr = trips[followTrip];
-    const p = tr && sysOn[data.routes[tr.r].sy] ? vehiclePos(tr, simT) : null;
-    if (p) { view.x = p[0] - (W / 2) / view.k; view.y = p[1] - (H / 2) / view.k; }
-    else followTrip = -1;   // trip ended or its system was filtered out
   }
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.fillStyle = "#cfe3ec"; ctx.fillRect(0, 0, W, H);
@@ -617,6 +630,29 @@ function frame(now) {
   const hh = String(Math.floor(simT / 3600)).padStart(2, "0");
   const mm = String(Math.floor(simT % 3600 / 60)).padStart(2, "0");
   ctx.fillText(`${hh}:${mm}`, 240, 3590);
+
+  // path inspector: while paused, stroke the whole line the selected vehicle
+  // runs (and its downtown mirror), so its variant reads against the artwork
+  if (!playing && pathTrip >= 0) {
+    const tr = trips[pathTrip], pat = tr && data.patterns[tr.p];
+    if (pat && sysOn[data.routes[tr.r].sy]) {
+      ctx.lineJoin = ctx.lineCap = "round";
+      const stroke = shape => {
+        ctx.lineWidth = 8 / view.k; ctx.strokeStyle = "rgba(0,0,0,.7)"; strokeShape(shape);
+        ctx.lineWidth = 4.5 / view.k; ctx.strokeStyle = PATH_INK; strokeShape(shape);
+      };
+      stroke(shapes[pat.s]);
+      const runs = insetRuns[pat.s];
+      if (runs && insetRect) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(insetRect[0], insetRect[1], insetRect[2] - insetRect[0], insetRect[3] - insetRect[1]);
+        ctx.clip();
+        for (const run of runs) if (run) stroke(run);
+        ctx.restore();
+      }
+    } else pathTrip = -1;   // the trip's system was filtered out
+  }
 
   // vehicles
   let active = 0;
@@ -647,7 +683,7 @@ function frame(now) {
     if (a < 1) ctx.globalAlpha = a;
     const [spx, sw] = spriteSize(sp.half, s);
     ctx.drawImage(spriteAt(tr.r, spx), x - sw / 2, y - sw / 2, sw, sw);
-    if (i === followTrip) {   // ring around the followed vehicle
+    if (i === pathTrip) {   // ring the vehicle whose path is shown
       ctx.beginPath(); ctx.arc(x, y, (sp.half + 4) * s, 0, 7);
       ctx.lineWidth = 2 * s; ctx.strokeStyle = "#111"; ctx.stroke();
     }
@@ -695,7 +731,7 @@ function frame(now) {
   }
   const hhmm = `${hh}:${mm}`;
   stats.textContent = `${hhmm} · ${active} vehicles` +
-    (followTrip >= 0 && trips[followTrip] ? ` · following ${data.routes[trips[followTrip].r].n}` : "") +
+    (pathTrip >= 0 && trips[pathTrip] ? ` · path: ${data.routes[trips[pathTrip].r].n}` : "") +
     (qp.get("debug") ? ` · tiles:${tilesDrawn}` : "");
   requestAnimationFrame(frame);
 }
