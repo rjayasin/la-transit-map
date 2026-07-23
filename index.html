@@ -262,8 +262,16 @@ function zoomAt(cx, cy, f) {
 // A pinch arrives as a wheel event with ctrlKey set (Chrome, Firefox, Edge);
 // Safari sends its own gesture events instead, handled below, and no ctrl
 // wheel, so the two paths can't both fire. A real mouse wheel still zooms, as
-// it does in Maps.app: it arrives in coarse whole-number notches on one axis,
-// where a trackpad sends fine-grained deltas and usually some sideways drift.
+// it does in Maps.app — but telling one from a two-finger swipe takes a
+// different tell in each browser:
+//   - Firefox delivers a physical wheel in *line* units (deltaMode 1) and a
+//     trackpad in pixels, so the delta unit alone settles it.
+//   - Chrome and Safari deliver both in pixel units, and a mouse notch is not
+//     the coarse whole number it is elsewhere: macOS ramps the wheel with
+//     acceleration, so the first event of a scroll can be as small and
+//     fractional as any trackpad delta. What stays constant is the legacy
+//     wheelDeltaY — a physical notch steps in multiples of 120, where a
+//     trackpad reports arbitrary pixel-derived values.
 // The test is only applied to the first event of a gesture and then held for
 // the rest of it, because mid-swipe a hard flick can throw a delta as coarse
 // as any mouse notch, and a swipe that changed its mind halfway would be far
@@ -273,8 +281,11 @@ const WHEEL_NOTCH = 40;      // px of deltaY below which it can't be a mouse not
 const WHEEL_GAP = 150;       // ms of quiet that ends a gesture
 let wheelMode = null, wheelAt = 0;
 function isMouseWheel(e) {
-  return e.deltaMode !== 0 ||
-         (e.deltaX === 0 && Number.isInteger(e.deltaY) && Math.abs(e.deltaY) >= WHEEL_NOTCH);
+  if (e.deltaMode !== 0) return true;            // Firefox sends a wheel in lines
+  const wd = e.wheelDeltaY;                      // Blink/WebKit legacy delta: a
+  if (wd) return Math.abs(wd) % 120 === 0;       // notch steps by 120, a trackpad
+                                                 // reports arbitrary pixels
+  return e.deltaX === 0 && Number.isInteger(e.deltaY) && Math.abs(e.deltaY) >= WHEEL_NOTCH;
 }
 cv.addEventListener("wheel", e => {
   e.preventDefault();
