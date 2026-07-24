@@ -13,10 +13,20 @@ the stored shape — so the distance between the two *is* the deviation, in map
 pixels, with nothing inferred.
 
     drift   arc px of the route running further than --px (default 12, about a
-            line and a half wide) from the nearest stroke of its own ink. This
-            is the ranking: how much of the route is visibly off its line.
-    worst   the single furthest point, and where it is — paste it into
-            debug_line.py, or crop the tiles there.
+            line and a half wide) from its own ink, *while that ink is still
+            within reach* (--far, default 60). This is the ranking: the stretches
+            where the sheet does draw the route hereabouts and the path is not
+            on it.
+    beyond  arc px with no ink of the agency within --far at all. Nearly always
+            the sheet declining to draw a stretch the feed still runs — a DASH
+            loop the schematic ends at its terminal, a line leaving the sheet —
+            and there the warp is the best there is and no fault of the snap.
+            Counted apart from drift rather than ranked with it, because it was
+            drowning the real thing: LADOT's Pacoima DASH runs up to the Sylmar
+            Metrolink station, the sheet draws only the Pacoima loop, and that
+            read as 24% of the route being off its line.
+    worst   the single furthest point *within* reach, and where it is — paste it
+            into debug_line.py, or crop the tiles there.
 
 Points inside the Downtown call-out and under the title banner are dropped:
 the sheet draws no ink there by design, so distance to it means nothing.
@@ -55,7 +65,6 @@ Usage:
 """
 import argparse
 import json
-import math
 import os
 import sys
 
@@ -68,6 +77,9 @@ DRIFT_PX = 12.0        # px off the ink before a stretch counts as drifting;
                        # a drawn line is ~8 px wide at 4096, so this is a line
                        # and a half — visibly beside it, not merely fuzzy
 STEP = 4.0             # px between samples along the path, matching the snapper
+FAR_PX = 60.0          # px; with no ink of the agency this near, the sheet is
+                       # not drawing the route here — and the snapper could not
+                       # have reached it if it were, its widest cap being 40
 NOT_DRAWN = 60.0       # median px; past this the sheet isn't drawing this route
                        # at all (it runs off the edge, or the map omits it) and
                        # a drift number would be measuring the omission
@@ -194,24 +206,28 @@ def densify(pts, step=STEP):
     return np.c_[np.interp(t, cum, P[:, 0]), np.interp(t, cum, P[:, 1])]
 
 
-def measure(pts, tree, px):
-    """Where a path stands off its ink: (drift arc px, judged arc px, p90, max,
-    worst point, per-run spans). Returns None where nothing can be judged."""
+def measure(pts, tree, px, far=FAR_PX):
+    """Where a path stands off its ink. Returns a dict, or None where nothing
+    can be judged. `drift` counts only ground the sheet actually draws the route
+    on — see the header on `beyond`, which counts the rest."""
     import build_data as B
     P = densify(pts)
     if len(P) < 2 or tree is None:
         return None
-    ok = B.maskable(P)                     # on the sheet, outside the call-out
-    P = P[ok]
+    P = P[B.maskable(P)]                   # on the sheet, outside the call-out
     if len(P) < 2:
         return None
     d = tree.query(P)[0]
     arc = (len(P) - 1) * STEP
     if arc < MIN_ARC:
         return None
-    off = d > px
-    drift = float(off.sum()) * STEP
-    k = int(np.argmax(d))
+    near = d <= far                        # the sheet draws this route hereabouts
+    beyond = float((~near).sum()) * STEP
+    if near.sum() < 2:
+        return None
+    dn = d[near]
+    off = near & (d > px)
+    k = int(np.argmax(np.where(near, d, -1)))
     # the contiguous stretches that are off, so a route can be told "one bad
     # corner" from "wrong for half its length"
     runs, i = [], 0
@@ -225,8 +241,9 @@ def measure(pts, tree, px):
         runs.append((float((j - i + 1) * STEP), float(d[i:j + 1].max()),
                      tuple(P[i + int(np.argmax(d[i:j + 1]))])))
         i = j + 1
-    return (drift, arc, float(np.percentile(d, 90)), float(d[k]),
-            tuple(P[k]), float(np.median(d)), runs)
+    return {"drift": float(off.sum()) * STEP, "arc": arc, "beyond": beyond,
+            "p90": float(np.percentile(dn, 90)), "max": float(d[k]),
+            "worst": tuple(P[k]), "med": float(np.median(dn)), "runs": runs}
 
 
 def main():
@@ -237,6 +254,9 @@ def main():
     ap.add_argument("--top", type=int, default=25, help="rows to print (default 25)")
     ap.add_argument("--px", type=float, default=DRIFT_PX,
                     help=f"px off the line before it counts (default {DRIFT_PX:g})")
+    ap.add_argument("--far", type=float, default=FAR_PX,
+                    help=f"px with no ink this near counts as beyond the "
+                         f"drawing, not as drift (default {FAR_PX:g})")
     ap.add_argument("--ink", action="store_true",
                     help="only routes the PDF's own strokes can settle")
     ap.add_argument("--min-trips", type=int, default=1,
@@ -279,21 +299,23 @@ def main():
         tree, src = tree_for(sysname, route["n"], cache, rail_trees)
         if tree is None or (a.ink and src != "ink"):
             continue
-        m = measure(pairs(d["shapes"][si]), tree, a.px)
+        m = measure(pairs(d["shapes"][si]), tree, a.px, a.far)
         if m is None:
             continue
-        drift, arc, p90, mx, worst, med, runs = m
         key = (route["n"], sysname)
         e = per_route.setdefault(key, {"n": route["n"], "sy": sysname, "src": src,
                                        "trips": 0, "drift": 0.0, "arc": 0.0,
-                                       "p90": 0.0, "max": 0.0, "worst": None,
-                                       "med": 0.0, "runs": [], "shape": None})
+                                       "beyond": 0.0, "p90": 0.0, "max": 0.0,
+                                       "worst": None, "med": 0.0, "runs": [],
+                                       "shape": None})
         e["trips"] += trips_per_shape.get(si, 0)
-        if drift > e["drift"]:
-            e.update(drift=drift, arc=arc, p90=p90, med=med, runs=runs, shape=si)
-        if mx > e["max"]:
-            e["max"] = mx
-            e["worst"] = worst
+        if m["drift"] > e["drift"] or e["shape"] is None:
+            e.update(drift=m["drift"], arc=m["arc"], p90=m["p90"], med=m["med"],
+                     runs=m["runs"], shape=si)
+        e["beyond"] = max(e["beyond"], m["beyond"])
+        if m["max"] > e["max"]:
+            e["max"] = m["max"]
+            e["worst"] = m["worst"]
 
     for e in per_route.values():
         if e["trips"] < a.min_trips:
@@ -310,6 +332,9 @@ def main():
             print(f"  {r['drift']:.0f} px of {r['arc']:.0f} drift over {a.px:g} px "
                   f"({100 * r['drift'] / max(1, r['arc']):.1f}%)   "
                   f"median {r['med']:.1f}  p90 {r['p90']:.1f}  max {r['max']:.1f}")
+            if r["beyond"]:
+                print(f"  {r['beyond']:.0f} px beyond the drawing "
+                      f"(no {r['sy']} ink within {a.far:g} px) — not counted as drift")
             for length, mx, xy in sorted(r["runs"], key=lambda x: -x[0])[:12]:
                 print(f"   {length:6.0f} px off, worst {mx:5.1f} px "
                       f"at ({xy[0]:.0f},{xy[1]:.0f})")
@@ -319,23 +344,26 @@ def main():
         import csv
         w = csv.writer(sys.stdout)
         w.writerow(["route", "system", "src", "trips", "drift_px", "arc_px",
-                    "pct", "median", "p90", "max", "worst_x", "worst_y"])
+                    "beyond_px", "pct", "median", "p90", "max",
+                    "worst_x", "worst_y"])
         for r in rows:
             w.writerow([r["n"], r["sy"], r["src"], r["trips"], round(r["drift"]),
-                        round(r["arc"]), round(100 * r["drift"] / max(1, r["arc"]), 1),
+                        round(r["arc"]), round(r["beyond"]),
+                        round(100 * r["drift"] / max(1, r["arc"]), 1),
                         round(r["med"], 1), round(r["p90"], 1), round(r["max"], 1),
                         round(r["worst"][0]), round(r["worst"][1])])
         return
 
     print(f"{'rank':>4}  {'route':<7} {'system':<22} {'src':<4} {'trips':>5} "
-          f"{'drift':>7} {'of':>6} {'pct':>5} {'p90':>6} {'max':>6}  worst-location")
+          f"{'drift':>7} {'of':>6} {'pct':>5} {'beyond':>7} {'p90':>6} {'max':>6}"
+          f"  worst-location")
     for i, r in enumerate(rows[:a.top], 1):
         w = f"({r['worst'][0]:.0f},{r['worst'][1]:.0f})" if r["worst"] else "-"
         flag = "  <-- suspect" if r["drift"] > 150 else ""
         print(f"{i:>4}  {r['n']:<7} {r['sy'][:22]:<22} {r['src']:<4} {r['trips']:>5} "
               f"{r['drift']:>7.0f} {r['arc']:>6.0f} "
               f"{100 * r['drift'] / max(1, r['arc']):>4.0f}% "
-              f"{r['p90']:>6.1f} {r['max']:>6.1f}  {w}{flag}")
+              f"{r['beyond']:>7.0f} {r['p90']:>6.1f} {r['max']:>6.1f}  {w}{flag}")
     ink = sum(1 for r in rows if r["src"] == "ink")
     print(f"\n{len(rows)} routes measured ({ink} against the PDF's strokes, "
           f"{len(rows) - ink} against a colour mask — see the header).")
