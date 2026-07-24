@@ -1139,6 +1139,98 @@ OVERRIDE_PATHS = {
 }
 
 
+DESPIKE_WIN = 3         # densified points (~12 px each side), matching path_check
+DESPIKE_ANGLE = 110.0   # deg; sharper than a square street corner
+DESPIKE_GAP = 10.0      # px; the path returning this close to where it was a
+                        # window ago has doubled back on itself
+DESPIKE_MAX = 160.0     # px of arc; a doubling-back longer than this is a real
+                        # loop, not a snapping sliver, and is left alone
+DESPIKE_CHORD = 34.0    # px; and its two ends must land this close together —
+                        # a sliver leaves the line and returns beside where it
+                        # left, so straightening it barely moves anything, while
+                        # a run whose ends are far apart spans a real bend that
+                        # straightening would cut a corner off
+
+
+def spike_penalty(pts, step=2.0, win=12.0):
+    """Total turning a polyline does beyond a square corner at points where it
+    doubles back on itself, measured on a uniform resampling so it is blind to
+    vertex spacing — the same currency scripts/path_check.py ranks on. Cheap
+    enough to run on every shape twice, so despike can be kept only when it
+    lowers this on the *stored* (simplified) shape, never on faith."""
+    P = np.asarray(pts, dtype=float)
+    seg = np.hypot(*np.diff(P, axis=0).T)
+    cum = np.concatenate([[0], np.cumsum(seg)])
+    if cum[-1] < 2 * step:
+        return 0.0
+    t = np.arange(0, cum[-1], step)
+    R = np.c_[np.interp(t, cum, P[:, 0]), np.interp(t, cum, P[:, 1])]
+    n = len(R)
+    w = max(1, int(round(win / step)))
+    if n < 2 * w + 1:
+        return 0.0
+    a = R[w:-w] - R[:-2 * w]
+    b = R[2 * w:] - R[w:-w]
+    na, nb = np.hypot(*a.T), np.hypot(*b.T)
+    ang = np.abs(np.degrees(np.arctan2(a[:, 0] * b[:, 1] - a[:, 1] * b[:, 0],
+                                       a[:, 0] * b[:, 0] + a[:, 1] * b[:, 1])))
+    gap = np.hypot(*(R[2 * w:] - R[:-2 * w]).T)
+    # Score only where path_check would: the doubling-back turns, on the drawn
+    # map, outside the ghosted Downtown call-out. Matching it exactly is what
+    # lets the caller's gate promise no shape scores worse there afterwards.
+    mid = R[w:-w]
+    onmap = ((mid[:, 0] >= 0) & (mid[:, 0] <= 4096)
+             & (mid[:, 1] >= 708) & (mid[:, 1] <= 4139)
+             & ~np.asarray(inside_callout(mid), dtype=bool))
+    doubling = (na > 1e-6) & (nb > 1e-6) & (gap < 12.0) & onmap
+    return float(np.where(doubling, np.maximum(0.0, ang - 92.0), 0.0).sum())
+
+
+def despike(full):
+    """Straighten thin retrace spikes out of a snapped polyline.
+
+    The snapper sometimes crushes a sharp deviation into a hairpin that darts
+    out and straight back on itself within a dozen px — a shape no drawn line
+    makes. Each such run is replaced by a straight line between the good points
+    just outside it, which removes the dart without moving those points, so no
+    new corner appears at the join. Only genuine doubling-back is touched: a
+    square street corner turns without returning (its window stays open) and a
+    real terminal loop keeps its two arms a block apart, so both are left as
+    they are, as is any reversal longer than a snapping sliver could be."""
+    n = len(full)
+    w = DESPIKE_WIN
+    if n < 4 * w:
+        return full
+    a = full[w:-w] - full[:-2 * w]
+    b = full[2 * w:] - full[w:-w]
+    na, nb = np.hypot(*a.T), np.hypot(*b.T)
+    ang = np.abs(np.degrees(np.arctan2(a[:, 0] * b[:, 1] - a[:, 1] * b[:, 0],
+                                       a[:, 0] * b[:, 0] + a[:, 1] * b[:, 1])))
+    gap = np.hypot(*(full[2 * w:] - full[:-2 * w]).T)
+    hit = (na > 1e-6) & (nb > 1e-6) & (ang > DESPIKE_ANGLE) & (gap < DESPIKE_GAP)
+    idx = np.nonzero(hit)[0] + w          # back to full-index space
+    if not len(idx):
+        return full
+    seg = np.hypot(*np.diff(full, axis=0).T)
+    cum = np.concatenate([[0], np.cumsum(seg)])
+    out = full.copy()
+    runs, s, p = [], idx[0], idx[0]
+    for i in idx[1:]:
+        if i <= p + w:
+            p = i
+        else:
+            runs.append((s, p)); s = p = i
+    runs.append((s, p))
+    for s, p in runs:
+        lo, hi = max(0, s - w), min(n - 1, p + w)
+        if (hi - lo < 2 or cum[hi] - cum[lo] > DESPIKE_MAX
+                or np.hypot(*(full[hi] - full[lo])) > DESPIKE_CHORD):
+            continue
+        t = np.linspace(0, 1, hi - lo + 1)[:, None]
+        out[lo:hi + 1] = full[lo] * (1 - t) + full[hi] * t
+    return out
+
+
 def apply_override(full, base, spec):
     """Splice a hand-drawn corridor into a snapped shape.
 
@@ -2443,6 +2535,18 @@ def main():
             # stored shape — rail tracks the artwork closely enough not to care.
             base = np.array(densify(pts, 4.0), dtype=float)
             full = np.asarray(out_pts, dtype=float) if out_pts is not None else base
+            if out_pts is not None and len(full) == len(base):
+                # Straightening one spike can leave a sharper residual where it
+                # met a bend, and the simplify() below can turn a helped dense
+                # path into a worse stored one, so the despiked shape is kept
+                # only when it lowers the penalty on the *stored* geometry the
+                # animation actually plays. That makes the pass strictly a
+                # cleanup: no shape it touches comes out worse than the snapper
+                # left it.
+                cand = despike(full)
+                if (cand is not full
+                        and spike_penalty(simplify(cand)) < spike_penalty(simplify(full))):
+                    full = cand
             override = OVERRIDE_PATHS.get((feed, (rid or "").split("-")[0]))
             if override is not None and len(full) == len(base):
                 full = np.asarray(apply_override(full, base, override), dtype=float)

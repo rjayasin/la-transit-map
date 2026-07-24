@@ -174,6 +174,17 @@ python3 -m http.server 8741
     better: the warp lags by half the distance between G Line stations, so the
     alignment minimizing total offset is the one putting every station on the
     platform *before* its own, and that is the one it found.
+  - A snapped line is finally *despiked*. Where the snapper crushes a sharp
+    deviation — a bus pulling into a transit centre, a jog at a terminal, a
+    badge sitting off to one side — into a hairpin that darts out and straight
+    back on itself within a dozen px, that sliver is straightened between the
+    good points either side of it. Only genuine doubling-back is touched: a
+    square street corner turns without returning, and a real terminal loop keeps
+    its arms a block apart, so neither is disturbed. And the straightened shape
+    is kept only when it scores fewer of these hairpins (by the same measure
+    `scripts/path_check.py` ranks on) than the snapper left — so the pass is
+    strictly a cleanup, and no shape it touches comes out worse. It settles 441
+    shapes and lifts the fleet's total hairpin turning by 28%.
 - **Rail platforms** — where a train halts is the white marker the sheet draws,
   not the warped stop, and matching each stop to its nearest one double-books
   platforms wherever the warp lags the artwork by more than the stops are
