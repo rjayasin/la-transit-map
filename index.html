@@ -97,7 +97,7 @@ const FADE_SEC = 0.16;  // how long a vehicle takes to fade on appear/disappear
 let sprites = [];       // per route: {img, w, h}
 let simT = 0;           // seconds since midnight
 let playing = true;
-let pathTrip = -1;      // index into trips whose path is shown while paused, or -1
+let pathTrip = -1;      // index into trips whose path is shown, or -1
 // The sheet already draws every route in its own ink, so tracing a path in that
 // same color loses it in the line underneath — and which line the vehicle is on
 // is the whole question. A fixed bright stroke reads against the map's muted
@@ -118,7 +118,6 @@ if (qp.get("paused")) { playing = false; playBtn.textContent = "▶"; }
 
 function togglePlay() {
   playing = !playing; playBtn.textContent = playing ? "⏸" : "▶";
-  if (playing) pathTrip = -1;   // the path inspector lives only while paused
 }
 playBtn.onclick = togglePlay;
 scrub.oninput = () => { simT = +scrub.value; };
@@ -867,10 +866,12 @@ function pickVehicle(cx, cy) {
   return best;
 }
 
-// path inspector: while paused, tapping a vehicle shows the line it runs;
-// tapping another switches to it, tapping empty space hides the path
+// path inspector: tapping a vehicle shows the line it runs; tapping another
+// switches to it, tapping empty space hides the path. The selection outlives a
+// pause in both directions — pressing play keeps the path up, which is what
+// makes it useful for watching a vehicle run its variant rather than only for
+// reading a frozen one. Only another tap (or filtering the system out) clears it.
 function handleTap(cx, cy) {
-  if (playing) return;
   pathTrip = pickVehicle(cx, cy);
 }
 
@@ -1292,9 +1293,9 @@ function drawFrame(now) {
   const mm = String(Math.floor(simT % 3600 / 60)).padStart(2, "0");
   ctx.fillText(`${hh}:${mm}`, 240, 3590);
 
-  // path inspector: while paused, stroke the whole line the selected vehicle
-  // runs (and its downtown mirror), so its variant reads against the artwork
-  if (!playing && pathTrip >= 0) {
+  // path inspector: stroke the whole line the selected vehicle runs (and its
+  // downtown mirror), so its variant reads against the artwork
+  if (pathTrip >= 0) {
     const tr = trips[pathTrip], pat = tr && data.patterns[tr.p];
     if (pat && sysOn[data.routes[tr.r].sy]) {
       ctx.lineJoin = ctx.lineCap = "round";
