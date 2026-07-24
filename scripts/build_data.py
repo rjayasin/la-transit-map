@@ -1357,6 +1357,17 @@ def unfold(full, base, badges=()):
     the folds already taken, not against the snap, so two that each look
     harmless can't between them strand a badge neither would have alone.
 
+    The ink test `undetour` asks (see `_ink_vouches`) does *not* belong here,
+    though it looks as though it should. Measured over every ink-snapped shape
+    on the sheet it left total drift from the drawn lines unchanged and cost 594
+    points of path_check, all of it on LADOT. The asymmetry is in what replaces
+    a fold. An interior fold collapses to a chord between two points already
+    within FOLD_GAP of each other, so the replacement is a few px long and sits
+    on whatever ink its ends sit on — the test can never fire there. An end
+    fold's replacement is a whole leg, and one leg reads as marginally further
+    from the strokes than the doubled-over pair it replaces, which is enough to
+    trip a 5 px threshold and veto precisely the fixes this pass exists to make.
+
     An interior fold is replaced by the straight line between the points either
     side, which are left where they are, so nothing outside the fold moves. A
     fold at an end is different: what it doubles over is the run out to the
