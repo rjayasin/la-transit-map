@@ -1923,6 +1923,19 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
     so this can only refine within the corridor the wide passes chose, never
     hop to the next one.
 
+    Raising that cap is a trap, and drift_check will recommend it. Swept at 14,
+    18 and 22, every value cuts total distance from the drawn lines — 18 takes
+    it down 6% — because most stretches really are a few px short of their ink
+    and a longer reach closes the gap. It also breaks routes outright. The cap
+    bounds which points may *contribute* a displacement, not how far the pass
+    may carry one: the field is interpolated across the points that contribute
+    nothing and then smoothed, so admitting more contributors lets a stretch
+    with no ink of its own be dragged by its neighbours. At 18, Metro 169 comes
+    off Saticoy and runs 70 px north of it across blank page for a third of the
+    Valley — a worse defect than the 24 px diagonal the change was aimed at,
+    and invisible in an aggregate that improved. Judge a change like this on
+    routes, not on the total.
+
     speckled: whether the tree came out of the raster, and so needs the final
     landing guarded against stray pixels. A tree of PDF strokes does not."""
     P = np.array(densify(pts, 4.0), dtype=float)
