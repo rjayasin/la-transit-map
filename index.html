@@ -278,16 +278,43 @@ function evictTiles(budget) {
   }
 }
 
+// A tile that failed used to stay failed for as long as the view held it, and
+// that is far more expensive than the missing square it looks like. levelReady()
+// is all-or-nothing, so one stuck tile makes its level permanently un-ready, and
+// two things follow every single recompose: tilesCover() stays false, so the
+// 17-megapixel base PNG is redrawn underneath — scaled by DPR*view.k, which is
+// 7.3x at the zoom this froze at — and drawTiles() never collapses to the finest
+// tier, so all three levels are drawn instead of one. None of that shows up as a
+// slow frame, because canvas draws are recorded on the main thread and
+// rasterized off it: the loop stays fast and clean while the compositor wears
+// it, which is exactly the signature these freezes report (frameErrors 0,
+// slowFrames 0, fps 0). And it cannot heal, because getTile() re-inserts the
+// tile on every access, making the broken one the *most* recently used tile in
+// the cache and so the last thing eviction would ever reach.
+//
+// So a failure is retried, with a delay and a small ceiling on attempts — which
+// was the whole point of not retrying, and is kept: a genuinely missing file
+// gives up after TILE_TRIES and cannot become a fetch storm.
+const TILE_RETRY_MS = 4000;    // before a failed tile is asked for again
+const TILE_TRIES = 3;          // attempts before it is left alone for good
+
 function getTile(level, c, r) {
   const key = `${level}/${c}_${r}`;
   let t = tileCache.get(key);
   if (t) {                                // re-insert: Map iterates in insertion
     tileCache.delete(key);                // order, so this is the LRU bookkeeping
     tileCache.set(key, t);
+    if (t.state === "error" && t.tries < TILE_TRIES
+        && performance.now() - t.errAt >= TILE_RETRY_MS) {
+      t.state = "queued";
+      tileQueue.push(t);
+      pumpTiles();
+    }
     return t;
   }
   evictTiles(tileBudget());
-  t = { level, c, r, key, bmp: null, ctl: null, state: "queued", dead: false };
+  t = { level, c, r, key, bmp: null, ctl: null, state: "queued", dead: false,
+        tries: 0, errAt: 0 };
   tileCache.set(key, t);
   tileQueue.push(t);
   pumpTiles();
@@ -328,10 +355,11 @@ async function fetchTile(t) {
     tileDecodes++;
     bgDirty = true;                       // a newly arrived tile must repaint
   } catch (err) {
-    // An evicted tile aborts its own fetch, so only a real failure counts. A
-    // tile that failed stays in the cache as an error rather than retrying, so
-    // one missing file can't turn into a fetch storm; eviction clears it.
-    if (!t.dead) { t.state = "error"; tileErrors++; }
+    // An evicted tile aborts its own fetch, so only a real failure counts. The
+    // tile stays in the cache as an error and getTile() retries it a few times
+    // on a delay, so a blip heals instead of pinning the base PNG under every
+    // recompose for as long as the view holds the tile.
+    if (!t.dead) { t.state = "error"; t.errAt = performance.now(); t.tries++; tileErrors++; }
   } finally {
     tileInflight--;
     t.ctl = null;
@@ -899,6 +927,23 @@ const DEBUG = qp.has("debug");
 const SLOW_FRAME_MS = 500;   // a frame this long is thrashing, not drawing
 let frameErrors = 0, slowFrames = 0, lastSlowLog = -1e9;
 let frames = 0, lastFrameAt = performance.now();
+// `fps: 0` has now been reported for two different failures and one non-failure,
+// and the snapshot could not tell them apart, because a stalled compositor and a
+// backgrounded tab produce the identical reading: rAF stops, timers keep firing.
+// Both were guessed at from the surrounding numbers instead of being stated. The
+// gap between rAF callbacks and the visibility of the document say it outright,
+// and neither costs anything, so both are kept always rather than only under
+// ?trace — where they existed already and were no use, the freeze never having
+// been caught under a flag someone had to set in advance.
+let lastRafAt = 0, rafGapMax = 0;
+let visibleSince = performance.now(), hiddenInWindow = document.hidden;
+addEventListener("visibilitychange", () => {
+  visibleSince = performance.now();
+  // A tab hidden and shown again *between* two snapshots reads as a stall in
+  // both fps and rafGapMax while being visible at both ends, so the flag has to
+  // survive the round trip rather than being sampled at the end of it.
+  if (document.hidden) hiddenInWindow = true;
+}, true);
 // Baselines for the per-second rates below, refreshed by every snapshot: the
 // rates a snapshot reports are since the *previous* snapshot, whoever took it.
 let statsAt = 0, statsFrames = 0, statsComposes = 0, statsEvictions = 0, statsDecodes = 0;
@@ -918,6 +963,16 @@ function resourceStats() {
     // failing to put them on screen. The old log couldn't tell those apart:
     // it reported no errors and no slow frames for both.
     fps: rate(frames - statsFrames), sinceFrameMs: Math.round(now - lastFrameAt),
+    // Read these next, and only then the rest. `hidden` or `hiddenSinceLast`
+    // means the browser stopped the loop on purpose at some point in this
+    // interval and there is no fault here at all — that alone accounts for
+    // fps 0. Both false, with rafGapMax in the seconds, is the compositor
+    // failing to call a loop that is ready to run: the failure this page keeps
+    // hitting, and a different thing from a loop that ran slowly, which shows up
+    // as slowFrames instead. visibilityAgeMs dates the last change either way.
+    hidden: document.hidden, hiddenSinceLast: hiddenInWindow,
+    visibilityAgeMs: Math.round(now - visibleSince),
+    rafGapMax: Math.round(rafGapMax),
     // tilesDrawn/tileDemand are per frame: if demand ever approaches the budget
     // the cache is thrashing, and evictions will be climbing by thousands/sec.
     tilesCached: tileCache.size, tilesDrawn, tileDemand: Math.round(tileDemand),
@@ -945,6 +1000,7 @@ function resourceStats() {
   s.imageMB = +(s.tileMB + s.bgMB + s.mapMB + s.spriteMB + s.canvasMB).toFixed(1);
   statsAt = now; statsFrames = frames; statsComposes = bgComposes;
   statsEvictions = tileEvictions; statsDecodes = tileDecodes;
+  rafGapMax = 0; hiddenInWindow = document.hidden;
   return s;
 }
 
@@ -1031,17 +1087,18 @@ const TRACE_KEEP = 240;       // records held for the localStorage fallback
 // sessions whose clocks both start at zero and reads the seam as a fault.
 const TRACE_SID = Math.random().toString(36).slice(2, 10);
 let traceSeq = 0, traceRing = [], traceWorker = null;
-let frameMs = [], rafGaps = [], lastRafAt = 0;
+let frameMs = [], rafGaps = [];   // lastRafAt lives with the diagnostics above
 let longTasks = 0, longTaskMs = 0, evWheel = 0, evPointer = 0, canvasesMade = 0;
 let lastWall = Date.now(), lastMono = performance.now(), lastTick = performance.now();
 
 // Called from frame(). Two numbers, no allocation beyond the push: the cost of
 // the frame itself, and the gap since the previous one — which is the only way
-// to see rAF being throttled or dropped, as opposed to running slowly.
-function traceFrame(at, cost) {
+// to see rAF being throttled or dropped, as opposed to running slowly. Both are
+// measured in frame() now, since the snapshot reports the gap too; this only
+// keeps the distribution the trace records over each interval.
+function traceFrame(cost, gap) {
   if (!TRACE) return;
-  if (lastRafAt) rafGaps.push(at - lastRafAt);
-  lastRafAt = at;
+  if (gap) rafGaps.push(gap);
   frameMs.push(cost);
 }
 
@@ -1261,14 +1318,20 @@ window.transitTrace = () => {
 function frame(now) {
   requestAnimationFrame(frame);
   const t0 = performance.now();
-  frames++; lastFrameAt = t0;      // liveness, so a snapshot can report real fps
+  frames++;
+  // Liveness, so a snapshot can report real fps — and the gap since the previous
+  // callback, which is the one number that separates a loop running slowly from
+  // a loop not being called at all.
+  const gap = lastRafAt ? t0 - lastRafAt : 0;
+  if (gap > rafGapMax) rafGapMax = gap;
+  lastRafAt = lastFrameAt = t0;
   try {
     drawFrame(now);
   } catch (err) {
     noteFrameError(err);
   }
   const cost = performance.now() - t0;
-  traceFrame(t0, cost);
+  traceFrame(cost, gap);
   if (cost > SLOW_FRAME_MS) noteSlowFrame(cost, t0);
 }
 
