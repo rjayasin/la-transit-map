@@ -2393,7 +2393,21 @@ def main():
                 if feed in BADGE_FILLS:
                     anchor_cols = good + [BADGE_FILLS[feed]]
                     anchor_tree = mask_tree(anchor_cols, 30.0)
-                anc = branch_anchors(route_anchors(toks, anchor_tree, colors=anchor_cols),
+                # The colour gate below rejects a badge whose chip is better
+                # explained by another agency's colour than by this one's — but
+                # an agency's *own* colours must never play that rival. `good` is
+                # the green refined off the drawn lines, and it drifts: foothill's
+                # came out (77,102,85), a dozen px from the (62,100,78) seed it
+                # started at. That seed is still in the rival palette, and it sits
+                # 6 px from the "SS" chip while `good` sits 22 px away — so it out-
+                # explains `good` and the gate throws the badge out. It cost the
+                # Silver Streak 16 of its 18 badges, and with nothing left to pin
+                # its 57-px-north warp the line sat up on Valley Blvd instead of on
+                # its own busway. Folding the seeds into the own-set keeps them off
+                # the rival list; a genuinely foreign chip is still far from every
+                # one of them and still rejected.
+                gate_cols = anchor_cols + LEGEND_SEEDS.get(feed, [])
+                anc = branch_anchors(route_anchors(toks, anchor_tree, colors=gate_cols),
                                      sid, route_sids[rid], kd_for)
                 anchored += bool(anc)
                 out_pts = snap_coherent(pts, agency_tree, anchors=anc)
