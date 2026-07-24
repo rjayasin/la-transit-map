@@ -985,7 +985,7 @@ const TRACE_KEEP = 240;       // records held for the localStorage fallback
 const TRACE_SID = Math.random().toString(36).slice(2, 10);
 let traceSeq = 0, traceRing = [], traceWorker = null;
 let frameMs = [], rafGaps = [], lastRafAt = 0;
-let longTasks = 0, longTaskMs = 0, evWheel = 0, evPointer = 0;
+let longTasks = 0, longTaskMs = 0, evWheel = 0, evPointer = 0, canvasesMade = 0;
 let lastWall = Date.now(), lastMono = performance.now(), lastTick = performance.now();
 
 // Called from frame(). Two numbers, no allocation beyond the push: the cost of
@@ -1009,8 +1009,15 @@ const TRACE_WORKER_SRC = `
 // posts everything it has to the recorder — including, and especially, while
 // the main thread is not answering.
 let last = null, lastAt = 0, stalledSince = 0, queue = [], busy = false, tick = 0;
+let hidden = false, throttledAt = 0;
 const STALL_MS = 1600;        // silence longer than three sample periods
-function push(r) { r.sid = SID; queue.push(r); if (queue.length > 600) queue.splice(0, queue.length - 600); }
+const THROTTLE_EVERY = 15000; // a backgrounded tab is quiet on purpose; say so rarely
+function push(r) {
+  if (!r) return;               // a throttle report suppressed by its rate limit
+  r.sid = SID;
+  queue.push(r);
+  if (queue.length > 600) queue.splice(0, queue.length - 600);
+}
 async function flush() {
   if (busy || !queue.length) return;
   busy = true;
@@ -1023,9 +1030,12 @@ async function flush() {
 }
 onmessage = e => {
   const m = e.data;
+  if (typeof m.hidden === "boolean") hidden = m.hidden;
+  if (m.t === "vis") return;      // a visibility change, not a sample
   lastAt = performance.now();
   if (stalledSince) {
-    push({ t: "resume", at: Date.now(), stalledMs: Math.round(lastAt - stalledSince) });
+    push({ t: "resume", at: Date.now(), stalledMs: Math.round(lastAt - stalledSince),
+           hidden });
     stalledSince = 0;
   }
   last = m;
@@ -1041,8 +1051,17 @@ setInterval(() => {
   const gap = lastAt ? now - lastAt : 0;
   if (lastAt && gap > STALL_MS) {
     if (!stalledSince) stalledSince = lastAt;
-    push({ t: "stall", at: Date.now(), silentMs: Math.round(gap),
-           workerLateMs: late, last });
+    // A hidden tab is quiet because the browser clamped its timers, not because
+    // anything is wrong: Chrome holds a background tab to one wake a second and,
+    // after a few minutes, to one a minute. Measured on this page, a backgrounded
+    // tab produced 83 "stalls" up to 12.8 s long with the worker never once late
+    // — every one of them an artifact. Calling that a blocked main thread would
+    // bury a real freeze under noise, so it is reported as what it is.
+    push(hidden
+      ? (now - throttledAt < THROTTLE_EVERY ? null : (throttledAt = now,
+          { t: "throttled", at: Date.now(), silentMs: Math.round(gap), hidden: true }))
+      : { t: "stall", at: Date.now(), silentMs: Math.round(gap),
+          workerLateMs: late, hidden: false, last });
   } else if (late > 250) {
     push({ t: "workerLate", at: Date.now(), lateMs: late });
   }
@@ -1076,9 +1095,13 @@ function traceSample(kind) {
     longTasks, longTaskMs: Math.round(longTaskMs),
     wheel: evWheel, pointer: evPointer,
     hidden: document.hidden, playing, speed: +speedSel.value,
-    // Canvases are counted from the DOM rather than from our own bookkeeping,
-    // so a leak the sprite cache doesn't know about still shows up.
-    canvases: document.getElementsByTagName("canvas").length,
+    // Canvases are counted as they are *made*, not as they are found. A sprite
+    // canvas is never appended to the document, so the DOM knows nothing about
+    // it — the DOM count read 1 on a page holding 324 of them. Creation is the
+    // number that matters anyway: this page has frozen once before because the
+    // sprite cache built a fresh canvas per zoom step and their buffers outran
+    // collection, and that shows up here as canvasesMade climbing without end.
+    canvasesMade,
     ...s,
   };
   if (performance.memory) {                 // Chrome: JS heap only, but free
@@ -1111,6 +1134,11 @@ if (TRACE) {
   // freeze that happened during one.
   addEventListener("wheel", () => evWheel++, { passive: true, capture: true });
   addEventListener("pointermove", () => evPointer++, { passive: true, capture: true });
+  const makeEl = document.createElement.bind(document);
+  document.createElement = (tag, ...rest) => {
+    if (String(tag).toLowerCase() === "canvas") canvasesMade++;
+    return makeEl(tag, ...rest);
+  };
   try {
     new PerformanceObserver(list => {       // Chrome; Firefox reports no longtask
       for (const e of list.getEntries()) { longTasks++; longTaskMs += e.duration; }
@@ -1123,6 +1151,11 @@ if (TRACE) {
     cores: navigator.hardwareConcurrency, deviceMemoryGB: navigator.deviceMemory || null,
   });
   setInterval(() => traceSample("sample"), TRACE_MS);
+  // Tell the worker the moment visibility changes rather than letting it learn
+  // from the next sample: going hidden is exactly when the samples stop, so the
+  // news has to travel ahead of the silence it explains.
+  addEventListener("visibilitychange", () =>
+    traceRecord({ t: "vis", at: Date.now(), hidden: document.hidden }), true);
   // The tail of the record survives the tab even with no server listening.
   setInterval(() => {
     try { localStorage.setItem(TRACE_KEY, JSON.stringify(traceRing.slice(-TRACE_KEEP))); }
