@@ -67,6 +67,20 @@ python3 -m http.server 8741
     error varies slowly enough that one vector covers every leg. The slide is
     charged for its length and refused unless it clears most of the residual,
     so it only decides which badge speaks for which leg.
+  - Metrolink carries no badge anywhere on the sheet, and its lines share one
+    ink and one crosshatched livery, so where two run parallel the artwork
+    alone cannot say which is which: through Vernon the Orange County and
+    Riverside lines are drawn 26 px apart on the same heading, near enough that
+    the warp put the OC's schedule closer to the Riverside track than to its
+    own, and the snap left it there — under the "VERNON" label, on the line the
+    sheet labels "RIVERSIDE LINE". But the sheet *does* say which is which,
+    and in the words GTFS names the route with: it writes each railroad's name
+    along it, repeated down its length, and metrolink's route_id is "Orange
+    County Line". Those names anchor the way a numbered route's badges do,
+    within 6-9 px of their own track. The 91/Perris Valley borrows the Orange
+    County Line's name, sharing its track for the whole of its length here and
+    drawn as that one line; the Inland Empire-Orange County line borrows
+    nothing, coming no nearer than 467 px to any label on the sheet.
   - A route's badges cover the whole route, but a shape is one *variant* of
     it, so where a route forks, the badges on one fork are still inside the
     gate of a variant taking the other and drag it bodily across. Metro 487's
@@ -155,6 +169,15 @@ python3 -m http.server 8741
   aligned in order instead — one to one, and however far the warp has slid.
   Stops whose platform isn't drawn, which is most of downtown under the
   call-out panel, fall in the gaps and keep the warp.
+- **Downtown inset** — a route reaching downtown is mirrored into the call-out
+  panel, and which stops belong to which mirrored run is decided by comparing
+  distances along the main shape. Both sides of that comparison go through one
+  measure, because two callers measuring differently is a mismatch that only
+  shows when the snap moves: the runs used to be placed by projecting onto the
+  snapped shape while the stops were carried over from the warp, and a
+  Metrolink shape shifting 28 px inside the call-out — where nothing is drawn
+  and the geometry is the warp's own noise — was enough to put Union Station
+  outside its own run and drop every Metrolink line out of the panel.
 - **Rendering** (`index.html`, vanilla canvas) — each vehicle is a labeled
   circle in the color the map draws its line in, so every sprite matches the
   artwork it rides on. Trains pull away, run, and brake to a stand at each
