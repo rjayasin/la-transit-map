@@ -1382,6 +1382,170 @@ def unfold(full, base, badges=()):
     return out
 
 
+# ---- detours: the snapper riding a neighbour's ink and coming back ----------
+# The mask a bus route snaps onto is the whole *agency's* drawn lines — one
+# undifferentiated blob of ink per legend colour (see `agency_tree` in main).
+# It cannot tell Montebello 20 from Montebello 10. That is fine while a route's
+# own line is drawn, because its own line is the nearest ink. It stops being
+# fine where the sheet paints something over that line: a place label, a station
+# marker, another route crossing on top. The ink under the label is simply
+# missing from the mask, so the nearest ink for that stretch is a *sibling
+# route*, and the smoothed displacement field walks the path over onto it and
+# back — off the line by the Montebello/Commerce label, off it again in the
+# label field by Whittier Narrows.
+#
+# Nothing already in the build sees this. `maskable` covers the opposite case,
+# where the sheet drew nothing at all and the warp is rightly kept; here there
+# is plenty of ink and it belongs to the wrong line. And the cleanup ballot is
+# scored by `spike_penalty`, which charges only turning that doubles back
+# within 12 px — the snapper's 61-point smoothing turns an occlusion into a
+# *smooth bulge*, which has no sharp turn anywhere in it. Foothill 493 scores a
+# flat 0 there while visibly leaving its line.
+#
+# What does see it is the warp the snapper started from. `base` and `full` are
+# the same points before and after snapping, index for index, and the global
+# poly2 fit is good to ~11 px median. So a stretch where `full` leaves `base`
+# far and comes back is the snapper having found ink that the warp says is not
+# this route's. The discriminators against a *legitimate* correction are that
+# it returns (a real fix to a bad warp stays moved), that it is bounded in arc
+# (Metro 690 is correctly carried 190 px onto Foothill Blvd for a third of its
+# length), and that no badge vouches for it — a route-number chip inside the
+# excursion means the sheet really does print the line out there.
+DETOUR_MIN = 13.0     # px *past the sustained correction*; under this the
+                      # snapper is refining, not relocating
+DETOUR_ENDS = 7.0     # px; the run has to start and finish back on the
+                      # correction, which separates an excursion from a fix
+DETOUR_PEAK = 21.0    # px; and reach this far past it at its worst, or it is
+                      # inside the warp's own error and not worth charging
+DETOUR_ARC = 650.0    # px of arc. Longer than this the snapper is not detouring
+                      # round an obstruction, it is tracking something for a
+                      # sustained stretch, and the badges are the better judge
+DETOUR_WEIGHT = float(os.environ.get("DETOUR_WEIGHT", 6.0))
+                      # degrees of spurious turning that one px of excursion is
+                      # worth, for the ballot in main(). The two measures are in
+                      # different units and the ballot has to add them: a spike
+                      # score runs to the hundreds while an excursion is tens of
+                      # px, so unweighted the detour term is noise and the pass
+                      # that fixes it never wins — Montebello 20's undetour took
+                      # the excursion to zero and lost by 14 spike points. A
+                      # detour is also the worse defect of the two: it puts the
+                      # vehicle on the wrong street, where a kink only makes the
+                      # right one look untidy.
+DETOUR_BADGE = 40.0   # px; how near a chip has to be for the path to count as
+                      # sitting on it at all
+DETOUR_VOUCH = 9.0    # px. A chip near the excursion is not evidence *for* it:
+                      # the sheet prints them every 50-100 px, so a route is
+                      # within a chip's length of one almost everywhere along
+                      # itself, and a plain proximity test vetoed every detour
+                      # there was — Montebello 20's peak has a "20" 32 px away
+                      # and so did the rest of the route. A chip only speaks for
+                      # the excursion if *taking it out* would walk the path
+                      # this much further from it than it is now.
+
+
+def _flatten_run(full, base, lo, hi):
+    """The run with its excursion taken out — see undetour, which applies it."""
+    d = full - base
+    t = np.linspace(0, 1, hi - lo + 1)[:, None]
+    return base[lo:hi + 1] + d[lo] * (1 - t) + d[hi] * t
+
+
+def _badge_vouches(full, base, lo, hi, B):
+    """Whether a route-number chip speaks for this excursion — that is, whether
+    flattening it would carry the path away from a chip it is currently on."""
+    R = full[lo:hi + 1]
+    cur = float(np.sqrt(((B[:, None, :] - R[None]) ** 2).sum(-1)).min())
+    if cur > DETOUR_BADGE:
+        return False                       # not on a chip to begin with
+    F = _flatten_run(full, base, lo, hi)
+    new = float(np.sqrt(((B[:, None, :] - F[None]) ** 2).sum(-1)).min())
+    return new > cur + DETOUR_VOUCH
+
+
+def detour_runs(full, base, badges=()):
+    """Stretches where `full` leaves `base` a long way and returns to it.
+
+    Measured against the *sustained* part of the correction, not against the
+    warp itself. A shape that the badges have rightly carried bodily onto its
+    street sits at a steady offset from the warp for its whole length —
+    Montebello 20 runs 13 px off it everywhere — and against an absolute
+    threshold that baseline either swamps every excursion or, worse, never lets
+    one close, because the displacement never returns to zero for the run to end
+    at. A median over a window wider than any detour recovers that baseline
+    without being dragged up by the detour sitting inside it, and what is left
+    over it is the excursion.
+
+    Yields (lo, hi, peak): the index span, widened out to where the path is
+    genuinely back on the sustained correction, and how far past it it got."""
+    off = np.hypot(*(full - base).T)
+    n = len(off)
+    if n < 16:
+        return []
+    cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(base, axis=0).T))])
+    step = max(1e-6, cum[-1] / max(1, n - 1))
+    w = int(min(n // 2 * 2 - 1, max(9, DETOUR_ARC / step))) | 1
+    off = off - ndi.median_filter(off, size=w, mode="nearest")
+    B = np.asarray(badges, dtype=float) if len(badges) else None
+    out, i = [], 0
+    while i < n:
+        if off[i] <= DETOUR_MIN:
+            i += 1
+            continue
+        j = i
+        while j + 1 < n and off[j + 1] > DETOUR_MIN:
+            j += 1
+        nxt = j + 1
+        # widen to where the displacement has actually come back to the warp
+        lo, hi = i, j
+        while lo > 0 and off[lo] > DETOUR_ENDS:
+            lo -= 1
+        while hi < n - 1 and off[hi] > DETOUR_ENDS:
+            hi += 1
+        i = nxt
+        # An excursion that runs off the end of the shape never came back, so
+        # there is nothing to say it is an excursion rather than a correction.
+        if off[lo] > DETOUR_ENDS or off[hi] > DETOUR_ENDS:
+            continue
+        if cum[hi] - cum[lo] > DETOUR_ARC:
+            continue
+        k = lo + int(np.argmax(off[lo:hi + 1]))
+        peak = float(off[k])
+        if peak < DETOUR_PEAK:
+            continue
+        if B is not None and not _badge_vouches(full, base, lo, hi, B):
+            out.append((lo, hi, peak))
+        elif B is None:
+            out.append((lo, hi, peak))
+    return out
+
+
+def detour_penalty(full, base, badges=()):
+    """How much of a shape is off its line and back. The measure `spike_penalty`
+    cannot make, and the reason the ballot in main() scores both."""
+    return float(sum(pk - DETOUR_PEAK for _, _, pk in detour_runs(full, base, badges)))
+
+
+def undetour(full, base, badges=()):
+    """Put a detoured stretch back on the warp.
+
+    The correction either side of the excursion is real — it is what put the
+    line on its own ink — so it is kept and interpolated across, rather than
+    dropping the stretch flat onto the warp and leaving a step at each join.
+    What the stretch loses is only the part of the displacement that took it to
+    a neighbour's ink, which is the part with nothing to vouch for it."""
+    runs = detour_runs(full, base, badges)
+    if not runs:
+        return full
+    out, d = full.copy(), full - base
+    for lo, hi, _ in runs:
+        t = np.linspace(0, 1, hi - lo + 1)[:, None]
+        out[lo:hi + 1] = base[lo:hi + 1] + d[lo] * (1 - t) + d[hi] * t
+    return out
+
+
+DETOUR_AUDIT = []     # (peak, feed, route, x, y) for the report main() prints
+
+
 def apply_override(full, base, spec):
     """Splice a hand-drawn corridor into a snapped shape.
 
@@ -2698,14 +2862,57 @@ def main():
                 # off, so the two together usually win; but not always, and a
                 # pass run unconditionally ahead of the other can rob it of a
                 # better answer, so each stands on the ballot alone as well.
-                as_snapped, best = full, stored_penalty(full)
+                #
+                # The ballot is scored on two measures, not one. `spike_penalty`
+                # charges only turning that doubles back inside 12 px, and the
+                # snapper's 61-point smoothing turns an occluded stretch into a
+                # smooth bulge with no sharp turn anywhere in it: Foothill 493
+                # scores a flat 0 while visibly off its line. Scored on that
+                # alone, `undetour` can never win a shape it is the only fix
+                # for — it ties, and the tie goes to the snapper. So the
+                # excursion is priced too, and the winner minimises both.
+                #
+                # The old promise still holds, and is now explicit: a candidate
+                # that would rank worse on `spike_penalty` than the snapper's
+                # own shape is thrown out before it can be scored, so nothing
+                # buys a straighter line at the cost of a hairpin.
+                as_snapped = full
+                spike0 = stored_penalty(as_snapped)
+                best = spike0 + DETOUR_WEIGHT * detour_penalty(as_snapped, base, anc)
                 unfolded = unfold(as_snapped, base, anc)
-                for cand in (despike(as_snapped), unfolded, despike(unfolded)):
+                undet = undetour(as_snapped, base, anc)
+                for cand in (despike(as_snapped), unfolded, despike(unfolded),
+                             undet, despike(undet), unfold(undet, base, anc)):
                     if np.array_equal(cand, as_snapped):
                         continue
-                    penalty = stored_penalty(cand)
+                    spike = stored_penalty(cand)
+                    if spike > spike0:
+                        continue
+                    penalty = spike + DETOUR_WEIGHT * detour_penalty(cand, base, anc)
                     if penalty < best:
                         full, best = cand, penalty
+            if len(full) == len(base) and os.environ.get("DETOUR_TRACE") == f"{feed}:{rid}":
+                _o = np.hypot(*(full - base).T)
+                _c = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(base, axis=0).T))])
+                _st = max(1e-6, _c[-1] / max(1, len(_o) - 1))
+                _w = int(min(len(_o) // 2 * 2 - 1, max(9, DETOUR_ARC / _st))) | 1
+                _x = _o - ndi.median_filter(_o, size=_w, mode="nearest")
+                _B = np.asarray(anc, dtype=float) if len(anc) else None
+                print(f"  TRACE {feed}:{rid} sid={sid} n={len(_o)} arc={_c[-1]:.0f} "
+                      f"medwin={_w} anchors={len(anc)} off p50={np.median(_o):.1f} "
+                      f"max={_o.max():.1f} excess max={_x.max():.1f} "
+                      f"runs={len(detour_runs(full, base, anc))}")
+                for _s in range(0, len(_o), max(1, len(_o) // 22)):
+                    _e = min(len(_o), _s + max(1, len(_o) // 22))
+                    _k = _s + int(np.argmax(_x[_s:_e]))
+                    _bd = np.hypot(*(_B - full[_k]).T).min() if _B is not None else -1
+                    print(f"    arc {_c[_k]:7.0f}  off {_o[_k]:6.1f}  exc {_x[_k]:6.1f}"
+                          f"  badge {_bd:6.1f}  at ({full[_k][0]:.0f},{full[_k][1]:.0f})")
+            if len(full) == len(base):
+                for _lo, _hi, _pk in detour_runs(full, base, anc):
+                    _k = _lo + int(np.argmax(np.hypot(*(full - base).T)[_lo:_hi + 1]))
+                    DETOUR_AUDIT.append((_pk, feed, rid or "?",
+                                         int(full[_k][0]), int(full[_k][1])))
             override = OVERRIDE_PATHS.get((feed, (rid or "").split("-")[0]))
             if override is not None and len(full) == len(base):
                 full = np.asarray(apply_override(full, base, override), dtype=float)
@@ -2834,6 +3041,15 @@ def main():
     stats["patterns"] = len(patterns_out)
     stats["trips_total"] = len(trips_final)
     print(dict(stats))
+    if DETOUR_AUDIT:
+        worst = sorted(DETOUR_AUDIT, reverse=True)
+        print(f"detours: {len(worst)} on {len({(f, r) for _, f, r, _, _ in worst})} routes"
+              f" (worst {worst[0][0]:.0f} px)")
+        for pk, feed, rid, x, y in worst[:15]:
+            print(f"  {pk:6.1f} px  {feed:<12} {rid:<8} at ({x},{y})")
+        with open("scratch/detours.tsv", "w") as f:
+            for pk, feed, rid, x, y in worst:
+                f.write(f"{pk:.1f}\t{feed}\t{rid}\t{x}\t{y}\n")
     print(f"built {datetime.now().isoformat(timespec='seconds')}")
 
 
