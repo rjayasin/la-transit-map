@@ -121,9 +121,10 @@ def main():
     if hid and samples:
         share = 100 * hid / len(samples)
         print(f"\n!! the tab was in the background for {share:.0f}% of this session. "
-              "Chrome clamps a hidden tab's timers, so sparse samples and long "
-              "quiet periods there are the browser, not the page — and rAF is "
-              "throttled, so nothing was really being presented.")
+              "Every browser clamps a hidden tab's timers, so sparse samples and "
+              "long quiet periods there are the browser, not the page — and rAF "
+              "is throttled, so nothing was really being presented. Read the "
+              "foreground samples; the rest say nothing about a freeze.")
     for o in opens:
         print(f"\nsession {o.get('rx','')}  dpr={o.get('dpr')} {o.get('w')}x{o.get('h')} "
               f"isolated={o.get('isolated')} cores={o.get('cores')} "
