@@ -36,7 +36,7 @@ DEAD_AFTER_S = 20        # quiet longer than this and the session is over, not i
 # Columns worth watching over time, in the order they answer the question.
 COLS = ["n", "fps", "frames", "frameP50", "frameP95", "frameMax", "rafGapMax",
         "tickLateMs", "driftMs", "longTaskMs", "imageMB", "tileMB", "peakTileMB",
-        "heapMB", "canvases", "tilesCached", "tileInflight", "decodesPerSec",
+        "heapMB", "canvasesMade", "tilesCached", "tileInflight", "decodesPerSec",
         "evictsPerSec", "composesPerSec", "zoom", "frameErrors", "slowFrames"]
 
 
@@ -102,12 +102,28 @@ def main():
               f"--all for every one.\n")
     samples = [r for r in recs if r.get("t") in ("sample", "final")]
     stalls = [r for r in recs if r.get("t") == "stall"]
+    throttled = [r for r in recs if r.get("t") == "throttled"]
     lates = [r for r in recs if r.get("t") == "workerLate"]
     opens = [r for r in recs if r.get("t") == "open"]
     mem = [r for r in recs if r.get("t") == "uaMemory"]
+    notes = [r for r in recs if r.get("t") == "note"]
 
     print(f"{a.file}: {len(recs)} records, {len(samples)} samples, "
-          f"{len(stalls)} stall reports, {len(lates)} worker-late reports")
+          f"{len(stalls)} stall reports, {len(throttled)} throttle reports, "
+          f"{len(lates)} worker-late reports")
+    for n in notes:
+        print(f"  note: {n.get('note')}")
+
+    # A backgrounded tab is throttled to one timer wake a second, and after a few
+    # minutes to one a minute, so its samples are sparse and its frame counts are
+    # meaningless. Say so before anyone reads the numbers as the page's own.
+    hid = sum(1 for r in samples if r.get("hidden"))
+    if hid and samples:
+        share = 100 * hid / len(samples)
+        print(f"\n!! the tab was in the background for {share:.0f}% of this session. "
+              "Chrome clamps a hidden tab's timers, so sparse samples and long "
+              "quiet periods there are the browser, not the page — and rAF is "
+              "throttled, so nothing was really being presented.")
     for o in opens:
         print(f"\nsession {o.get('rx','')}  dpr={o.get('dpr')} {o.get('w')}x{o.get('h')} "
               f"isolated={o.get('isolated')} cores={o.get('cores')} "
@@ -136,6 +152,11 @@ def main():
         if lastgood:
             print("\n  last state the page reported before it went quiet:")
             table([lastgood], COLS)
+    elif throttled and not stalls:
+        worst = max(throttled, key=lambda r: r.get("silentMs", 0))
+        print(f"\nno stalls. {len(throttled)} quiet periods, worst "
+              f"{worst.get('silentMs')} ms, all while the tab was hidden — that is "
+              "the browser's background throttling, not the page.")
     elif samples and samples[-1].get("t") == "final":
         print(f"\nno stalls; the session ended cleanly "
               f"({samples[-1].get('reason', 'final')}).")
