@@ -525,9 +525,9 @@ RAPID_RED = (180, 51, 61)   # 720/754/761
 BUSWAY_GRAY = "969CA0"      # J Line 910/950 freeway busway ribbon
 BUSWAY_ORANGE = (243, 123, 33)   # G Line busway ribbon, as printed on the sheet
 BUSWAY_TOL = 30.0
-# The busway mask holds that one ribbon and nothing else, so the snap can
-# reach much further than it dares on the shared orange, and can follow the
-# line closely instead of smoothing whole stretches together.
+# The busway holds that one ribbon and nothing else, so the snap can reach much
+# further than it dares on the shared orange, and can follow the line closely
+# instead of smoothing whole stretches together.
 BUSWAY_CAPS = (100.0, 50.0, 25.0, 12.0)
 BUSWAY_WIN = 9
 
@@ -684,6 +684,7 @@ INK_STEP = 3.0      # px between samples along a stroke read from the PDF
 RAIL_INK = [(0.655, 0.664, 0.673)]
 ORANGE_INK = [(0.961, 0.513, 0.272)]                       # Metro Local
 RAPID_RED_INK = [(0.844, 0.086, 0.207)]                    # 720/754/761 rapid ribbon
+BUSWAY_INK = [(0.957, 0.474, 0.126)]                       # G Line busway ribbon
 LADOT_INK = [(0.409, 0.398, 0.173), (0.419, 0.4, 0.164)]   # DASH + Commuter Express
 
 # The mask holds railroads and nothing else, so — as with the busway ribbon —
@@ -1695,9 +1696,28 @@ def snap_rail(pts, tree, caps=(45.0, 24.0), wins=(15, 9), max_gap=45, rnd=2):
     dist, j = tree.query(P)                      # final tight re-snap on the track
     close = dist < 8
     P[close] = tree.data[j[close]]
-    # line both ends up with where the map stops drawing the line: cut back an
-    # overshoot, run out to a terminus the warp fell short of, then stand the
-    # end in the middle of the platform it finished at
+    return [tuple(p) for p in chaikin(simplify(square_ends(P, tree), 1.0), rnd)]
+
+
+def resample(P, n):
+    """`P` redrawn as `n` points evenly spaced along its own length."""
+    P = np.asarray(P, dtype=float)
+    cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(P, axis=0).T))])
+    if len(P) < 2 or cum[-1] <= 0:
+        return P
+    t = np.linspace(0, cum[-1], n)
+    return np.c_[np.interp(t, cum, P[:, 0]), np.interp(t, cum, P[:, 1])]
+
+
+def square_ends(P, tree):
+    """Line both ends of a snapped line up with where the map stops drawing it:
+    cut back an overshoot, run out to a terminus the warp fell short of, then
+    stand the end in the middle of the platform it finished at.
+
+    Snapping only moves a point sideways, and it pads its smoothing at the ends,
+    so an end finishes wherever the warp left it along the line rather than
+    where the artwork stops — which is a different place whenever the warp's
+    error runs along the line instead of across it."""
     lo, hi = (rail_trim(P, tree, e) for e in (0, -1))
     if lo + hi + 4 < len(P):
         P = P[lo:len(P) - hi]
@@ -1705,7 +1725,7 @@ def snap_rail(pts, tree, caps=(45.0, 24.0), wins=(15, 9), max_gap=45, rnd=2):
     P = np.vstack([head[::-1], P, tail])
     for e in (0, -1):
         P = rail_platform(P, e)
-    return [tuple(p) for p in chaikin(simplify(P, 1.0), rnd)]
+    return P
 
 
 def simplify(pts, tol=1.2, mask=False):
@@ -2175,20 +2195,29 @@ def main():
                 else:
                     cols = [BUSWAY_ORANGE] if busway else [ORANGE]
                 if cols is not None:
-                    # The G Line's own busway ribbon is a hotter orange than the
-                    # streets, but only on the sheet: map.png's downscale mixes
-                    # it with the page until it sits 24 from ordinary Metro
-                    # orange, inside the mask tolerance, so the line had every
-                    # parallel street to choose from and took Vanowen. Read it
-                    # off the tiles, where the two stay 57 apart.
-                    tree = tile_tree(cols, BUSWAY_TOL) if busway else mask_tree(cols)
                     # Snap on the strokes, anchor on the pixels. The badges are
                     # chips filled with the line color, not strokes of it, so
                     # they stand on the mask and not on the ink.
-                    snap_tree, ink = tree, None
-                    if not busway:
-                        ink = ink_tree(RAPID_RED_INK if cols == [RAPID_RED] else ORANGE_INK)
-                        snap_tree = ink or tree
+                    ink = ink_tree(BUSWAY_INK if busway else
+                                   RAPID_RED_INK if cols == [RAPID_RED] else ORANGE_INK)
+                    # The busway is pinned by station names printed beside the
+                    # ribbon, not by badges standing on it — the sheet gives the
+                    # G Line no badge at all — so it has no use for a mask, and
+                    # every use for being rid of one. Its ribbon reads as a hotter
+                    # orange than the streets only on the sheet itself; map.png's
+                    # downscale mixes it with the page until it sits 24 from
+                    # ordinary Metro orange, so the mask was read off the tiles
+                    # instead, where the two stay 57 apart. That kept whole
+                    # parallel streets out but not the orange badge chips beside
+                    # the line, whose fringe pixels blend to within tolerance of
+                    # the ribbon: single stray mask points under the "154" and
+                    # "237" chips bent the line 40 px north of Burbank Blvd
+                    # between Valley College and Laurel Canyon, and the chips
+                    # around De Soto pulled a Canoga working diagonally across
+                    # three blocks of blank page. The ink has one stroke per
+                    # drawn line and no chips at all.
+                    tree = (ink or tile_tree(cols, BUSWAY_TOL)) if busway else mask_tree(cols)
+                    snap_tree = ink or tree
                     # no color gate: Metro's orange badges render with variable
                     # fade (crisp ~1 px from orange, faded ~70), overlapping
                     # muted foreign badge colors, so a color test drops genuine
@@ -2208,6 +2237,35 @@ def main():
                                                   INK_CAPS if ink else None),
                                             win=BUSWAY_WIN if busway else 61,
                                             speckled=ink is None)
+                    # The busway is drawn the way a rail line is — its own
+                    # ribbon, ending at a platform the sheet draws — so its ends
+                    # are squared against that ribbon like a rail line's. They
+                    # need it for the same reason and worse: the warp is a
+                    # median 50 px out through the Valley, and out there the
+                    # error runs *along* the busway as much as across it, which
+                    # a sideways snap cannot answer for. Every end landed
+                    # somewhere other than the terminus it should be at — 47 px
+                    # short of North Hollywood on the Canoga workings, and,
+                    # before the ink, 50 px past it and away down the B line's
+                    # red toward Universal City.
+                    #
+                    # Squaring trims and extends, so the result is resampled
+                    # back to the point count it came in with. That keeps it
+                    # index-aligned with the warp, which is what carries the
+                    # stops over (see below) — and with both lines now running
+                    # platform to platform, the two ends pin the parameterization
+                    # and leave the stations between them a median 10 px from
+                    # their drawn platforms, down from 42. Handing those stops
+                    # to platform_stops instead, as rail does, was worse rather
+                    # than better: the warp lags by half the distance between
+                    # stations here, so the alignment that minimizes total
+                    # offset is the one that puts every station on the platform
+                    # *before* its own, and that is the one it found — 14 stops
+                    # each one station early.
+                    if busway and out_pts is not None:
+                        out_pts = resample(
+                            square_ends(np.asarray(out_pts, dtype=float), snap_tree),
+                            len(out_pts))
                     shape_isnap[(feed, sid)] = (cols, 38.0, toks)
             elif feed == "metrolink":
                 # no badges anywhere on the sheet, so nothing to anchor with;
