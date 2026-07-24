@@ -207,6 +207,10 @@ pipeline order is `georef.py` → `georef_inset.py` → `build_data.py`;
   which is how a bad path usually shows itself in the animation.
 - `scripts/orphan_check.py` — lists vehicles labelled with a designation the
   map never prints, which a rider has no way to look up.
+- `scripts/freeze_log.py` — serves the map *and* records what the page reports
+  about itself, so a freeze leaves evidence outside the tab that froze.
+- `scripts/freeze_report.py` — reads that recording back and says where the page
+  stopped.
 - `index.html` — the whole client: loader, canvas renderer, and controls.
 
 ## Rebuild data
@@ -292,6 +296,46 @@ It separates the two causes. Most orphans are honest — the agency's lines
 aren't drawn, or the route is too minor to badge. The interesting ones are
 *mislabelled*: the map does designate the route, just not as we do, so the
 badge is sitting right there to copy.
+
+## Catching a freeze
+
+The tab has frozen hard enough that only closing it helps — which also throws
+away the console, the devtools pane, and every snapshot that would have said
+why. So the page can be made to report on itself from a *second thread* and
+ship the record out of the process as it goes.
+
+```sh
+.venv/bin/python scripts/freeze_log.py           # serve on :8741 and record
+# open http://localhost:8741/index.html?trace=1 and reproduce the freeze
+.venv/bin/python scripts/freeze_report.py        # read back where it stopped
+```
+
+`freeze_log.py` is a drop-in for the README's `http.server`, so nothing else
+about running the map changes. Under `?trace=1` the page hands a snapshot to a
+Worker twice a second; the Worker posts them back and, when they stop arriving,
+says so once a second with the last one attached. A frozen main thread cannot
+suppress that, because the Worker is not on it.
+
+The report answers the question the old console logs could not:
+
+| what it says | what it means |
+| --- | --- |
+| stall reports, worker still posting | the main thread is blocked or gone, but the process lives — `last` is the final state the page reported |
+| nothing after some point | the content process died with the tab; the last sample is what was climbing on the way out |
+| samples continue, `rafGapMax` climbs | frames are being asked for and not delivered — the compositor, not us |
+| `tickLateMs` and `workerLateMs` climb together | the whole process is starved, so memory pressure or the OS |
+| `driftMs` jumps | the tab was suspended, not wedged — a different problem entirely |
+
+`peakTileMB`, `imageMB` and `canvases` are there to catch the memory story, and
+`heapMB` plus `measureUserAgentSpecificMemory()` the JavaScript one. Read those
+two together rather than trusting either: the UA measurement reported 27.8 MB on
+a page holding 102 MB of decoded images, because canvas backing stores and image
+surfaces are outside its scope. If the tab dies while it stays flat, the memory
+is somewhere the page cannot see.
+
+If nothing is listening on `/_trace` the records still accumulate in
+`localStorage`, so `transitTrace()` in the console after reopening the tab
+returns the tail of them anyway.
 
 ## Known limitations
 
