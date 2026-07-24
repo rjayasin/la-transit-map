@@ -78,7 +78,7 @@ python3 -m http.server 8741
   - A color mask can only find a line the raster shows, and the sheet draws
     lines it doesn't. Those lines are read out of the PDF's vectors instead,
     where every route is a stroke in its agency's ink — no tolerance, no rival
-    colors, nothing to recover from a rendering. Three networks need it:
+    colors, nothing to recover from a rendering. Four networks need it:
     - **Metrolink** rides the crosshatched railroad, inked in the same gray the
       sheet uses for place labels and minor street art, so masking that color
       selects most of the page.
@@ -88,6 +88,20 @@ python3 -m http.server 8741
       those dashes blend into the page or vanish under a heavier line alongside
       — Metro 233 through the Sepulveda Pass is dashed orange laid against the
       761's red ribbon, and none of it reaches the raster at all.
+    - **The G Line busway** has the opposite problem: its ribbon is on the
+      raster clearly enough, but so is everything the raster confuses with it.
+      Its orange is hotter than the streets' on the sheet and all but identical
+      to theirs in map.png, so its mask is read off the tile pyramid, where the
+      two stay 57 apart. That keeps whole parallel streets out, and still lets
+      in the orange badge chips printed alongside, whose antialiased fringe
+      blends to within tolerance of the ribbon: single stray pixels under the
+      "154" and "237" chips bent the line 40 px north of Burbank Blvd, and the
+      chips around De Soto dragged a Canoga working diagonally across three
+      blocks of blank page. The mask also stops dead where the sheet ghosts the
+      busway inside its "See G Line detour inset" call-out, and the line sagged
+      off it onto the dashed alignment below. The ink has one stroke per drawn
+      line, no chips at all, and draws the ghosted stretch in the same ink as
+      the rest.
   - Where two liveries share one ink they are two stroke styles of it, so the
     dash pattern tells them apart: the railroad's centreline under its dashed
     ticks (the ticks stick out sideways and would only pull a shape off the
@@ -119,6 +133,21 @@ python3 -m http.server 8741
     where the track carries on rather than ending, and is dropped; a *long* run
     off the ink is the Downtown call-out, where nothing is drawn for 200 px and
     the warp is all there is, and is left alone.
+  - The G Line busway is squared the same way, being drawn the same way: its
+    own ribbon, ending at a platform. It needs it more than rail does, because
+    out in the Valley the warp's 50 px error runs *along* the busway as much as
+    across it, which a sideways snap cannot answer for — every end of every
+    working landed somewhere other than its terminus, 47 px short of North
+    Hollywood or (before the ink) 50 px past it and away down the B line's red
+    toward Universal City. The squared line is then resampled back to the point
+    count it came in with, so it stays index-aligned with the warp and the
+    stops still carry over rather than being re-projected. With both lines now
+    running platform to platform, that pins the ends exactly and leaves every
+    station between them a median 10 px from its drawn platform, down from 42.
+    Handing those stops to the platform matcher rail uses was worse, not
+    better: the warp lags by half the distance between G Line stations, so the
+    alignment minimizing total offset is the one putting every station on the
+    platform *before* its own, and that is the one it found.
 - **Rail platforms** — where a train halts is the white marker the sheet draws,
   not the warped stop, and matching each stop to its nearest one double-books
   platforms wherever the warp lags the artwork by more than the stops are
