@@ -231,8 +231,22 @@ const TILE = 512;
 // peak, floored so a small viewport still caches usefully, and capped in the
 // megabytes the cap is actually protecting — the old ceiling of 640 tiles read
 // like a count and meant 640 MB. Eviction is least-recently-*used*.
+//
+// TILE_CEIL is now a cap that actually holds. It used to be overridden whenever
+// demand passed it — `max(capped, demand * 1.25)` — on the reasoning that a
+// budget under the working set is worse than a big one. That reasoning is
+// sound and the conclusion was still wrong: it meant the ceiling stopped
+// applying at exactly the zoom where memory was tightest. Measured on the
+// window that froze (2560x1331, DPR 2), demand peaked at 304 tiles and took the
+// budget to 380 MB; on a 3440-wide display it asks for 565 MB. The way out is
+// not to raise the cap or to clamp it and thrash, but to stop generating that
+// much demand — see levelsFor(), which drops a tier that doesn't fit. Demand is
+// bounded there, so the budget never has to choose between the cap and the
+// working set, and honouring the cap here costs nothing.
 const TILE_FLOOR = 192;        // tiles; a small viewport still caches usefully
 const TILE_CEIL = 256;         // tiles, and 1 MB each: the live-memory ceiling
+const TILE_HEADROOM = 1.25;    // budget over working set; a frame must never
+                               // evict a tile it is itself still drawing
 const TILE_INFLIGHT = 12;      // concurrent decodes — see pumpTiles
 const tileCache = new Map();   // "level/c_r" -> tile, held in LRU order
 const tileQueue = [];          // tiles waiting for a decode slot, oldest first
@@ -241,12 +255,9 @@ let tileDecodes = 0, tileDiscards = 0, tileErrors = 0, tileInflight = 0;
 let tilePx = 0, peakTileMB = 0;   // live decoded tile pixels, and the high-water mark
 
 function tileBudget() {
-  const capped = Math.min(TILE_CEIL, Math.max(TILE_FLOOR, Math.ceil(tileDemand * 2)));
-  // The cap bounds the *headroom*, never the working set: on a big enough
-  // display demand alone can pass TILE_CEIL, and a budget under demand is the
-  // thrash this whole scheme exists to avoid — which costs far more, in stutter
-  // and in re-decoded surfaces, than the memory the cap was protecting.
-  return Math.max(capped, Math.ceil(tileDemand * 1.25));
+  // levelsFor() keeps demand at or under TILE_CEIL / TILE_HEADROOM, so this is
+  // always comfortably above one frame's working set without the cap giving way.
+  return Math.min(TILE_CEIL, Math.max(TILE_FLOOR, Math.ceil(tileDemand * 2)));
 }
 
 // Release a tile's decoded surface now, and abandon a fetch still on its way.
@@ -346,6 +357,51 @@ function tileRange(ts) {
   ];
 }
 
+// how many tiles this level needs to cover the viewport
+function levelCost(level) {
+  const [c0, r0, c1, r1] = tileRange(TILE / level);
+  return Math.max(0, c1 - c0 + 1) * Math.max(0, r1 - r0 + 1);
+}
+
+// The cascade to draw for a given sharpness: every level up to the one that is
+// sharp enough, coarsest first, so coarser tiles back-fill while finer ones load.
+//
+// Two things bound it, and both exist because the naive rule — take the finest
+// level that isn't too soft — is what ran the tab out of graphics memory.
+//
+// Level L supplies L device px per map px, and costs 4x the level below it. The
+// old test, `level / 2 >= want`, reached for the finer tier the instant the
+// coarser one fell short by *any* margin: at want = 4.02 it paid 4x the tiles
+// and 4x the fill for a 0.5% gain in sharpness nobody can see. SHARP_ENOUGH
+// says don't trade up for less than a tenth, which is still under what reads as
+// soft when the tile is upscaled to fit.
+//
+// The switch-on is also where a tier is most expensive: it engages while the
+// viewport is at its widest in map px, so the first frame that wants level 8
+// wants ~250 of it. That cost is 4*W*H*DPR^2/TILE^2 whichever tier it is, so it
+// scales with the window and no fixed cascade is safe on every display — 304
+// tiles on the 2560x1331 window that froze, 452 on a 3440-wide one. So a tier
+// that doesn't fit the memory ceiling is simply not used, and the view stays on
+// the tier below until zooming further in shrinks the footprint enough to
+// afford it. The result is a slightly softer picture for a few tenths of zoom
+// on a large window, instead of 500+ MB of live tiles and a dead compositor.
+const SHARP_ENOUGH = 0.9;      // accept a tier within this fraction of sharp
+function levelsFor(want) {
+  const levels = [];
+  for (const level of [2, 4, 8]) {
+    if (level / 2 >= want * SHARP_ENOUGH) break;
+    levels.push(level);
+  }
+  // Drop the finest tier while a single frame's tiles wouldn't fit under the
+  // ceiling with headroom. Always keep one: the coarsest is cheap, and drawing
+  // nothing would show the base PNG through a view that has zoomed past it.
+  let cost = levels.reduce((n, l) => n + levelCost(l), 0);
+  while (levels.length > 1 && cost * TILE_HEADROOM > TILE_CEIL) {
+    cost -= levelCost(levels.pop());
+  }
+  return levels;
+}
+
 // whether every tile this level needs for the viewport has finished decoding
 function levelReady(level) {
   const [c0, r0, c1, r1] = tileRange(TILE / level);
@@ -359,22 +415,13 @@ function drawTiles(g) {
   tilesDrawn = 0;
   if (view.k * DPR <= 1.05 || !map) return;         // base PNG is sharp enough
   const want = view.k * DPR;                         // needed px per map px
-  // cascade: every level up to the needed one, so coarser tiles back-fill
-  // while finer ones are still loading
-  let levels = [];
-  for (const level of [2, 4, 8]) {
-    if (level / 2 >= want) break;                    // previous level already sharp enough
-    levels.push(level);
-  }
+  let levels = levelsFor(want);
   if (!levels.length) return;
   // Size the budget from what this frame needs *before* touching the cache. A
   // budget that lags demand by a frame spends that frame evicting tiles it is
   // about to ask for again, which is a whole frame of thrash on every zoom.
   let wanted = 0;
-  for (const level of levels) {
-    const [c0, r0, c1, r1] = tileRange(TILE / level);
-    wanted += Math.max(0, c1 - c0 + 1) * Math.max(0, r1 - r0 + 1);
-  }
+  for (const level of levels) wanted += levelCost(level);
   tileDemand = Math.max(wanted, tileDemand * 0.99);  // decaying peak
   // Once the finest level has every tile it needs, the levels beneath it are
   // covered pixel for pixel: drawing them is wasted fill, and keeps their tiles
@@ -440,16 +487,15 @@ function composeBackground() {
   }
 }
 
-// whether the tile pyramid will completely hide the base PNG this frame
+// Whether the tile pyramid will completely hide the base PNG this frame. It has
+// to ask about the same cascade drawTiles will actually draw — this used to
+// repeat the level choice inline, and any disagreement between the two skips the
+// base PNG under tiles that were never drawn, leaving bare canvas.
 function tilesCover() {
   if (view.k * DPR <= 1.05 || !map) return false;
-  const want = view.k * DPR;
-  let fine = 0;
-  for (const level of [2, 4, 8]) {
-    if (level / 2 >= want) break;
-    fine = level;
-  }
-  return fine > 0 && levelReady(fine);
+  const levels = levelsFor(view.k * DPR);
+  if (!levels.length) return false;
+  return levelReady(levels[levels.length - 1]);
 }
 
 // ---- pan / zoom ----
@@ -1201,9 +1247,18 @@ window.transitTrace = () => {
   catch (e) { return []; }
 };
 
-// Scheduling the next frame is deliberately outside the try: a thrown frame
-// must not be able to end the loop.
+// The next frame is scheduled first, before any of the work — so nothing in the
+// body of this function can end the loop, whether or not it is caught.
+//
+// It used to be scheduled last, outside the try, on the reasoning that keeping
+// it out of the try protected it. It didn't: traceFrame() and noteSlowFrame()
+// also sit outside the try, between the catch and the scheduling, and both
+// allocate — which is precisely what fails when the process is short of memory.
+// Either one throwing would have ended the animation while reporting
+// `frameErrors: 0`, making it indistinguishable from a freeze below the page.
+// Asking for the next frame up front costs nothing and removes the ambiguity.
 function frame(now) {
+  requestAnimationFrame(frame);
   const t0 = performance.now();
   frames++; lastFrameAt = t0;      // liveness, so a snapshot can report real fps
   try {
@@ -1214,7 +1269,6 @@ function frame(now) {
   const cost = performance.now() - t0;
   traceFrame(t0, cost);
   if (cost > SLOW_FRAME_MS) noteSlowFrame(cost, t0);
-  requestAnimationFrame(frame);
 }
 
 function drawFrame(now) {
