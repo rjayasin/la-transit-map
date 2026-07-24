@@ -822,6 +822,86 @@ def badge_words(region="main"):
     return _BADGES[region]
 
 
+_PHRASES = None
+
+
+def map_phrases():
+    """{PHRASE: [(x, y) map px, ...]} for every run of text the sheet sets as a
+    single line, upper-cased.
+
+    badge_words() keys on one word, which is what a route badge is. A railroad
+    is named rather than numbered — "ORANGE COUNTY LINE", set in italics along
+    its own track — and no word of that identifies anything on its own: the
+    sheet prints "ORANGE" as a city and a street, and "LINE" against five other
+    railroads."""
+    global _PHRASES
+    if _PHRASES is None:
+        _PHRASES = {}
+        try:
+            import fitz
+            page = fitz.open(PDF)[0]
+            s = map_image()[0].shape[1] / page.rect.width
+            runs = defaultdict(list)
+            for w in page.get_text("words"):
+                runs[(w[5], w[6])].append(w)          # (block, line)
+            out = defaultdict(list)
+            for ws in runs.values():
+                ws.sort(key=lambda w: w[7])           # word order within the line
+                xs = [v for w in ws for v in (w[0], w[2])]
+                ys = [v for w in ws for v in (w[1], w[3])]
+                cx = (min(xs) + max(xs)) / 2 * s
+                cy = (min(ys) + max(ys)) / 2 * s
+                if any(ex0 <= cx < ex1 and ey0 <= cy < ey1
+                       for ex0, ey0, ex1, ey1 in EXCLUDE):
+                    continue
+                out[" ".join(w[4].strip() for w in ws).upper()].append((cx, cy))
+            _PHRASES = dict(out)
+        except Exception as e:                        # missing pdf / pymupdf
+            print(f"phrase extraction unavailable: {e}")
+    return _PHRASES
+
+
+LABEL_NEAR = 24.0   # px a printed railroad name may stand from its own track
+
+# A route the sheet doesn't name rides one it does. The 91/Perris Valley shares
+# the Orange County Line's track for the whole of its length on this sheet —
+# its warp passes within 28 px of all three "ORANGE COUNTY LINE" labels — and is
+# drawn as that one line, so the sheet never writes "91" along it. Borrowing the
+# name is the only thing that holds it there: it took the Riverside track
+# through Vernon exactly as the Orange County Line itself did. The
+# Inland Empire-Orange County Line is the other unnamed one, and it borrows
+# nothing — it comes no nearer than 467 px to any label on the sheet, running
+# off the east edge instead.
+SHARED_RAIL_LABEL = {"91 Line": "Orange County Line"}
+
+
+def line_name_anchors(name, tree, near=LABEL_NEAR):
+    """Anchors from the name the sheet writes along a railroad.
+
+    Metrolink prints no badge anywhere on the map, and its lines share one ink
+    and one crosshatched livery, so where two of them run parallel the artwork
+    alone cannot say which is which. Through Vernon the Orange County and
+    Riverside lines are drawn 26 px apart on the same heading, close enough that
+    the warp lands the OC's schedule nearer the Riverside track than its own,
+    and the snap put it there — under the "VERNON" label, on the line the sheet
+    labels "RIVERSIDE LINE".
+
+    The sheet does say which is which, though, and in the very words GTFS names
+    the route with: metrolink's route_id is "Orange County Line". Each name is
+    written along its own track and repeated down its length, so it pins the
+    line at intervals the way a numbered route's badges do. The label is set
+    beside the track rather than on it — a measured 5.5 to 9 px off — so the
+    anchor is the nearest ink to the label, not the label itself."""
+    if tree is None:
+        return []
+    out = []
+    for cx, cy in map_phrases().get(SHARED_RAIL_LABEL.get(name, name).upper(), ()):
+        d, j = tree.query([cx, cy])
+        if d < near:
+            out.append(tuple(tree.data[j]))
+    return out
+
+
 def badge_line_color(cx, cy, r=7):
     """Dominant fill color of the chip a route-number badge sits on.
 
@@ -1898,13 +1978,15 @@ def outside_inset(ix, iy, ll):
         np.zeros(len(ix))])
 
 
-def inset_runs(ll, stored_pts, cum, snap_tree=None, anchors=None):
+def inset_runs(ll, main_dist, snap_tree=None, anchors=None):
     """Portions of a shape inside the DTLA inset, as runs of inset-px
     polyline. Motion in the inset is computed natively in inset space (the
     schematic main map collapses downtown, so main-shape distance cannot
     parameterize it): each run carries its own cumulative distance, and
     stops are later projected onto it. d0/d1 (distance range on the main
-    shape) only route each stop to the right run."""
+    shape) only route each stop to the right run, and come from `main_dist`
+    — the same measure the stops themselves are placed by, so the two agree
+    however far the snap moved the shape out from under the warp."""
     ll = np.asarray(ll, dtype=float)
     if TR_INSET is None or len(ll) < 2:
         return None
@@ -1953,7 +2035,7 @@ def inset_runs(ll, stored_pts, cum, snap_tree=None, anchors=None):
         if b - a < 1:
             continue
         mx, my = to_px(ll[a:b+1, 0], ll[a:b+1, 1])
-        d = project_stops(stored_pts, cum, list(zip(mx, my)))
+        d = main_dist(list(zip(mx, my)))
         pts = np.c_[ix[a:b+1], iy[a:b+1]]
         if snap_tree is not None:
             # same coherent snap + badge anchors as the main map, but scaled
@@ -2116,6 +2198,12 @@ def main():
             if sid_ in used_shapes:
                 tmp[sid_].append((int(seq), float(lon), float(lat)))
         route_by_shape = {row.get("shape_id", ""): row["route_id"] for row in trip_rows}
+        if feed == "metrolink":
+            # trips.txt leaves shape_id empty here, so the line above keys every
+            # Metrolink route under "" and no shape can find the route it
+            # belongs to. METROLINK_SHAPES already paired the two; trip_info
+            # carries that pairing.
+            route_by_shape = {s: r for r, s in trip_info.values()}
         warped = {}
         for sid, p in tmp.items():
             p.sort()
@@ -2268,12 +2356,16 @@ def main():
                             len(out_pts))
                     shape_isnap[(feed, sid)] = (cols, 38.0, toks)
             elif feed == "metrolink":
-                # no badges anywhere on the sheet, so nothing to anchor with;
-                # the railroad mask is sparse enough to snap on its own
+                # The railroad ink holds railroads and nothing else, which is
+                # enough to put a line on track but not to say *which* track
+                # where two run together. The sheet's own name for the line
+                # says that, so it anchors like a numbered route's badges.
                 tree = rail_line_tree()
                 if tree is not None:
-                    out_pts = snap_coherent(pts, tree, caps=RAIL_CAPS, win=RAIL_WIN,
-                                            speckled=False)
+                    anc = line_name_anchors(rid or "", tree)
+                    anchored += bool(anc)
+                    out_pts = snap_coherent(pts, tree, anchors=anc, caps=RAIL_CAPS,
+                                            win=RAIL_WIN, speckled=False)
             elif feed == "ladot":
                 # LADOT's two liveries are two stroke styles of one olive ink —
                 # DASH solid, Commuter Express dashed — so each snaps to its own
@@ -2350,6 +2442,24 @@ def main():
     for key, pts in shapes_raw.items():
         add_shape(key, pts)
 
+    def main_dist(key, si, px):
+        """Distance along the stored shape of each map-px point.
+
+        Where the snap displaced the warp point by point the two agree index
+        for index, so a point is placed on the warp — which it was measured
+        against — and carried over. Everything that has to speak about a
+        position along a shape goes through here, because two callers using
+        different rules is a mismatch that only shows up when the snap moves:
+        the DTLA inset runs used to project onto the snapped shape while the
+        stops carried over, and a Metrolink shape shifting 28 px inside the
+        Downtown call-out was enough to put Union Station outside its own run
+        and drop every Metrolink line out of the inset panel."""
+        prm = shape_param.get(key)
+        if prm is None:
+            return project_stops(shapes_raw[key], cums[si], px)
+        base, cb, cb_kept = prm
+        return np.interp(project_stops(base, cb, px), cb_kept, cums[si])
+
     # DTLA inset: per-shape downtown runs in inset px, computed on demand
     shape_runs = {}                 # si -> runs or None
 
@@ -2364,7 +2474,7 @@ def main():
                 tree = mask_tree(cols, tol, region="inset") if cols else None
                 gate = None if key[0] in ("gtfs_bus", "gtfs_rail") else cols
                 anc = route_anchors(toks, tree, region="inset", colors=gate)
-                runs = inset_runs(ll, shapes_raw[key], cums[si], tree, anc)
+                runs = inset_runs(ll, lambda px: main_dist(key, si, px), tree, anc)
             shape_runs[si] = runs
         return shape_runs[si]
 
@@ -2387,12 +2497,7 @@ def main():
         si = shape_index[key]
         if feed == "gtfs_rail":
             spx = platform_stops(shapes_raw[key], cums[si], spx)
-        prm = shape_param.get(key)
-        if prm is None:
-            d = project_stops(shapes_raw[key], cums[si], spx)
-        else:                     # project before the snap, then carry it over
-            base, cb, cb_kept = prm
-            d = np.interp(project_stops(base, cb, spx), cb_kept, cums[si])
+        d = main_dist(key, si, spx)
         entry = {"s": si, "d": [round(v) for v in d]}
         runs = runs_for(key, si)
         if runs:
