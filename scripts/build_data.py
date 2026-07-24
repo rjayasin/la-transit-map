@@ -1153,11 +1153,14 @@ DESPIKE_CHORD = 34.0    # px; and its two ends must land this close together —
 
 
 def spike_penalty(pts, step=2.0, win=12.0):
-    """Total turning a polyline does beyond a square corner at points where it
-    doubles back on itself, measured on a uniform resampling so it is blind to
-    vertex spacing — the same currency scripts/path_check.py ranks on. Cheap
-    enough to run on every shape twice, so despike can be kept only when it
-    lowers this on the *stored* (simplified) shape, never on faith."""
+    """How un-straight a polyline is: the turning it does beyond a square corner
+    where it doubles back on itself, plus what it pays for sewing between two
+    streets, measured on a uniform resampling so it is blind to vertex spacing.
+
+    This is scripts/path_check.py's score, computed the same way on the same
+    grid — matching it is what lets the caller's gate promise that no shape
+    comes out of a cleanup pass ranking worse than it went in. Cheap enough to
+    run on every candidate for every shape, so no pass is kept on faith."""
     P = np.asarray(pts, dtype=float)
     seg = np.hypot(*np.diff(P, axis=0).T)
     cum = np.concatenate([[0], np.cumsum(seg)])
@@ -1172,18 +1175,35 @@ def spike_penalty(pts, step=2.0, win=12.0):
     a = R[w:-w] - R[:-2 * w]
     b = R[2 * w:] - R[w:-w]
     na, nb = np.hypot(*a.T), np.hypot(*b.T)
-    ang = np.abs(np.degrees(np.arctan2(a[:, 0] * b[:, 1] - a[:, 1] * b[:, 0],
-                                       a[:, 0] * b[:, 0] + a[:, 1] * b[:, 1])))
+    turn = np.degrees(np.arctan2(a[:, 0] * b[:, 1] - a[:, 1] * b[:, 0],
+                                 a[:, 0] * b[:, 0] + a[:, 1] * b[:, 1]))
     gap = np.hypot(*(R[2 * w:] - R[:-2 * w]).T)
-    # Score only where path_check would: the doubling-back turns, on the drawn
-    # map, outside the ghosted Downtown call-out. Matching it exactly is what
-    # lets the caller's gate promise no shape scores worse there afterwards.
+    # Score only where path_check would: on the drawn map, outside the ghosted
+    # Downtown call-out, where the ends of the window are far enough apart to
+    # have a turn at all.
     mid = R[w:-w]
-    onmap = ((mid[:, 0] >= 0) & (mid[:, 0] <= 4096)
+    drawn = ((na > 1e-6) & (nb > 1e-6) & (mid[:, 0] >= 0) & (mid[:, 0] <= 4096)
              & (mid[:, 1] >= 708) & (mid[:, 1] <= 4139)
              & ~np.asarray(inside_callout(mid), dtype=bool))
-    doubling = (na > 1e-6) & (nb > 1e-6) & (gap < 12.0) & onmap
-    return float(np.where(doubling, np.maximum(0.0, ang - 92.0), 0.0).sum())
+    turn = np.where(drawn, turn, 0.0)
+    mag = np.abs(turn)
+    cusp = np.where(gap < 12.0, np.maximum(0.0, mag - 92.0), 0.0).sum()
+    # and the zigzag: adjacent sharp turns in opposite directions, charged by
+    # how sharp the tighter of the pair is, whatever either owes on its own
+    sewn = (mag[1:] > 45.0) & (mag[:-1] > 45.0) & (np.sign(turn[1:]) != np.sign(turn[:-1]))
+    zig = np.where(sewn, np.minimum(mag[1:], mag[:-1]) - 45.0, 0.0).sum()
+    return float(cusp + zig)
+
+
+def stored_penalty(full):
+    """spike_penalty of exactly what a shape would be written out as: simplified
+    and rounded to the tenth of a pixel schedule.json carries.
+
+    Not a detail. The doubling-back test turns on a hard 12 px threshold, so a
+    hundredth of a pixel can carry a whole run of points across it — jittering
+    one Metro 202 shape by 0.02 px swings its score between 505 and 767. Score
+    the geometry that ships, or the gate below can promise nothing about it."""
+    return spike_penalty(np.round(simplify(full), 1))
 
 
 def despike(full):
@@ -1228,6 +1248,137 @@ def despike(full):
             continue
         t = np.linspace(0, 1, hi - lo + 1)[:, None]
         out[lo:hi + 1] = full[lo] * (1 - t) + full[hi] * t
+    return out
+
+
+FOLD_GAP = 14.0     # px; a run that ends this close to where it began has come
+                    # back to a point the line already occupied
+FOLD_MIN = 24.0     # px of arc; anything shorter is despike's sliver
+FOLD_MAX = 190.0    # px of arc; a longer way round is a circuit the sheet draws
+                    # rather than a line laid back over itself
+FOLD_OUT = 6.0      # px; the run has to go somewhere before coming back, or it
+                    # is a line dawdling in place, not a fold
+FOLD_REACH = 70.0   # px, and no further. However the arc is spent, this is the
+                    # most route a fold can be hiding, and so the most that
+                    # flattening one can cost: past it the doubling-back is more
+                    # line than any sliver of snapping, and the sheet is likelier
+                    # to be drawing a working that really does run out and back.
+FOLD_WIDTH = 12.0   # px; and it has to come back *along itself*. Twice the area
+                    # a run encloses over its own length is the mean distance
+                    # between its two arms: a fold's arms lie on top of each
+                    # other, while a route going round something holds them a
+                    # block apart.
+FOLD_WARP = 4.0     # px of that same gap, in the warp the fold was crushed from
+                    # — enough that the route went somewhere over the stretch
+                    # rather than out and back down one street. Under it the
+                    # doubling-back is the route's own and the snapper only
+                    # inherited it.
+
+
+def arm_gap(P, i, j):
+    """Mean distance between the two arms of the run P[i:j+1] — twice the area
+    it encloses over its own length. Near zero where the run doubles back along
+    itself, a block's width where it goes round something."""
+    run = P[i:j + 1]
+    length = np.hypot(*np.diff(run, axis=0).T).sum()
+    if length <= 0:
+        return 0.0
+    x, y = run[:, 0], run[:, 1]
+    return abs(np.sum(x * np.roll(y, -1) - np.roll(x, -1) * y)) / length
+
+
+def strands_badge(before, after, badges):
+    """Whether reshaping a line from `before` to `after` leaves one of the route's
+    own printed badges with no path near it any more.
+
+    A badge stands on the line it names, so a detour that is the only thing
+    reaching one is a detour the sheet draws — Metro 601's run down to the badge
+    on Burbank Blvd doubles back on itself the same way the snapper's folds do,
+    and is the route. Gated at the distance a badge is read from its line to
+    begin with, so a badge the shape still passes doesn't count."""
+    for b in badges:
+        if (np.hypot(*(before - b).T).min() <= BADGE_NEAR_INK
+                < np.hypot(*(after - b).T).min()):
+            return True
+    return False
+
+
+def folds(full, base):
+    """The runs of a snapped polyline that double back to where they started —
+    and that the warp they came from does not, so the fold is the snapper's
+    doing and not the route's.
+
+    Each is the longest run from its start that returns within FOLD_GAP without
+    exceeding FOLD_MAX of arc; where two overlap, the one doubling more line
+    over itself wins, since it is the one with more to be rid of."""
+    n = len(full)
+    cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(full, axis=0).T))])
+    cands = []
+    for i in range(n):
+        lo = int(np.searchsorted(cum, cum[i] + FOLD_MIN, side="left"))
+        hi = min(int(np.searchsorted(cum, cum[i] + FOLD_MAX, side="right")) - 1, n - 1)
+        if lo > hi:
+            continue
+        back = np.nonzero(np.hypot(*(full[lo:hi + 1] - full[i]).T) <= FOLD_GAP)[0]
+        if not len(back):
+            continue
+        j = lo + int(back[-1])
+        if not FOLD_OUT <= np.hypot(*(full[i:j + 1] - full[i]).T).max() <= FOLD_REACH:
+            continue
+        if arm_gap(full, i, j) > FOLD_WIDTH or arm_gap(base, i, j) <= FOLD_WARP:
+            continue
+        cands.append((cum[j] - cum[i], i, j))
+    taken, used = [], np.zeros(n, bool)
+    for _, i, j in sorted(cands, reverse=True):
+        if used[i:j + 1].any():
+            continue
+        used[i:j + 1] = True
+        taken.append((i, j))
+    return sorted(taken)
+
+
+def unfold(full, base, badges=()):
+    """Take the folds out of a snapped polyline.
+
+    Where the sheet draws a route the GTFS detours off — a bus pulling round a
+    transit centre, a jog through an office park, a terminal loop the schematic
+    ends in a stub — the detour has no ink of its own, and the snapper crushes
+    it onto the line it does have. Nothing there is drawn twice, so the line
+    runs out along that ink and straight back down it, and the fold is what
+    path_check charges for.
+
+    Only the snapper's folds go, and two things speak for the route against
+    taking one out. `base` is the warp the snap displaced point for point, so it
+    says what the route does over the same stretch: where the warp doubles back
+    too, the retracing is the route's own. `badges` are the chips the sheet
+    prints for this route, and one the line would no longer reach is the sheet
+    saying it draws the route out there. Either way the fold stays, however the
+    ranking scores it. The badges are read against the line as it stands after
+    the folds already taken, not against the snap, so two that each look
+    harmless can't between them strand a badge neither would have alone.
+
+    An interior fold is replaced by the straight line between the points either
+    side, which are left where they are, so nothing outside the fold moves. A
+    fold at an end is different: what it doubles over is the run out to the
+    terminus, and collapsing it would leave the route stopping short of the end
+    the sheet draws. That one keeps the leg that reaches the terminus and drops
+    the other, stretched over the same indices, so the vehicle starts at its
+    drawn end and drives in."""
+    out = full.copy()
+    n = len(full)
+    B = np.asarray(badges, dtype=float).reshape(-1, 2)
+    for i, j in folds(full, base):
+        cand = out.copy()
+        if i == 0 or j == n - 1:
+            e = j if i == 0 else i
+            m = int(np.hypot(*(full[i:j + 1] - full[e]).T).argmax()) + i
+            leg = resample(full[m:j + 1] if i == 0 else full[i:m + 1], j - i + 1)
+            cand[i:j + 1] = leg if len(leg) == j - i + 1 else full[m]
+        else:
+            t = np.linspace(0, 1, j - i + 1)[:, None]
+            cand[i:j + 1] = full[i] * (1 - t) + full[j] * t
+        if not strands_badge(out, cand, B):
+            out = cand
     return out
 
 
@@ -2370,7 +2521,7 @@ def main():
 
         snapped = anchored = 0
         for sid, pts in warped.items():
-            out_pts = None
+            out_pts, anc = None, []
             rid = route_by_shape.get(sid)
             toks = badge_tokens.get(rid, set())
             hubs = HUB_ANCHORS.get((feed, (rid or "").split("-")[0]))
@@ -2538,15 +2689,23 @@ def main():
             if out_pts is not None and len(full) == len(base):
                 # Straightening one spike can leave a sharper residual where it
                 # met a bend, and the simplify() below can turn a helped dense
-                # path into a worse stored one, so the despiked shape is kept
-                # only when it lowers the penalty on the *stored* geometry the
-                # animation actually plays. That makes the pass strictly a
-                # cleanup: no shape it touches comes out worse than the snapper
-                # left it.
-                cand = despike(full)
-                if (cand is not full
-                        and spike_penalty(simplify(cand)) < spike_penalty(simplify(full))):
-                    full = cand
+                # path into a worse stored one, so neither cleanup is taken on
+                # faith. Every candidate is scored on the *stored* geometry the
+                # animation actually plays — by the very measure path_check
+                # ranks on — and the best of them wins, the snapper's own shape
+                # taking ties, so no shape comes out worse than it went in.
+                # Taking a fold out is what leaves the residual despike files
+                # off, so the two together usually win; but not always, and a
+                # pass run unconditionally ahead of the other can rob it of a
+                # better answer, so each stands on the ballot alone as well.
+                as_snapped, best = full, stored_penalty(full)
+                unfolded = unfold(as_snapped, base, anc)
+                for cand in (despike(as_snapped), unfolded, despike(unfolded)):
+                    if np.array_equal(cand, as_snapped):
+                        continue
+                    penalty = stored_penalty(cand)
+                    if penalty < best:
+                        full, best = cand, penalty
             override = OVERRIDE_PATHS.get((feed, (rid or "").split("-")[0]))
             if override is not None and len(full) == len(base):
                 full = np.asarray(apply_override(full, base, override), dtype=float)
