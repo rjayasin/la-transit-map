@@ -26,7 +26,11 @@ python3 -m http.server 8741
   as `schedule.json` (~7 MB): **26,902 trips on 336 routes**, as route
   colors/labels, shape polylines in map pixels, per-stop distance along each
   shape, and stop arrival times. Trips crossing midnight are duplicated at
-  −24 h so owl service appears at the start of the day.
+  −24 h so owl service appears at the start of the day. A trip begins at its
+  origin's *departure* time, not its arrival: a bus staged at a terminal
+  through its recovery time isn't in service yet, and drawing it there pooled
+  Foothill's fleet — which times some origins up to two hours early — into
+  motionless clusters at Pomona, Montclair and El Monte.
 - **Georeferencing** — the map is only quasi-geographic, so a lat/lon→pixel
   transform is fitted rather than assumed: color-mask the drawn rail lines,
   then ICP-align GTFS rail shapes to them (affine init → 2nd-order polynomial

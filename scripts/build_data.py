@@ -2158,11 +2158,15 @@ def main():
             trip_info[row["trip_id"]] = (row["route_id"], sid)
 
         stop_times = defaultdict(list)
-        for ti, seq, at, sid_ in read_cols(
+        for ti, seq, at, dt, sid_ in read_cols(
                 feed, "stop_times.txt",
-                ("trip_id", "stop_sequence", "arrival_time", "stop_id")):
+                ("trip_id", "stop_sequence", "arrival_time", "departure_time", "stop_id")):
             if ti in trip_info and at.strip():
-                stop_times[ti].append((int(seq), parse_time(at), sid_))
+                # keep both times: a stop is a dwell [arrival, departure], and at
+                # the origin that dwell is a layover we must not draw (see below)
+                stop_times[ti].append((int(seq), parse_time(at),
+                                       parse_time(dt) if dt.strip() else parse_time(at),
+                                       sid_))
 
         n_before = len(trips_out)
         used_shapes = set()
@@ -2171,9 +2175,22 @@ def main():
                 continue
             rid, sid = trip_info[ti]
             sts.sort()
-            route_stops.setdefault((feed, rid), set()).update(s for _, _, s in sts)
-            times = [t for _, t, _ in sts]
-            stop_seq = tuple(s for _, _, s in sts)
+            route_stops.setdefault((feed, rid), set()).update(s for _, _, _, s in sts)
+            # A bus laying over at its origin before it enters service is not yet
+            # a vehicle anyone can ride, and drawing it parked there for the
+            # length of the layover is what pooled Foothill's buses at Pomona,
+            # Montclair and El Monte: those terminals time the first stop with an
+            # arrival_time a median 15 minutes — up to two hours — before its
+            # departure_time, and timing the trip from the arrival left the bus
+            # sitting on the terminal until it pulled out. The trip starts when it
+            # departs, so the origin is timed by its departure; every later stop
+            # keeps its arrival (arrival and departure are equal there anyway, so
+            # this changes nothing downstream). Clamped so a malformed feed whose
+            # departure trails the next arrival can't make the clock run backward.
+            times = [t for _, t, _, _ in sts]
+            if len(times) > 1:
+                times[0] = min(sts[0][2], times[1])
+            stop_seq = tuple(s for _, _, _, s in sts)
             rkey = (feed, rid)
             if rkey not in route_idx:
                 label, color, text, rail = rmeta[rid]
