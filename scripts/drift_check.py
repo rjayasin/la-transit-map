@@ -106,11 +106,16 @@ def tree_for(system, label, cache, rail_trees):
         else:
             out = (B.ink_tree(B.ORANGE_INK), "ink")
     elif system == "LADOT":
-        # Two stroke styles of one olive: DASH solid, Commuter Express dashed.
-        # The feed says which by route_long_name and schedule.json doesn't carry
-        # it, but the sheet's own designations do — Commuter Express is numbered
-        # and DASH is named.
-        out = (B.ink_tree(B.LADOT_INK, dashed=label.isdigit()), "ink")
+        # Two stroke styles of one olive: DASH solid, Commuter Express dashed,
+        # and a route measured against the wrong one is measured against another
+        # network entirely. schedule.json doesn't carry the distinction, so it is
+        # read back out of the feed the same way build_data reads it. Guessing
+        # from the designation — numbered is Commuter Express, named is DASH —
+        # is right 47 labels out of 48 and wrong about the one Commuter Express
+        # that isn't numbered: "CE Union Station/Bunker Hill Shuttle", which the
+        # sheet labels "USH" and the guess would measure against DASH's network.
+        out = (B.ink_tree(B.LADOT_INK, dashed=not ladot_is_dash().get(label, True)),
+               "ink")
     elif system == "Metrolink":
         out = (B.rail_line_tree(), "ink")
     elif system == "Metro Rail":
@@ -121,6 +126,25 @@ def tree_for(system, label, cache, rail_trees):
         out = (B.mask_tree(cols, 30.0) if cols else None, "mask")
     cache[key] = out
     return out
+
+
+_LADOT_DASH = None
+
+
+def ladot_is_dash():
+    """{map label: is a DASH route}, read from the feed exactly as build_data
+    reads it — the long name says which livery, and the label is what the sheet
+    prints. A label covering both liveries (none does today) would resolve to
+    DASH, which is the commoner of the two."""
+    global _LADOT_DASH
+    if _LADOT_DASH is None:
+        import build_data as B
+        _LADOT_DASH = {}
+        for row in B.read_csv("ladot", "routes.txt"):
+            label = B.MAP_LABELS.get(("ladot", row["route_id"])) or B.route_label(
+                row.get("route_short_name", ""), row.get("route_long_name", ""))
+            _LADOT_DASH.setdefault(label, "DASH" in (row.get("route_long_name") or ""))
+    return _LADOT_DASH
 
 
 _AGENCY_COLS = {}
