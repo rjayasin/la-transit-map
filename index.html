@@ -940,12 +940,233 @@ if (DEBUG) {
 const MEM_WARN_MB = 480;
 let memWarnings = 0;
 setInterval(() => {
-  if (DEBUG || memWarnings >= 3) return;
+  if (DEBUG || TRACE || memWarnings >= 3) return;
   const s = resourceStats();
   if (s.imageMB < MEM_WARN_MB) return;
   memWarnings++;
   console.warn(`[transit] ${s.imageMB} MB of decoded images live. Snapshot:`, s);
 }, 10000);
+
+// ---- black box (?trace) ----
+// Everything above reports from inside the page, which is the one place that
+// stops reporting when the page is what fails. The freeze takes the tab with
+// it — console gone, devtools gone, and closing the tab, the only cure, throws
+// the evidence away. Twice now the last thing we had was a snapshot that looked
+// healthy, which is not a diagnosis.
+//
+// So under ?trace the page keeps a second record, on a second thread, and ships
+// it out of the process as it goes. A Worker is the whole trick: it has its own
+// event loop, so it keeps running while the main thread is wedged, and it holds
+// the last snapshot the main thread managed to hand it. When the snapshots stop
+// arriving it says so, and keeps saying so, with that last state attached. That
+// turns "the tab froze and there's nothing" into "the main thread stopped at T,
+// and here is what it was doing at T minus half a second".
+//
+// It also tells apart the three failures that look identical from inside:
+//   - the main thread is blocked      — samples stop, the worker keeps posting
+//   - the main thread is fine and the compositor is not
+//                                     — samples continue, rafGapMax climbs
+//   - the content process is gone     — the posts stop too, and the last record
+//                                       in the file is the epitaph
+// A worker that goes quiet *with* the main thread is itself the finding: that
+// is the process dying, not a script hanging.
+//
+// scripts/freeze_log.py receives the posts and writes them to
+// scratch/freeze-trace.jsonl; scripts/freeze_report.py reads them back. If
+// nothing is listening the records still accumulate in localStorage, so
+// transitTrace() after reopening the tab gets the tail of them either way.
+const TRACE = qp.has("trace");
+const TRACE_KEY = "transit.trace";
+const TRACE_MS = 500;         // how often the main thread proves it is alive
+const TRACE_KEEP = 240;       // records held for the localStorage fallback
+// One id per page load. A reload beacons its own last gasp into the same file
+// as the run that follows it, so without this the reader interleaves two
+// sessions whose clocks both start at zero and reads the seam as a fault.
+const TRACE_SID = Math.random().toString(36).slice(2, 10);
+let traceSeq = 0, traceRing = [], traceWorker = null;
+let frameMs = [], rafGaps = [], lastRafAt = 0;
+let longTasks = 0, longTaskMs = 0, evWheel = 0, evPointer = 0;
+let lastWall = Date.now(), lastMono = performance.now(), lastTick = performance.now();
+
+// Called from frame(). Two numbers, no allocation beyond the push: the cost of
+// the frame itself, and the gap since the previous one — which is the only way
+// to see rAF being throttled or dropped, as opposed to running slowly.
+function traceFrame(at, cost) {
+  if (!TRACE) return;
+  if (lastRafAt) rafGaps.push(at - lastRafAt);
+  lastRafAt = at;
+  frameMs.push(cost);
+}
+
+function pct(a, p) {
+  if (!a.length) return 0;
+  const b = Float64Array.from(a).sort();
+  return Math.round(b[Math.min(b.length - 1, Math.floor(b.length * p))]);
+}
+
+const TRACE_WORKER_SRC = `
+// Runs on its own thread. Holds the newest sample, notices when they stop, and
+// posts everything it has to the recorder — including, and especially, while
+// the main thread is not answering.
+let last = null, lastAt = 0, stalledSince = 0, queue = [], busy = false, tick = 0;
+const STALL_MS = 1600;        // silence longer than three sample periods
+function push(r) { r.sid = SID; queue.push(r); if (queue.length > 600) queue.splice(0, queue.length - 600); }
+async function flush() {
+  if (busy || !queue.length) return;
+  busy = true;
+  const batch = queue.splice(0, queue.length);
+  try {
+    await fetch(ENDPOINT, { method: "POST", headers: { "content-type": "application/json" },
+                            body: batch.map(r => JSON.stringify(r)).join("\\n") });
+  } catch (e) { /* nobody listening; drop rather than grow without bound */ }
+  busy = false;
+}
+onmessage = e => {
+  const m = e.data;
+  lastAt = performance.now();
+  if (stalledSince) {
+    push({ t: "resume", at: Date.now(), stalledMs: Math.round(lastAt - stalledSince) });
+    stalledSince = 0;
+  }
+  last = m;
+  push(m);
+  if (m.t === "final") flush();
+};
+setInterval(() => {
+  // The worker's own lateness matters too: if this interval slips, the trouble
+  // is the whole process, not one blocked script.
+  const now = performance.now();
+  const late = tick ? Math.round(now - tick - 1000) : 0;
+  tick = now;
+  const gap = lastAt ? now - lastAt : 0;
+  if (lastAt && gap > STALL_MS) {
+    if (!stalledSince) stalledSince = lastAt;
+    push({ t: "stall", at: Date.now(), silentMs: Math.round(gap),
+           workerLateMs: late, last });
+  } else if (late > 250) {
+    push({ t: "workerLate", at: Date.now(), lateMs: late });
+  }
+  flush();
+}, 1000);
+`;
+
+function traceRecord(rec) {
+  rec.sid = TRACE_SID;
+  traceRing.push(rec);
+  if (traceRing.length > TRACE_KEEP) traceRing.splice(0, traceRing.length - TRACE_KEEP);
+  if (traceWorker) traceWorker.postMessage(rec);
+}
+
+function traceSample(kind) {
+  const wall = Date.now(), mono = performance.now();
+  const s = resourceStats();
+  const rec = {
+    t: kind, n: ++traceSeq, at: wall, up: Math.round(mono),
+    // How late this very sample ran is the cheapest read on main-thread
+    // contention there is: it is scheduled every TRACE_MS and nothing else
+    // has to cooperate for it to be true.
+    tickLateMs: Math.round(mono - lastTick - TRACE_MS),
+    // Wall clock minus monotonic clock. They advance together unless the
+    // process was suspended or descheduled, so a jump here is the OS or the
+    // browser taking the tab away rather than anything the page did.
+    driftMs: Math.round((wall - lastWall) - (mono - lastMono)),
+    frames: frameMs.length, frameP50: pct(frameMs, 0.5), frameP95: pct(frameMs, 0.95),
+    frameMax: Math.round(frameMs.reduce((a, b) => b > a ? b : a, 0)),
+    rafGapMax: Math.round(rafGaps.reduce((a, b) => b > a ? b : a, 0)),
+    longTasks, longTaskMs: Math.round(longTaskMs),
+    wheel: evWheel, pointer: evPointer,
+    hidden: document.hidden, playing, speed: +speedSel.value,
+    // Canvases are counted from the DOM rather than from our own bookkeeping,
+    // so a leak the sprite cache doesn't know about still shows up.
+    canvases: document.getElementsByTagName("canvas").length,
+    ...s,
+  };
+  if (performance.memory) {                 // Chrome: JS heap only, but free
+    rec.heapMB = +(performance.memory.usedJSHeapSize / 1048576).toFixed(1);
+    rec.heapCapMB = +(performance.memory.jsHeapSizeLimit / 1048576).toFixed(1);
+  }
+  lastTick = mono; lastWall = wall; lastMono = mono;
+  frameMs = []; rafGaps = []; longTasks = 0; longTaskMs = 0; evWheel = 0; evPointer = 0;
+  traceRecord(rec);
+  return rec;
+}
+
+if (TRACE) {
+  try {
+    // The endpoint is baked in absolute, because a worker made from a blob: URL
+    // cannot resolve a relative one: its self.location is the blob URL, and
+    // resolving "/_trace" against that throws inside URL() and inside fetch().
+    // The throw is caught by the worker's own try/catch, so the failure is
+    // completely silent — the recorder simply records nothing, which is the one
+    // way this could fail that would waste a whole reproduction.
+    traceWorker = new Worker(URL.createObjectURL(new Blob(
+      [`const ENDPOINT = ${JSON.stringify(location.origin + "/_trace")};\n`,
+       `const SID = ${JSON.stringify(TRACE_SID)};\n`,
+       TRACE_WORKER_SRC], { type: "text/javascript" })));
+  } catch (e) {
+    console.warn("[transit] trace worker unavailable, falling back to localStorage:", e);
+  }
+  // Counted with capture-phase listeners of their own, so the real handlers
+  // stay exactly as they are and a gesture can still be correlated with a
+  // freeze that happened during one.
+  addEventListener("wheel", () => evWheel++, { passive: true, capture: true });
+  addEventListener("pointermove", () => evPointer++, { passive: true, capture: true });
+  try {
+    new PerformanceObserver(list => {       // Chrome; Firefox reports no longtask
+      for (const e of list.getEntries()) { longTasks++; longTaskMs += e.duration; }
+    }).observe({ entryTypes: ["longtask"] });
+  } catch (e) { /* not supported: tickLateMs covers the same ground more coarsely */ }
+
+  traceRecord({
+    t: "open", at: Date.now(), url: location.href, ua: navigator.userAgent,
+    dpr: DPR, w: W, h: H, isolated: self.crossOriginIsolated === true,
+    cores: navigator.hardwareConcurrency, deviceMemoryGB: navigator.deviceMemory || null,
+  });
+  setInterval(() => traceSample("sample"), TRACE_MS);
+  // The tail of the record survives the tab even with no server listening.
+  setInterval(() => {
+    try { localStorage.setItem(TRACE_KEY, JSON.stringify(traceRing.slice(-TRACE_KEEP))); }
+    catch (e) { /* quota or private mode; the POSTs are the real channel */ }
+  }, 2000);
+  // A breakdown of what the tab is holding, by type — JavaScript, DOM, and
+  // which realm each belongs to. Chrome, and only when cross-origin-isolated,
+  // which is what freeze_log.py's headers are for. It is slow, so rarely.
+  //
+  // Read it next to imageMB rather than instead of it: it measured 27.8 MB on a
+  // page whose decoded images were 102 MB, because canvas backing stores and
+  // decoded image surfaces are not in its scope. That gap is the useful part —
+  // this number moving means the JS side is growing, and this number staying
+  // put while the tab dies says the memory is somewhere it cannot see.
+  if (performance.measureUserAgentSpecificMemory) {
+    setInterval(async () => {
+      try {
+        const m = await performance.measureUserAgentSpecificMemory();
+        traceRecord({ t: "uaMemory", at: Date.now(),
+                      totalMB: +(m.bytes / 1048576).toFixed(1),
+                      breakdown: m.breakdown.filter(b => b.bytes > 0).map(b => ({
+                        mb: +(b.bytes / 1048576).toFixed(1),
+                        types: b.types, scopes: b.attribution.map(a => a.scope),
+                      })) });
+      } catch (e) { /* rejected while the document is hidden, and other refusals */ }
+    }, 20000);
+  }
+  for (const ev of ["pagehide", "visibilitychange", "freeze"]) {
+    addEventListener(ev, () => {
+      const rec = traceSample("final");
+      rec.reason = ev;
+      // sendBeacon survives the document going away in a way fetch does not.
+      try { navigator.sendBeacon("/_trace", JSON.stringify(rec)); } catch (e) {}
+    });
+  }
+  console.log("[transit] tracing to /_trace and localStorage — transitTrace() "
+            + "reads the tail back after a reload, even if the tab was closed.");
+}
+
+// The tail of the record, straight from the console, after reopening the tab.
+window.transitTrace = () => {
+  try { return JSON.parse(localStorage.getItem(TRACE_KEY) || "[]"); }
+  catch (e) { return []; }
+};
 
 // Scheduling the next frame is deliberately outside the try: a thrown frame
 // must not be able to end the loop.
@@ -958,6 +1179,7 @@ function frame(now) {
     noteFrameError(err);
   }
   const cost = performance.now() - t0;
+  traceFrame(t0, cost);
   if (cost > SLOW_FRAME_MS) noteSlowFrame(cost, t0);
   requestAnimationFrame(frame);
 }
