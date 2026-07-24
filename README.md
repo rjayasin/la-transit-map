@@ -54,7 +54,15 @@ python3 -m http.server 8741
     and a shortest path) and sampled into intermediate anchors, so the
     correction follows the drawn corridor rather than a chord across it.
   - Route numbers collide across agencies, so a candidate badge is kept only
-    when its own chip color is best explained by this agency's.
+    when its own chip color is best explained by this agency's — measured
+    against every *other* agency's drawn colors, but never against this
+    agency's own. That distinction matters: the color a shape snaps to is
+    refined off the drawn lines and drifts from the legend seed it started at
+    (Foothill's came out a dozen px away), and the seed is still in the rival
+    palette, so left in it the seed sits closer to the agency's own chip than
+    the refined color does and rejects it as foreign. Foothill's Silver Streak
+    lost 16 of its 18 "SS" badges that way and, unpinned, its busway warp sat
+    up on Valley Blvd; folding the seeds into the own-color set fixes it.
   - A badge belongs to the point of the shape nearest it, which asks the warp
     to be closer to the truth than the streets are to each other. On a route
     that runs out and back on parallel streets it isn't: GTrans 2 loops north
