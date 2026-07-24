@@ -174,17 +174,32 @@ python3 -m http.server 8741
     better: the warp lags by half the distance between G Line stations, so the
     alignment minimizing total offset is the one putting every station on the
     platform *before* its own, and that is the one it found.
-  - A snapped line is finally *despiked*. Where the snapper crushes a sharp
-    deviation — a bus pulling into a transit centre, a jog at a terminal, a
-    badge sitting off to one side — into a hairpin that darts out and straight
-    back on itself within a dozen px, that sliver is straightened between the
-    good points either side of it. Only genuine doubling-back is touched: a
-    square street corner turns without returning, and a real terminal loop keeps
-    its arms a block apart, so neither is disturbed. And the straightened shape
-    is kept only when it scores fewer of these hairpins (by the same measure
-    `scripts/path_check.py` ranks on) than the snapper left — so the pass is
-    strictly a cleanup, and no shape it touches comes out worse. It settles 441
-    shapes and lifts the fleet's total hairpin turning by 28%.
+  - A snapped line is finally *despiked* and *unfolded*. Both take out the same
+    scar, at two scales: the line running out along a piece of ink and straight
+    back down it, a hairpin the artwork never makes. Despiking straightens the
+    slivers, where the dart is a dozen px. Unfolding takes out the long ones —
+    where the GTFS detours off the line the sheet draws (a bus round a transit
+    centre, a jog through an office park, a terminal loop the schematic ends in
+    a stub), the detour has no ink of its own and the snapper crushes it onto
+    the ink beside it, laying tens of px of route back over itself. The run is
+    replaced by the straight line between the points either side, which don't
+    move; a fold at an *end* instead keeps whichever leg reaches the terminus,
+    so the vehicle starts at its drawn end and drives in rather than stopping
+    short of it.
+  - Three things hold those passes back from the doubling-back a route really
+    makes. A square street corner turns without returning and a circuit round a
+    block keeps its two arms apart, so neither reads as a fold. The *warp* is
+    consulted over the same stretch — where the route itself runs out and back
+    down one street, the retracing is the route's and stays. And a fold that is
+    the only thing reaching one of the route's printed badges is a detour the
+    sheet draws, so it stays too — Metro 601's run down to the badge on Burbank
+    Blvd doubles back exactly the way the snapper's folds do.
+  - Nothing is taken on faith. Every candidate is scored on the stored,
+    rounded geometry the animation actually plays — by the very measure
+    `scripts/path_check.py` ranks on — and the best wins, the snapper's own
+    shape taking ties. So no shape comes out worse than it went in. Together
+    they settle 393 shapes and take two thirds off the fleet's total hairpin
+    turning, with every rail line still at zero.
 - **Rail platforms** — where a train halts is the white marker the sheet draws,
   not the warped stop, and matching each stop to its nearest one double-books
   platforms wherever the warp lags the artwork by more than the stops are
@@ -230,6 +245,10 @@ pipeline order is `georef.py` → `georef_inset.py` → `build_data.py`;
   which is how a bad path usually shows itself in the animation.
 - `scripts/orphan_check.py` — lists vehicles labelled with a designation the
   map never prints, which a rider has no way to look up.
+- `scripts/path_check.py` — ranks routes by how un-straight their drawn path
+  is, worst first, and locates each kink. The build gates its own cleanup
+  passes on this same score, so a route still high in the ranking is one the
+  snapper put on the wrong ink rather than one it merely roughed up.
 - `scripts/freeze_log.py` — serves the map *and* records what the page reports
   about itself, so a freeze leaves evidence outside the tab that froze.
 - `scripts/freeze_report.py` — reads that recording back and says where the page
