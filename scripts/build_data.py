@@ -1441,6 +1441,11 @@ DETOUR_VOUCH = 9.0    # px. A chip near the excursion is not evidence *for* it:
                       # and so did the rest of the route. A chip only speaks for
                       # the excursion if *taking it out* would walk the path
                       # this much further from it than it is now.
+DETOUR_INK = 5.0      # px, median over the run. Where the sheet's own vectors
+                      # are to be had they get the last word over the chips:
+                      # a flattening that would stand this much further from the
+                      # drawn line than the excursion does is not a flattening,
+                      # it is the removal of the line.
 
 
 def _flatten_run(full, base, lo, hi):
@@ -1462,7 +1467,51 @@ def _badge_vouches(full, base, lo, hi, B):
     return new > cur + DETOUR_VOUCH
 
 
-def detour_runs(full, base, badges=()):
+def _ink_vouches(full, base, lo, hi, tree):
+    """Whether the drawn line itself speaks for this excursion — that is,
+    whether flattening it would carry the path off the artwork altogether.
+
+    The badge test above is a proxy for this, and a coarse one. Chips are
+    printed every 50-100 px, so a run a few hundred px long can hold two of
+    them, and a flattening that trades one for the other passes: Metro 180 is
+    drawn along Broadway and steps south onto Colorado at Eagle Rock while the
+    warp runs straight through. The snapper follows the step exactly, to a
+    median 0.8 px of the ink. The step then reads as a 40 px excursion over the
+    sustained correction — it is one, geometrically — and the flattened version
+    cuts the corner across blank page, yet lands 4.5 px from the "180" chip
+    printed north of the bend where the correct path is 8.3 away. The badges
+    vouched for the cut, and the ballot took it.
+
+    The strokes answer directly what the chips only hint at, and this is asked
+    of the *ink* and never of a mask. A mask is broken by the labels painted
+    over it, and the stretch a real detour should be flattened back onto is
+    precisely the stretch whose ink a label knocked out — so a mask would
+    report every genuine fix as leaving the artwork and veto the lot. The PDF's
+    vectors are the drawing itself, whole under its labels, so a flattening
+    that leaves them has left the drawn line and not merely a hole in the
+    raster.
+
+    What the ink cannot answer for is the ground it is deliberately kept off.
+    `pdf_ink` drops every stroke inside the Downtown call-out and the other
+    regions the masks skip, so *any* flattening that lands in the panel reads as
+    leaving the artwork, and the test would vouch for whatever the snapper did
+    on the way in. Metro 14 comes down Beverly and finishes inside the call-out
+    with only the warp to go on; the snapper takes it 33 px onto Alvarado's
+    orange instead, and unqualified this test called that the drawn line and
+    kept it, reversing the route at its own badge. So the comparison is made
+    only where a mask could have held something, and a run flattening mostly
+    into the panel is left to the badges as before."""
+    R = full[lo:hi + 1]
+    F = np.asarray(_flatten_run(full, base, lo, hi))
+    keep = maskable(R) & maskable(F)
+    if keep.sum() < max(4, len(F) // 2):
+        return False
+    cur = float(np.median(tree.query(R[keep])[0]))
+    new = float(np.median(tree.query(F[keep])[0]))
+    return new > cur + DETOUR_INK
+
+
+def detour_runs(full, base, badges=(), ink=None):
     """Stretches where `full` leaves `base` a long way and returns to it.
 
     Measured against the *sustained* part of the correction, not against the
@@ -1512,20 +1561,22 @@ def detour_runs(full, base, badges=()):
         peak = float(off[k])
         if peak < DETOUR_PEAK:
             continue
-        if B is not None and not _badge_vouches(full, base, lo, hi, B):
-            out.append((lo, hi, peak))
-        elif B is None:
-            out.append((lo, hi, peak))
+        if B is not None and _badge_vouches(full, base, lo, hi, B):
+            continue
+        if ink is not None and _ink_vouches(full, base, lo, hi, ink):
+            continue
+        out.append((lo, hi, peak))
     return out
 
 
-def detour_penalty(full, base, badges=()):
+def detour_penalty(full, base, badges=(), ink=None):
     """How much of a shape is off its line and back. The measure `spike_penalty`
     cannot make, and the reason the ballot in main() scores both."""
-    return float(sum(pk - DETOUR_PEAK for _, _, pk in detour_runs(full, base, badges)))
+    return float(sum(pk - DETOUR_PEAK
+                     for _, _, pk in detour_runs(full, base, badges, ink)))
 
 
-def undetour(full, base, badges=()):
+def undetour(full, base, badges=(), ink=None):
     """Put a detoured stretch back on the warp.
 
     The correction either side of the excursion is real — it is what put the
@@ -1533,7 +1584,7 @@ def undetour(full, base, badges=()):
     dropping the stretch flat onto the warp and leaving a step at each join.
     What the stretch loses is only the part of the displacement that took it to
     a neighbour's ink, which is the part with nothing to vouch for it."""
-    runs = detour_runs(full, base, badges)
+    runs = detour_runs(full, base, badges, ink)
     if not runs:
         return full
     out, d = full.copy(), full - base
@@ -2686,6 +2737,10 @@ def main():
         snapped = anchored = 0
         for sid, pts in warped.items():
             out_pts, anc = None, []
+            # The tree of PDF strokes this shape was snapped on, where it had
+            # one. It is the arbiter of whether a detour is really the drawn
+            # line — see _ink_vouches, which must never be handed a mask.
+            line_ink = None
             rid = route_by_shape.get(sid)
             toks = badge_tokens.get(rid, set())
             hubs = HUB_ANCHORS.get((feed, (rid or "").split("-")[0]))
@@ -2730,6 +2785,7 @@ def main():
                     # drawn line and no chips at all.
                     tree = (ink or tile_tree(cols, BUSWAY_TOL)) if busway else mask_tree(cols)
                     snap_tree = ink or tree
+                    line_ink = ink
                     # no color gate: Metro's orange badges render with variable
                     # fade (crisp ~1 px from orange, faded ~70), overlapping
                     # muted foreign badge colors, so a color test drops genuine
@@ -2784,7 +2840,7 @@ def main():
                 # enough to put a line on track but not to say *which* track
                 # where two run together. The sheet's own name for the line
                 # says that, so it anchors like a numbered route's badges.
-                tree = rail_line_tree()
+                tree = line_ink = rail_line_tree()
                 if tree is not None:
                     anc = line_name_anchors(rid or "", tree)
                     anchored += bool(anc)
@@ -2795,7 +2851,7 @@ def main():
                 # DASH solid, Commuter Express dashed — so each snaps to its own
                 # network and neither can be dragged onto the other's streets.
                 dash = bool(is_dash.get(rid))
-                tree = ink_tree(LADOT_INK, dashed=not dash)
+                tree = line_ink = ink_tree(LADOT_INK, dashed=not dash)
                 # Commuter Express needs pinning where the warp is worst: at
                 # Marina del Rey it is 130 px out, further than the run down
                 # Via Marina is long, and the leg had no way to tell which end
@@ -2878,9 +2934,10 @@ def main():
                 # buys a straighter line at the cost of a hairpin.
                 as_snapped = full
                 spike0 = stored_penalty(as_snapped)
-                best = spike0 + DETOUR_WEIGHT * detour_penalty(as_snapped, base, anc)
+                best = spike0 + DETOUR_WEIGHT * detour_penalty(as_snapped, base,
+                                                               anc, line_ink)
                 unfolded = unfold(as_snapped, base, anc)
-                undet = undetour(as_snapped, base, anc)
+                undet = undetour(as_snapped, base, anc, line_ink)
                 for cand in (despike(as_snapped), unfolded, despike(unfolded),
                              undet, despike(undet), unfold(undet, base, anc)):
                     if np.array_equal(cand, as_snapped):
@@ -2888,7 +2945,8 @@ def main():
                     spike = stored_penalty(cand)
                     if spike > spike0:
                         continue
-                    penalty = spike + DETOUR_WEIGHT * detour_penalty(cand, base, anc)
+                    penalty = spike + DETOUR_WEIGHT * detour_penalty(cand, base,
+                                                                     anc, line_ink)
                     if penalty < best:
                         full, best = cand, penalty
             if len(full) == len(base) and os.environ.get("DETOUR_TRACE") == f"{feed}:{rid}":
@@ -2901,7 +2959,7 @@ def main():
                 print(f"  TRACE {feed}:{rid} sid={sid} n={len(_o)} arc={_c[-1]:.0f} "
                       f"medwin={_w} anchors={len(anc)} off p50={np.median(_o):.1f} "
                       f"max={_o.max():.1f} excess max={_x.max():.1f} "
-                      f"runs={len(detour_runs(full, base, anc))}")
+                      f"runs={len(detour_runs(full, base, anc, line_ink))}")
                 for _s in range(0, len(_o), max(1, len(_o) // 22)):
                     _e = min(len(_o), _s + max(1, len(_o) // 22))
                     _k = _s + int(np.argmax(_x[_s:_e]))
@@ -2909,7 +2967,7 @@ def main():
                     print(f"    arc {_c[_k]:7.0f}  off {_o[_k]:6.1f}  exc {_x[_k]:6.1f}"
                           f"  badge {_bd:6.1f}  at ({full[_k][0]:.0f},{full[_k][1]:.0f})")
             if len(full) == len(base):
-                for _lo, _hi, _pk in detour_runs(full, base, anc):
+                for _lo, _hi, _pk in detour_runs(full, base, anc, line_ink):
                     _k = _lo + int(np.argmax(np.hypot(*(full - base).T)[_lo:_hi + 1]))
                     DETOUR_AUDIT.append((_pk, feed, rid or "?",
                                          int(full[_k][0]), int(full[_k][1])))
