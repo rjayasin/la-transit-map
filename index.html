@@ -937,8 +937,47 @@ let frames = 0, lastFrameAt = performance.now();
 // been caught under a flag someone had to set in advance.
 let lastRafAt = 0, rafGapMax = 0;
 let visibleSince = performance.now(), hiddenInWindow = document.hidden;
+// Those flags were still not enough, and the third report is why: it came back
+// `hidden: true`, which the rule above reads as "no fault, the tab was
+// backgrounded" — and there is no way to tell from it whether the freeze was
+// missed or whether the freeze is *what happens* around a hide. Reading a
+// snapshot means going to the browser to read it, and on macOS a window that
+// ends up behind another is reported hidden, so the act of collecting the
+// evidence is one of the things that produces this reading. A flag that the
+// observer trips by observing cannot decide anything.
+//
+// It also disagreed with itself: `visibilityAgeMs` 50499 against `sinceFrameMs`
+// 39078, i.e. a frame 11 s after the tab was supposedly hidden. That gap dates
+// the last visibility *change*, and at load it dates the load instead, so it
+// answers a different question depending on what has happened — which is not a
+// number to reason from either.
+//
+// What can decide it is a clock that only advances while the document is
+// visible. rAF is called when the page is visible and not otherwise, so time
+// spent visible since the last frame is exactly "how long the page has been
+// asked to draw and hasn't". A tab hidden for an hour contributes nothing to it
+// and cannot fake a stall; a page that is visible and not drawing cannot hide
+// one. Everything below hangs off that instead of off document.hidden.
+let visClock = 0;                                   // ms spent visible, banked
+let visSince = document.hidden ? 0 : performance.now();   // 0 while hidden
+let frameAtVis = 0;                                 // visibleMs() at the last frame
+let stalls = 0, firstStallAt = 0;                   // what the watchdog below found
+
+function visibleMs() {
+  return visClock + (visSince ? performance.now() - visSince : 0);
+}
+
 addEventListener("visibilitychange", () => {
-  visibleSince = performance.now();
+  const now = performance.now();
+  if (document.hidden) {
+    if (visSince) { visClock += now - visSince; visSince = 0; }
+  } else if (!visSince) {
+    visSince = now;
+    // Coming back is not a stall, however long the tab was away: the loop was
+    // stopped on purpose and the next callback is due within a frame.
+    frameAtVis = visibleMs();
+  }
+  visibleSince = now;
   // A tab hidden and shown again *between* two snapshots reads as a stall in
   // both fps and rafGapMax while being visible at both ends, so the flag has to
   // survive the round trip rather than being sampled at the end of it.
@@ -963,15 +1002,29 @@ function resourceStats() {
     // failing to put them on screen. The old log couldn't tell those apart:
     // it reported no errors and no slow frames for both.
     fps: rate(frames - statsFrames), sinceFrameMs: Math.round(now - lastFrameAt),
-    // Read these next, and only then the rest. `hidden` or `hiddenSinceLast`
-    // means the browser stopped the loop on purpose at some point in this
-    // interval and there is no fault here at all — that alone accounts for
-    // fps 0. Both false, with rafGapMax in the seconds, is the compositor
-    // failing to call a loop that is ready to run: the failure this page keeps
-    // hitting, and a different thing from a loop that ran slowly, which shows up
-    // as slowFrames instead. visibilityAgeMs dates the last change either way.
+    // Then read this one, and settle the question on it alone: milliseconds the
+    // document has spent *visible* since the last frame was drawn. rAF runs when
+    // the page is visible and not otherwise, so anything here beyond a frame or
+    // two is the loop failing to be called while the page was asking to draw —
+    // no interpretation, and nothing an observer can trip by observing. Seconds
+    // of it is the freeze; `sinceFrameMs` far larger than it is a backgrounded
+    // tab and no fault at all. STALL_VISIBLE_MS of it fires the watchdog below,
+    // which records the snapshot at the time rather than leaving it to be read
+    // afterwards. Zero until the first frame: the page spends its load visible
+    // and not drawing, which is not a stall but would read as the largest one
+    // in the session to anyone who took a snapshot during it.
+    stalledVisibleMs: frames ? Math.round(visibleMs() - frameAtVis) : 0,
+    framesTotal: frames, stalls, firstStallAt,
+    // The rest is context for that number, not a substitute for it. rafGapMax is
+    // the longest gap between consecutive frames since the last snapshot, so it
+    // catches a stall the page recovered from, which the live figure above no
+    // longer shows; slowFrames is the other failure, a loop that ran but ran
+    // slowly. `hidden` and `hiddenSinceLast` say what the browser was doing to
+    // the loop on purpose, and visibilityAgeMs dates the last change — with the
+    // caveat that before the first change it dates the page load.
     hidden: document.hidden, hiddenSinceLast: hiddenInWindow,
     visibilityAgeMs: Math.round(now - visibleSince),
+    visibleMs: Math.round(visibleMs()),
     rafGapMax: Math.round(rafGapMax),
     // tilesDrawn/tileDemand are per frame: if demand ever approaches the budget
     // the cache is thrashing, and evictions will be climbing by thousands/sec.
@@ -1049,6 +1102,85 @@ setInterval(() => {
   memWarnings++;
   console.warn(`[transit] ${s.imageMB} MB of decoded images live. Snapshot:`, s);
 }, 10000);
+
+// ---- stall watchdog (always on) ----
+// Three freezes, three snapshots, and not one of them taken while the page was
+// failing: each was read off the console afterwards, by which time the numbers
+// describe the reading rather than the fault. The ?trace black box was built for
+// exactly this and has never been running when it happened, because it takes a
+// flag set in advance — and nobody sets a flag in advance for a bug that shows
+// up once a session. So the page watches itself, always, and writes down the
+// moment rather than waiting to be asked about it afterwards.
+//
+// The condition is the visible clock above: the document visible and no frame
+// for STALL_VISIBLE_MS. There is no legitimate way to sit that long — a slow
+// frame is still a frame and shows up as slowFrames, a hidden tab does not
+// advance the clock, and a frame that threw still scheduled its successor.
+//
+// The record goes to localStorage because the only cure anyone has found is
+// closing the tab, which throws away the console with it. transitFreeze() after
+// reopening reads it back. Written once, when the stall is detected, so nothing
+// touches storage on the hot path.
+//
+// What this cannot catch is the main thread wedged outright, since the timer
+// would be wedged with it — that is the ?trace worker's case, and it stays there.
+// Every freeze so far has had live timers and a dead loop, which is this one.
+const STALL_VISIBLE_MS = 4000;   // visible, and not drawn, for this long
+const STALL_TICK_MS = 1000;      // so the record lands within a second of that
+const STALL_KEY = "transit.freeze";
+const STALL_RUNUP = 30;          // cheap liveness samples kept before the stall
+let stallRunup = [], inStall = false;   // stalls/firstStallAt live with the clock
+
+// One sample per tick, and deliberately not resourceStats(): that resets the
+// rate baselines the ?debug log and the memory watchdog read from, so polling it
+// would quietly zero everyone else's rates. These are counters already being
+// kept, copied.
+function stallSample() {
+  return { t: Math.round(performance.now()), vis: Math.round(visibleMs()),
+           frames, hidden: document.hidden, stalled: Math.round(visibleMs() - frameAtVis),
+           tiles: tileCache.size, decodes: tileDecodes, evictions: tileEvictions,
+           composes: bgComposes, errors: frameErrors, slow: slowFrames,
+           k: +view.k.toFixed(3) };
+}
+
+setInterval(() => {
+  if (!frames) return;                 // nothing has drawn yet; still loading
+  const sample = stallSample();
+  stallRunup.push(sample);
+  if (stallRunup.length > STALL_RUNUP) stallRunup.shift();
+  if (sample.stalled < STALL_VISIBLE_MS) { inStall = false; return; }
+  if (inStall) return;                 // already recorded this one
+  inStall = true;
+  stalls++;
+  if (!firstStallAt) firstStallAt = Math.round(Date.now());
+  // resourceStats() is called here and only here, so the run-up above stays
+  // cheap and the snapshot below is the expensive one, taken once.
+  const snap = resourceStats();
+  console.error(`[transit] the page has been visible and not drawing for `
+              + `${sample.stalled} ms — this is the freeze, recorded. `
+              + "transitFreeze() reads it back, and survives closing the tab.", snap);
+  try {
+    const prior = JSON.parse(localStorage.getItem(STALL_KEY) || "null");
+    // Keep the first stall of the session: it is the one with the healthy-to-
+    // stalled transition in front of it. Later ones only bump the count.
+    if (prior && prior.stalls) {
+      prior.stalls = stalls;
+      prior.lastAt = Date.now();
+      localStorage.setItem(STALL_KEY, JSON.stringify(prior));
+    } else {
+      localStorage.setItem(STALL_KEY, JSON.stringify({
+        at: Date.now(), stalls, ua: navigator.userAgent,
+        screen: [innerWidth, innerHeight, DPR], snapshot: snap, runup: stallRunup,
+      }));
+    }
+  } catch (e) { /* storage full or disabled; the console record still stands */ }
+}, STALL_TICK_MS);
+
+// The record from the session that froze, after reopening the tab.
+window.transitFreeze = () => {
+  try { return JSON.parse(localStorage.getItem(STALL_KEY) || "null"); }
+  catch (e) { return null; }
+};
 
 // ---- black box (?trace) ----
 // Everything above reports from inside the page, which is the one place that
@@ -1325,6 +1457,7 @@ function frame(now) {
   const gap = lastRafAt ? t0 - lastRafAt : 0;
   if (gap > rafGapMax) rafGapMax = gap;
   lastRafAt = lastFrameAt = t0;
+  frameAtVis = visibleMs();   // the watchdog measures the stall from here
   try {
     drawFrame(now);
   } catch (err) {
@@ -1335,8 +1468,27 @@ function frame(now) {
   if (cost > SLOW_FRAME_MS) noteSlowFrame(cost, t0);
 }
 
+// The gap since the previous frame, in seconds, but never more than a beat.
+//
+// `now - lastFrame` is real elapsed time, and after a tab has been in the
+// background it is however long the tab was away — rAF stops there and the first
+// frame back carries the whole absence. At 400x that made a single frame advance
+// the simulation by hours, and one subtraction of a day doesn't bring a jump
+// like that back into range: the clock landed outside [0, 86400), no trip's
+// window contained it, and every vehicle on the map faded out for that frame.
+// It corrected itself on the next one, so what it left was a blink of an empty
+// map on returning to the tab — and, if that frame happened to be the last one
+// drawn, an empty map for as long as the tab stayed that way.
+//
+// Clamping is the right answer rather than wrapping properly, because there is
+// no sense in which the missed time should be played: nothing was drawn for it.
+// A frame that arrives late gets one frame's worth of clock and the animation
+// picks up where the eye left it.
+const MAX_STEP_SEC = 0.25;   // 4 fps; below this, real frame pacing is preserved
+
 function drawFrame(now) {
-  const dt = (now - lastFrame) / 1000; lastFrame = now;
+  const dt = Math.min(MAX_STEP_SEC, Math.max(0, (now - lastFrame) / 1000));
+  lastFrame = now;
   if (playing) {
     simT += dt * +speedSel.value;
     if (simT >= 86400) simT -= 86400;
