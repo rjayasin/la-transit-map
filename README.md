@@ -293,6 +293,11 @@ pipeline order is `georef.py` → `georef_inset.py` → `build_data.py`;
 - `scripts/freeze_report.py` — reads that recording back and says where the page
   stopped.
 - `index.html` — the whole client: loader, canvas renderer, and controls.
+- `scripts/stall_test.mjs` — `node scripts/stall_test.mjs`. Lifts the visible
+  clock and the stall watchdog out of `index.html` and drives them under a fake
+  clock, so the one thing that has to be right about a freeze report — that a
+  backgrounded tab never reads as a stall, and a stalled page always does — is
+  checked rather than assumed.
 
 ## Rebuild data
 
@@ -382,8 +387,48 @@ badge is sitting right there to copy.
 
 The tab has frozen hard enough that only closing it helps — which also throws
 away the console, the devtools pane, and every snapshot that would have said
-why. So the page can be made to report on itself from a *second thread* and
-ship the record out of the process as it goes.
+why.
+
+### The page watches itself
+
+Nothing to turn on. The render loop only runs while the document is visible, so
+the page keeps a clock that only advances while it is, and `stalledVisibleMs` is
+how long it has been visible without drawing. That is the whole diagnosis in one
+number, and it is the one to read first:
+
+| `stalledVisibleMs` | what it means |
+| --- | --- |
+| seconds of it | the freeze. Already recorded — see below |
+| near zero, `sinceFrameMs` large | a backgrounded tab. No fault; rAF is supposed to stop |
+| near zero, `rafGapMax` large | it stalled and recovered between snapshots |
+| near zero, `slowFrames` climbing | a different failure — the main thread, not the loop |
+
+It matters that this is not `document.hidden`. Three freezes were reported with
+snapshots that could not tell a dead loop from a backgrounded tab, and the third
+came back `hidden: true` — which is what you get for going to the browser to read
+the snapshot, since a window behind another window is reported hidden. A flag the
+observer trips by observing cannot settle anything. Time spent visible can: a tab
+hidden for an hour adds none of it.
+
+Four seconds of it trips a watchdog that takes a full snapshot, shouts on the
+console, and writes both — plus the previous 30 seconds of cheap liveness
+samples — to `localStorage`. Closing the tab is the only cure anyone has found
+and it takes the console with it, so the record has to outlive the tab:
+
+```js
+transitFreeze()      // in the console after reopening: the snapshot at the
+                     // stall, and the run-up to it
+```
+
+`null` after a freeze is itself a finding — the watchdog's own timer didn't fire,
+so the main thread was wedged rather than the loop starved, and the black box
+below is the tool for that.
+
+### The black box (`?trace`)
+
+Everything above reports from inside the page, which is the one place that stops
+reporting when the page is what fails. So the page can also report on itself from
+a *second thread* and ship the record out of the process as it goes.
 
 ```sh
 .venv/bin/python scripts/freeze_log.py           # serve on :8741 and record
