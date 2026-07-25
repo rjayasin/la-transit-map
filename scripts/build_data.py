@@ -1071,7 +1071,10 @@ def route_anchors(tokens, tree, region="main", colors=None, margin=8.0, near=Non
     return pts
 
 
-# Hand-placed hubs, in map px, where a route the badges can't pin terminates.
+# Points on a route's drawn line, in map px, placed by hand where the sheet
+# prints no badge the anchoring can use. They serve as badges do — and where one
+# falls near an end of the shape, trim_terminus also cuts the overshoot back to
+# it.
 #
 # A shared transit hub prints each of its routes once, in the municipal gray, so
 # the sheet's "2" at the UCLA gateway is Big Blue Bus's, not Metro's, and
@@ -1080,35 +1083,70 @@ def route_anchors(tokens, tree, region="main", colors=None, margin=8.0, near=Non
 # drifts the last stretch off the Hilgard it is drawn on, bodily west onto the
 # 602/Westwood corridor; and the schematic ends the route at the hub while the
 # GTFS runs on ~80 px past it to the real layover, which the snap chases down
-# toward Wilshire. A hub point fixes both — trim_terminus cuts the overshoot back
-# to it, and it anchors the snap so the trimmed end stays on the drawn line.
-HUB_ANCHORS = {
+# toward Wilshire. A hub point fixes both.
+#
+# Big Blue Bus 14 needs one at each end of the same failure. Its grey stops at
+# the Culver City Transit Center marker while the GTFS carries on ~100 px past
+# it to the layover at Bristol Pkwy, over ground the sheet gives the route no
+# line on — and there is ink down there all the same, the railroad's crosshatch
+# and the glyphs of "GREEN VALLEY" and "405 574", near enough BBB's grey to be
+# in the mask, so the tail snapped onto that and drove off down the freeway
+# corridor. And between its "14" on Centinela and its "14" at the hub the sheet
+# prints nothing for 245 px, over exactly the stretch where the route leaves
+# Centinela and turns east along Bluff Creek. `trace_anchors` should walk that
+# corridor and pin it, and cannot: the olive Culver CityBus line crosses the
+# grey by the transit centre and takes a 14 px bite out of the mask, which
+# breaks the walk in two. Widening the walk's reach past that bite does not help
+# and is how you find out the mask is the problem — at 6 px it steps across the
+# glyphs of the "Culver City Transit Center" label instead and comes back with a
+# shortcut through the words. So the stretch is interpolated straight between
+# the two badges, which is the chord across the corner, and the snap then has to
+# find its way back from 27 px out with a 26 px cap. One point on the drawn
+# Bluff Creek gives the interpolation the corner and halves that: worst 27.3 px
+# off the ink to 9.8, and the whole route a median 1.0.
+PINNED_ANCHORS = {
     ("gtfs_bus", "2"): [(1001, 1801)],   # Metro 2 west end at the UCLA hub
+    ("bigbluebus", "4061"): [             # BBB 14
+        (1138, 2215),                     #   south end at Culver City TC
+        (1090, 2271),                     #   Bluff Creek, east of the corner
+    ],
 }
 
-TERMINUS_REACH = 35.0   # px a shape must pass within of a hub to be cut to it
-TERMINUS_TAIL = 110.0   # px of overshoot past the hub that gets trimmed off
+TERMINUS_REACH = 35.0   # px a shape must pass within of a pin to be cut to it
+TERMINUS_TAIL = 110.0   # px of overshoot past the pin that gets trimmed off
 
 
-def trim_terminus(pts, hubs):
-    """Cut a shape back to a hub it overshoots. The schematic ends a route at
-    its hub; the GTFS runs on to a layover the map omits, and snapping that tail
-    onto whatever line runs past the hub leaves the vehicle wandering beyond its
-    drawn end. Where the shape passes close to a hub with only a short tail
-    beyond, drop the tail so the shape ends at the hub."""
+def trim_terminus(pts, pins):
+    """Cut a shape back to a pinned terminus it overshoots. The schematic ends a
+    route at its hub; the GTFS runs on to a layover the map omits, and snapping
+    that tail onto whatever line runs past the hub leaves the vehicle wandering
+    beyond its drawn end. Where the shape passes close to a pin with only a short
+    tail beyond, drop the tail so the shape ends there. A pin further into the
+    route than that has more shape on both sides of it than a layover is long,
+    and only anchors the snap.
+
+    Every pin is measured against the whole shape and the cuts applied together,
+    rather than each against what the last one left. Trimming in sequence lets
+    the cuts compound: Big Blue Bus 14's hub takes ~100 px off the end, which
+    brings the pin on Bluff Creek — 160 px into the route, and no kind of
+    terminus — inside the tail limit as measured from the new end, and the
+    second pass cut the route back to that as well."""
     P = np.asarray(densify(pts, 4.0), dtype=float)
-    for hx, hy in hubs or ():
+    if len(P) < 2:
+        return [tuple(p) for p in P]
+    cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(P, axis=0).T))])
+    lo, hi = 0, len(P) - 1
+    for hx, hy in pins or ():
         d = np.hypot(P[:, 0] - hx, P[:, 1] - hy)
         j = int(d.argmin())
         if d[j] > TERMINUS_REACH:
             continue
-        cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(P, axis=0).T))])
         head, tail = cum[j], cum[-1] - cum[j]
         if head < tail and head <= TERMINUS_TAIL:
-            P = P[j:]
+            lo = max(lo, j)
         elif tail < head and tail <= TERMINUS_TAIL:
-            P = P[:j + 1]
-    return [tuple(p) for p in P]
+            hi = min(hi, j)
+    return [tuple(p) for p in P[lo:hi + 1]]
 
 
 # Hand-drawn geometry that replaces warp+snap over a stretch the snapper cannot
@@ -1452,11 +1490,17 @@ DETOUR_VOUCH = 9.0    # px. A chip near the excursion is not evidence *for* it:
                       # and so did the rest of the route. A chip only speaks for
                       # the excursion if *taking it out* would walk the path
                       # this much further from it than it is now.
-DETOUR_INK = 5.0      # px, median over the run. Where the sheet's own vectors
-                      # are to be had they get the last word over the chips:
-                      # a flattening that would stand this much further from the
+DETOUR_INK = 5.0      # px, at INK_QUANTILE over the run. Where the drawing is
+                      # to be had it gets the last word over the chips: a
+                      # flattening that would stand this much further from the
                       # drawn line than the excursion does is not a flattening,
                       # it is the removal of the line.
+INK_QUANTILE = float(os.environ.get("INK_QUANTILE", 0.85))
+                      # of the run, sorted by distance from the drawing. The
+                      # ends of a widened run agree whatever is done to its
+                      # middle, so a median mostly reports that agreement; this
+                      # reads the far end of the run instead. Set at the most a
+                      # label can knock out of a mask — see `_ink_vouches`.
 
 
 def _flatten_run(full, base, lo, hi):
@@ -1493,17 +1537,42 @@ def _ink_vouches(full, base, lo, hi, tree):
     printed north of the bend where the correct path is 8.3 away. The badges
     vouched for the cut, and the ballot took it.
 
-    The strokes answer directly what the chips only hint at, and this is asked
-    of the *ink* and never of a mask. A mask is broken by the labels painted
-    over it, and the stretch a real detour should be flattened back onto is
-    precisely the stretch whose ink a label knocked out — so a mask would
-    report every genuine fix as leaving the artwork and veto the lot. The PDF's
-    vectors are the drawing itself, whole under its labels, so a flattening
-    that leaves them has left the drawn line and not merely a hole in the
-    raster.
+    Where the PDF's own strokes are to be had they are the better witness: they
+    are the drawing itself, whole underneath every label painted over them. But
+    the agencies that most need this test have no vector ink of their own and
+    snap onto a colour mask, and the mask was written off here as unusable — it
+    has label-shaped holes in it, and the stretch a genuine detour should be
+    flattened back onto is exactly the stretch a label knocked out, so the
+    flattening would read as leaving the artwork and every real fix would be
+    vetoed. That is only true of a test that reads the hole. A word covers a
+    short piece of a run and the drawing resumes either side of it, so the
+    comparison has only to be made somewhere the hole cannot reach.
 
-    What the ink cannot answer for is the ground it is deliberately kept off.
-    `pdf_ink` drops every stroke inside the Downtown call-out and the other
+    Which is why the two versions are compared at `INK_QUANTILE` of their
+    distance rather than at the median. The widened run reaches out to where the
+    displacement has come back, so over its ends the flattening barely moves the
+    path and both versions sit on the same ink; a median is mostly reporting
+    that agreement, and it reported it loudly enough to lose a real corner. Big
+    Blue Bus 14 comes down Centinela and turns east along Bluff Creek, a corner
+    the warp cuts across. The snapper follows it to within a median 1.7 px of
+    the drawn grey, and flattening it lays the route over blank page — yet the
+    medians read 1.7 against 4.4, under the threshold, because the half of the
+    run before the corner is on Centinela either way. At the 85th percentile the
+    same pair reads 5.9 against 20.1 and the corner stays.
+
+    Reading further out than that is worse, not better, and in the way that
+    tells you the quantile is doing the intended work: at the maximum a single
+    stray point decides, and the ink-snapped routes — whose strokes have no
+    holes to forgive in the first place — start losing genuine fixes, Metrolink's
+    Antelope Valley line and Metro 487 among them. Swept from the median to the
+    maximum, 0.85 is the floor of total drift from the drawn lines: 15180 px
+    committed, 14428 at the median, 13776 here, 14368 at the maximum, for two
+    tenths of a percent of path_check and 50 routes improved against 2 made
+    worse. Together with handing each mask-snapped shape its own agency mask it
+    takes Foothill 492, 286 and 486 to no drift at all.
+
+    What the drawing cannot answer for is the ground it is deliberately kept
+    off. `pdf_ink` drops every stroke inside the Downtown call-out and the other
     regions the masks skip, so *any* flattening that lands in the panel reads as
     leaving the artwork, and the test would vouch for whatever the snapper did
     on the way in. Metro 14 comes down Beverly and finishes inside the call-out
@@ -1517,8 +1586,9 @@ def _ink_vouches(full, base, lo, hi, tree):
     keep = maskable(R) & maskable(F)
     if keep.sum() < max(4, len(F) // 2):
         return False
-    cur = float(np.median(tree.query(R[keep])[0]))
-    new = float(np.median(tree.query(F[keep])[0]))
+    q = 100 * INK_QUANTILE
+    cur = float(np.percentile(tree.query(R[keep])[0], q))
+    new = float(np.percentile(tree.query(F[keep])[0], q))
     return new > cur + DETOUR_INK
 
 
@@ -2761,15 +2831,17 @@ def main():
         snapped = anchored = 0
         for sid, pts in warped.items():
             out_pts, anc = None, []
-            # The tree of PDF strokes this shape was snapped on, where it had
-            # one. It is the arbiter of whether a detour is really the drawn
-            # line — see _ink_vouches, which must never be handed a mask.
+            # The drawing this shape was snapped on: the PDF's strokes where it
+            # has them, its agency's colour mask where it does not. It is the
+            # arbiter of whether a detour is really the drawn line — see
+            # _ink_vouches, which reads it far enough out along the run that a
+            # mask's label-shaped holes cannot answer for the whole of it.
             line_ink = None
             rid = route_by_shape.get(sid)
             toks = badge_tokens.get(rid, set())
-            hubs = HUB_ANCHORS.get((feed, (rid or "").split("-")[0]))
-            if hubs:
-                pts = trim_terminus(pts, hubs)   # end at the drawn hub, not past it
+            pins = PINNED_ANCHORS.get((feed, (rid or "").split("-")[0]), [])
+            if pins:
+                pts = trim_terminus(pts, pins)   # end at the drawn hub, not past it
             if feed == "gtfs_rail":
                 tree = rail_trees.get(rid)
                 if tree is not None:
@@ -2821,7 +2893,7 @@ def main():
                                            {s: stops_px.get((feed, s))
                                             for s in route_stops.get((feed, rid), ())})
                            if busway else branch_anchors(
-                               route_anchors(toks, tree) + HUB_ANCHORS.get((feed, rid0), []),
+                               route_anchors(toks, tree) + pins,
                                sid, route_sids[rid], kd_for))
                     anchored += bool(anc)
                     out_pts = snap_coherent(pts, snap_tree, anchors=anc,
@@ -2911,10 +2983,12 @@ def main():
                 # the rival list; a genuinely foreign chip is still far from every
                 # one of them and still rejected.
                 gate_cols = anchor_cols + LEGEND_SEEDS.get(feed, [])
-                anc = branch_anchors(route_anchors(toks, anchor_tree, colors=gate_cols),
-                                     sid, route_sids[rid], kd_for)
+                anc = branch_anchors(
+                    route_anchors(toks, anchor_tree, colors=gate_cols) + pins,
+                    sid, route_sids[rid], kd_for)
                 anchored += bool(anc)
                 out_pts = snap_coherent(pts, agency_tree, anchors=anc)
+                line_ink = agency_tree
                 shape_isnap[(feed, sid)] = (good, 30.0, toks)
             if out_pts is not None:
                 snapped += 1
