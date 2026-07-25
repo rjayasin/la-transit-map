@@ -410,6 +410,12 @@ the snapshot, since a window behind another window is reported hidden. A flag th
 observer trips by observing cannot settle anything. Time spent visible can: a tab
 hidden for an hour adds none of it.
 
+**A locked screen reproduces the freeze signature exactly** — `fps: 0` with
+`sinceFrameMs` climbing into the minutes — and so does a minimized or fully
+covered window. Measured: 215 s of it, with `stalledVisibleMs` at 0 the whole
+way and the loop back at 60 fps the moment the screen unlocked. Rule that out
+first; `stalledVisibleMs` does it for you.
+
 Four seconds of it trips a watchdog that takes a full snapshot, shouts on the
 console, and writes both — plus the previous 30 seconds of cheap liveness
 samples — to `localStorage`. Closing the tab is the only cure anyone has found
