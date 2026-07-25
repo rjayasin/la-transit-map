@@ -196,11 +196,48 @@ python3 -m http.server 8741
     the only thing reaching one of the route's printed badges is a detour the
     sheet draws, so it stays too — Metro 601's run down to the badge on Burbank
     Blvd doubles back exactly the way the snapper's folds do.
+  - A third pass, *undetouring*, answers the failure none of that can see. A
+    mask holds a whole agency's lines and cannot tell one of them from another,
+    so where the sheet paints a label or a crossing line over a route's own ink
+    the nearest ink for that stretch is a *sibling route*, and the smoothed
+    displacement walks the path onto it and back. The 61-point smoothing makes
+    that a gentle bulge with no sharp turn in it, so despiking and unfolding
+    have nothing to charge and `path_check` scores it a flat zero — Foothill 493
+    was visibly off its line at zero. What does see it is the warp: `base` and
+    `full` are the same points before and after snapping, so a stretch leaving
+    the warp far and returning to it is the snapper having found ink the warp
+    says is not this route's. Measured against the *sustained* part of the
+    correction, since a shape the badges have rightly carried bodily onto its
+    street never returns to the warp at all.
+  - What holds *that* back is the drawing itself. The excursion and the
+    flattening that would replace it are each measured against what the route is
+    drawn in — the PDF's strokes where a route has them, its agency's colour
+    mask where it doesn't — and a flattening standing further off the drawing
+    than the excursion does is not a flattening but the removal of the line.
+    Comparing the two a good way out along the run rather than at the median is
+    what makes a holed mask usable for this: a label knocks out a short piece of
+    a run and the drawing resumes either side of it, while a corner cut across
+    blank page is off the drawing for as long as the corner lasts. Big Blue Bus
+    14's turn from Centinela onto Bluff Creek was being flattened into the chord
+    across it, and Metro 180's step from Broadway onto Colorado before it.
+  - Where the sheet prints no badge over a stretch that needs one, a point on
+    the drawn line is placed by hand (`PINNED_ANCHORS`) and serves as a badge
+    does. Two reasons it comes to that: a shared transit hub prints each of its
+    routes once in the municipal gray, so Metro 2's chip at the UCLA gateway is
+    Big Blue Bus's and the colour gate rightly refuses it; and the badge-to-
+    badge corridor walk needs the mask to be continuous, which it is not where
+    Culver CityBus's olive crosses BBB 14's gray by the Culver City Transit
+    Center. A pin near an end of a shape also cuts the overshoot back to itself,
+    for the schematic that ends a route at its hub while the GTFS runs on to a
+    layover the map omits — BBB 14 carried on past the transit centre and
+    snapped onto the railroad crosshatch down the 405.
   - Nothing is taken on faith. Every candidate is scored on the stored,
     rounded geometry the animation actually plays — by the very measure
-    `scripts/path_check.py` ranks on — and the best wins, the snapper's own
-    shape taking ties. So no shape comes out worse than it went in. Together
-    they settle 393 shapes and take two thirds off the fleet's total hairpin
+    `scripts/path_check.py` ranks on, plus what its excursions cost — and the
+    best wins, the snapper's own shape taking ties, and anything ranking worse
+    on the hairpin measure than the snapper's own shape thrown out before it is
+    scored at all. So no shape comes out worse than it went in. Together they
+    settle 393 shapes and take two thirds off the fleet's total hairpin
     turning, with every rail line still at zero.
 - **Rail platforms** — where a train halts is the white marker the sheet draws,
   not the warped stop, and matching each stop to its nearest one double-books
