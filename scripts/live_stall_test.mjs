@@ -161,6 +161,34 @@ const d = await evaluate("JSON.stringify(transitDebug())").then(JSON.parse);
 check("recovery: one loop, not two", d.fps <= 75, true);
 console.log("post-recovery fps:", d.fps);
 
+// ---- a record left by an earlier run must not swallow the next freeze ------
+// This is the one that got through: localStorage outlives the session, so the
+// old "is there a record already" test was true on any machine that had ever
+// frozen, and every later run's snapshot, run-up and verdict went nowhere.
+await evaluate(`localStorage.setItem("transit.freeze", JSON.stringify({
+    at: 1, session: "an-earlier-run", stalls: 5,
+    snapshot: { stale: true }, runup: [{ stale: true }] }));
+  localStorage.removeItem("transit.freeze.prev"); true`);
+await evaluate("window.requestAnimationFrame = () => 0;");
+await sleep(7000);
+const stale = await evaluate("JSON.stringify(transitFreeze())").then(JSON.parse);
+const prev = await evaluate("JSON.stringify(transitFreeze(1))").then(JSON.parse);
+console.log("superseding:", { session: stale.session, verdict: stale.verdict?.browserRendering,
+                              prevAt: prev?.at });
+check("earlier run: superseded, not bumped", stale.session === "an-earlier-run", false);
+check("earlier run: this run's snapshot recorded", stale.snapshot.stale, undefined);
+check("earlier run: the verdict is written after all", !!stale.verdict, true);
+check("earlier run: the superseded record stepped back one slot", prev.at, 1);
+await evaluate("window.requestAnimationFrame = window.__raf; true");
+await sleep(2500);
+
+// and it has to survive the one thing that has ever cured a freeze
+await send("Page.navigate", { url: URL });
+await sleep(9000);
+const after = await evaluate("JSON.stringify(transitFreeze())").then(JSON.parse);
+check("after a reload: the record survives", after.at, stale.at);
+check("after a reload: so does its verdict", !!after.verdict, true);
+
 let bad = 0;
 for (const [name, got, want, ok] of results) {
   if (!ok) bad++;

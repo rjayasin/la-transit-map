@@ -445,7 +445,17 @@ and it takes the console with it, so the record has to outlive the tab:
 ```js
 transitFreeze()      // in the console after reopening: the snapshot at the
                      // stall, the run-up to it, and the verdict below
+transitFreeze(1)     // the run before that one
 ```
+
+The page also says at load that a record exists, with its date and its verdict,
+so it doesn't take knowing to ask — the session after a freeze is exactly when
+nobody is thinking about the console.
+
+Each run keeps its own record: the first stall of a *session* is the one held,
+because it has the healthy-to-stalled transition in front of it, and later stalls
+in that session only bump the count. A new run supersedes an older record rather
+than adding to it, stepping the old one back to `transitFreeze(1)` first.
 
 `null` after a freeze is itself a finding — the watchdog's own timer didn't fire,
 so the main thread was wedged rather than the loop starved, and the black box

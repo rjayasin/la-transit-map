@@ -1161,7 +1161,19 @@ setInterval(() => {
 const STALL_VISIBLE_MS = 4000;   // visible, and not drawn, for this long
 const STALL_TICK_MS = 1000;      // so the record lands within a second of that
 const STALL_KEY = "transit.freeze";
+const STALL_PREV_KEY = "transit.freeze.prev";
 const STALL_RUNUP = 30;          // cheap liveness samples kept before the stall
+// Which run of the page wrote the record. "Keep the first stall of the session"
+// needs to know what the session is, and localStorage outlives it: the test used
+// to be "is there a record already", which is true in every later session on any
+// machine that has ever frozen. So the first freeze ever recorded was kept
+// forever, every freeze after it only bumped a counter on a snapshot of some
+// older run, and — worse, once there was something to amend — the verdict and
+// the recovery were dropped on the floor, because neither is written unless this
+// run owns the record. Caught the first time it mattered: the freeze on
+// 2026-07-28 12:12, two minutes after the verdict shipped, left a record from
+// 11:46 with nothing but `lastAt` changed.
+const STALL_SESSION = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 let stallRunup = [], inStall = false;   // stalls/firstStallAt live with the clock
 
 // One sample per tick, and deliberately not resourceStats(): that resets the
@@ -1279,15 +1291,20 @@ setInterval(() => {
   requestAnimationFrame(frame);
   try {
     const prior = JSON.parse(localStorage.getItem(STALL_KEY) || "null");
-    // Keep the first stall of the session: it is the one with the healthy-to-
-    // stalled transition in front of it. Later ones only bump the count.
-    if (prior && prior.stalls) {
+    // Keep the first stall of *this* session: it is the one with the healthy-to-
+    // stalled transition in front of it. Later ones in the same session only
+    // bump the count. A record from an earlier run is superseded rather than
+    // preserved — a fresh freeze, carrying its own run-up and its own verdict,
+    // is worth more than an old one — but it steps back one slot first, so
+    // nothing that has not been read yet disappears without warning.
+    if (prior && prior.session === STALL_SESSION) {
       prior.stalls = stalls;
       prior.lastAt = Date.now();
       localStorage.setItem(STALL_KEY, JSON.stringify(prior));
     } else {
+      if (prior) localStorage.setItem(STALL_PREV_KEY, JSON.stringify(prior));
       localStorage.setItem(STALL_KEY, JSON.stringify({
-        at: Date.now(), stalls, ua: navigator.userAgent,
+        at: Date.now(), session: STALL_SESSION, stalls, ua: navigator.userAgent,
         screen: [innerWidth, innerHeight, DPR], snapshot: snap, runup: stallRunup,
       }));
       ownsRecord = true;
@@ -1296,10 +1313,31 @@ setInterval(() => {
 }, STALL_TICK_MS);
 
 // The record from the session that froze, after reopening the tab.
-window.transitFreeze = () => {
-  try { return JSON.parse(localStorage.getItem(STALL_KEY) || "null"); }
+// transitFreeze(1) reaches the run before it, kept so that superseding a record
+// nobody has read yet is recoverable rather than final.
+window.transitFreeze = (back = 0) => {
+  try { return JSON.parse(localStorage.getItem(back ? STALL_PREV_KEY : STALL_KEY) || "null"); }
   catch (e) { return null; }
 };
+
+// And say at load that there is one. Reading the record takes knowing to ask for
+// it, and the whole reason it is in storage is that the tab it describes is
+// gone — so the session after a freeze is exactly when nobody is thinking about
+// the console. Announcing it also dates the code: a record from a run older than
+// the fix being tested says so, instead of being read as a result of it.
+{
+  const rec = window.transitFreeze();
+  if (rec) console.warn(
+    `[transit] a freeze was recorded ${new Date(rec.at).toLocaleString()}`
+    + `${rec.session === STALL_SESSION ? "" : " (an earlier run)"} — `
+    + `${rec.stalls} stall${rec.stalls === 1 ? "" : "s"}, `
+    + `${rec.verdict ? "verdict: " + (rec.verdict.browserRendering
+        ? "the page lost its rAF registration"
+        : "the browser stopped rendering")
+      : "no verdict recorded"}. `
+    + "transitFreeze() reads it back; the next freeze supersedes it, and "
+    + "transitFreeze(1) reaches the one before.");
+}
 
 // ---- black box (?trace) ----
 // Everything above reports from inside the page, which is the one place that
