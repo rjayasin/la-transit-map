@@ -314,6 +314,11 @@ pipeline order is `georef.py` → `georef_inset.py` → `build_data.py`;
   clock, so the one thing that has to be right about a freeze report — that a
   backgrounded tab never reads as a stall, and a stalled page always does — is
   checked rather than assumed.
+- `scripts/live_stall_test.mjs` — `node scripts/live_stall_test.mjs`, with the
+  map served on :8741. The same watchdog in a real browser: kills `rAF` with the
+  page visible and checks the stall is caught, the verdict names the page rather
+  than the browser, the tab strip warns, and the re-arm brings the loop back
+  without a reload.
 
 ## Rebuild data
 
@@ -439,12 +444,42 @@ and it takes the console with it, so the record has to outlive the tab:
 
 ```js
 transitFreeze()      // in the console after reopening: the snapshot at the
-                     // stall, and the run-up to it
+                     // stall, the run-up to it, and the verdict below
 ```
 
 `null` after a freeze is itself a finding — the watchdog's own timer didn't fire,
 so the main thread was wedged rather than the loop starved, and the black box
 below is the tool for that.
+
+### Whose fault it was: `renderTick`
+
+`stalledVisibleMs` says the page is visible and not drawing. It does not say
+whether that is because the browser stopped calling this page, or because the
+browser stopped drawing anything at all. Those need opposite fixes and the
+snapshot could not tell them apart.
+
+`document.timeline.currentTime` can. It is the timestamp `requestAnimationFrame`
+callbacks are handed, set once per frame and unmoving between them, so reading it
+from a *timer* asks the browser directly whether it is still producing frames —
+and nothing the page does can advance it or hold it back. It is reported as
+`renderTick`, and a tick after any stall the watchdog writes the verdict:
+
+| `verdict.browserRendering` | what stopped | what helps |
+| --- | --- | --- |
+| `true` | the browser is rendering; this page's rAF registration is gone | the watchdog re-arms it once a second, and it comes back on its own |
+| `false` | the browser stopped updating the rendering for a visible document | nothing from in here. Reopen the tab; a reload keeps the same process |
+
+A second, independent read on the same question comes free: `winW`/`winH` against
+`cvW`/`cvH`. Resize steps and animation-frame callbacks are dispatched by the same
+"update the rendering" pass, so a canvas still cut for a window that has since
+changed size means that pass stopped — the resize event was never delivered. The
+watchdog reconciles the two once a second, so a dropped resize heals instead of
+leaving the drawing buffer permanently the wrong size for the CSS box.
+
+While stalled the page also renames itself `⚠ frozen — …`. The tab strip is
+painted by the browser, not by this document, so it is the one channel still
+working when the rendering pass is what stopped — an overlay would sit in the
+same dead pass as the canvas.
 
 ### The black box (`?trace`)
 

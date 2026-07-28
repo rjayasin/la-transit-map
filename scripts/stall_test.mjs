@@ -32,7 +32,10 @@ const logs = { error: [], warn: [] };
 
 const env = {
   performance: { now: () => nowMs },
-  document: { hidden: false },
+  // `timeline.currentTime` is the browser's frame clock: the shim advances it
+  // only when the *browser* renders, which is the whole point of the probe —
+  // the page can be getting no frames while it climbs, and vice versa.
+  document: { hidden: false, title: "LA Transit — 24h", timeline: { currentTime: 0 } },
   navigator: { userAgent: "shim" },
   innerWidth: 1200, innerHeight: 800,
   localStorage: {
@@ -62,19 +65,44 @@ function fire(hidden) {
   for (const l of listeners) if (l.ev === "visibilitychange") l.fn();
 }
 
+// Stand-ins for the page globals the extracted blocks reach for. These live
+// inside the evaluated body rather than in `env` because the blocks *assign* to
+// them — W and H through resize(), which is the page's own two lines — and a
+// value passed in as a parameter could not be written back out.
+const prelude = `
+  let W = innerWidth, H = innerHeight, resizes = 0;
+  const cv = { width: innerWidth * DPR, height: innerHeight * DPR };
+  function resize() {
+    W = innerWidth; H = innerHeight;
+    cv.width = W * DPR; cv.height = H * DPR; resizes++;
+  }
+  let rafArmed = 0, rafFn = null;
+  function requestAnimationFrame(fn) { rafArmed++; rafFn = fn; }
+  function frame() { frames++; frameAtVis = visibleMs(); }
+`;
+
 // Evaluate the extracted blocks against the shim.
 const body = `
+  ${prelude}
   ${clockBlock}
   ${watchdogBlock}
-  return { visibleMs, frame: () => { frames++; frameAtVis = visibleMs(); },
+  return { visibleMs, frame, renderTick,
            stalled: () => Math.round(visibleMs() - frameAtVis),
-           counts: () => ({ stalls, firstStallAt }) };
+           counts: () => ({ stalls, firstStallAt }),
+           setWin: (w, h) => { innerWidth = w; innerHeight = h; },
+           win: () => ({ W, H, cvW: cv.width, cvH: cv.height, resizes }),
+           rafArmed: () => rafArmed,
+           runRaf: () => { const f = rafFn; rafFn = null; if (f) f(); } };
 `;
 const names = Object.keys(env);
 const api = new Function(...names, body)(...names.map(n => env[n]));
 
 // The page's own frame() bumps `frames`, which the shim owns; keep them in step.
-const drawFrame = () => { env.frames++; api.frame(); };
+// A page frame implies the browser rendered, so it advances that clock too.
+const drawFrame = () => { env.frames++; env.document.timeline.currentTime = nowMs; api.frame(); };
+// The browser rendering while this page gets nothing — the case the frame clock
+// exists to name, and the one no page-side counter can see.
+const browserFrame = () => { env.document.timeline.currentTime = nowMs; };
 
 // ---- the cases ------------------------------------------------------------
 const results = [];
@@ -106,7 +134,10 @@ const before = nowMs;
 advance(6000);
 check("visible 6 s, no frames: stall recorded", api.counts().stalls, 1);
 const rec = JSON.parse(store.get("transit.freeze"));
-check("stall: console.error fired", logs.error.length, 1);
+// two lines, and deliberately: the stall, then the verdict on it a tick later
+check("stall: console.error fired, then the verdict", logs.error.length, 2);
+check("stall: the verdict names who stopped",
+      /below the page/.test(logs.error[1][0]), true);
 check("stall: record has a run-up", rec.runup.length > 0, true);
 check("stall: run-up carries the stalled clock", rec.runup.at(-1).stalled >= 4000, true);
 check("stall: detected within a tick of the limit",
@@ -130,7 +161,41 @@ fire(true);
 advance(60000);
 check("hidden mid-stall: clock frozen", api.stalled(), held);
 
-// 8. the frame clock cannot jump the simulation out of range. One subtraction
+// 8. the verdict on the stall that just happened. The browser's frame clock did
+//    not move while the page was visible and asking to draw, which is the
+//    freeze as reported — and is now stated rather than inferred.
+const recV = JSON.parse(store.get("transit.freeze"));
+check("verdict: recorded a tick after detection", !!recV.verdict, true);
+check("verdict: the browser was not rendering either", recV.verdict.browserRendering, false);
+check("stall: the tab strip says so", env.document.title.startsWith("⚠ frozen"), true);
+check("stall: a frame was re-armed", api.rafArmed() > 0, true);
+
+// 9. coming back is recorded on the same record, and the title goes back
+fire(false);
+advance(16, 16); drawFrame();
+advance(1000);
+const recR = JSON.parse(store.get("transit.freeze"));
+check("recovery: title restored", env.document.title, "LA Transit — 24h");
+check("recovery: written to the record that froze", !!recR.recovered, true);
+check("recovery: counts the frames that came back", recR.recovered.framesSince > 0, true);
+check("recovery: the first record is still the first", recR.at, rec.at);
+
+// 10. the other verdict: the browser rendering normally while this page's loop
+//     gets nothing. Same stalledVisibleMs, opposite cause, opposite fix.
+for (let i = 0; i < 8; i++) { advance(1000); browserFrame(); }
+const recB = JSON.parse(store.get("transit.freeze"));
+check("verdict: browser rendering, page not called", recB.verdict.browserRendering, true);
+
+// 11. a resize event that never arrived is reconciled from the tick, once
+const r0 = api.win().resizes;
+api.setWin(1000, 600);
+advance(1000);
+check("dropped resize: canvas recut to the window", [api.win().cvW, api.win().cvH], [2000, 1200]);
+check("dropped resize: recut once, not once a second", api.win().resizes, r0 + 1);
+advance(3000);
+check("no drift: no further recuts", api.win().resizes, r0 + 1);
+
+// 12. the frame clock cannot jump the simulation out of range. One subtraction
 //    of a day is all drawFrame does, so a single frame's advance has to stay
 //    under a day — which is a property of MAX_STEP_SEC against the fastest
 //    speed the page offers, and breaks silently if either is changed.
@@ -143,6 +208,11 @@ check("clock: dt is clamped and floored", /Math\.min\(MAX_STEP_SEC, Math\.max\(0
 check("index.html still defines the visible clock", SRC.includes("function visibleMs()"), true);
 check("index.html still reports stalledVisibleMs", SRC.includes("stalledVisibleMs:"), true);
 check("frame() marks the visible clock", SRC.includes("frameAtVis = visibleMs();   // the watchdog"), true);
+check("index.html reports the browser's frame clock", SRC.includes("renderTick: renderTick()"), true);
+check("the watchdog reconciles a dropped resize",
+      SRC.includes("if (innerWidth !== W || innerHeight !== H) resize();"), true);
+check("frame() drops a duplicate rAF callback",
+      /if \(now === lastRafNow\) return;/.test(SRC), true);
 
 let bad = 0;
 for (const [name, got, want, ok] of results) {
