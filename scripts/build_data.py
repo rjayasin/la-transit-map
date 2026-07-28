@@ -534,9 +534,98 @@ BUSWAY_WIN = 9
 # Drawn colors for feeds whose lines can't be color-masked, sampled from the
 # map, so vehicle sprites still match the artwork they ride on.
 DRAWN_COLORS = {
-    "pasadena": (204, 193, 184),   # plain gray, same as street art
+    # Plain gray, the same as the street art. Re-read once the shapes were
+    # snapped onto that art: it had been sampled at (204,193,184) and the
+    # sprites came out visibly paler than the lines they ride on. A line two or
+    # three px wide is mostly edge, so anything that averages across its width —
+    # or takes the dominant cluster, which for a gray line is the palest blend
+    # rather than the fill — reads the page as much as the ink. Measured along
+    # the snapped paths and taken across the line rather than along it, the
+    # printed gray is this, and a direct profile of the drawn corridor at
+    # (2225,1348) agrees: (160,160,151) to (185,178,172).
+    "pasadena": (172, 171, 161),
     "metrolink": (120, 124, 126),  # crosshatched railroad gray
 }
+
+# ---- the street grid, for the one agency that has no line of its own ----
+#
+# Pasadena Transit is drawn in the same gray as the street art, so no color
+# finds its lines and not the grid — which is why it was left on the raw warp.
+# But look at what the sheet actually does: it gives PT no livery at all. It
+# prints "PT" beside the street the route runs on, in gray text, and the line
+# under that label is the street. There is nothing else to find.
+#
+# For every other agency that would be fatal. Here it is not, because a PT bus
+# runs *on* those streets: the grid is the right thing to snap to, and the only
+# question is which street of it. The warp already answers that nearly
+# everywhere — measured against this mask its median error is 3 px, i.e. it is
+# on the correct street and a line-width off it — and the fault is entirely in
+# the excursions, where it drifts into the white between two streets and stays
+# there for a few hundred px. Snapping with a short reach closes those without
+# ever having to choose a street, because the stretches either side of an
+# excursion are already on the right one and the smoothed field carries it.
+#
+# Not a color test: PT's gray, the street gray and the gray the sheet
+# antialiases its text with are all the same hue, and a tolerance wide enough to
+# take the line takes the lettering with it. Low saturation excludes every
+# colored livery; the luminance floor excludes the near-black label text, and the
+# ceiling the cream page. Checked against Big Blue Bus, which is gray-liveried
+# and *is* snapped: its shapes sit at a median of 0.0 px from this mask, so the
+# mask is the drawn line work and not an approximation of it.
+STREET_SAT = 22            # max(RGB) - min(RGB)
+STREET_LUM = (130, 215)    # page is lighter, label text darker
+
+
+def street_pixels(region="main"):
+    """Coordinates of every gray line-work pixel, as an Nx2 array."""
+    im, keep_full = map_image()
+    if region == "inset":
+        x0, y0, x1, y1 = INSET_RECT
+        keep = np.ones((y1 - y0, x1 - x0), dtype=bool)
+        lx0, ly0, lx1, ly1 = INSET_LEGEND
+        keep[ly0 - y0:ly1 - y0, lx0 - x0:lx1 - x0] = False
+    else:
+        x0, y0 = 0, 0
+        y1, x1 = keep_full.shape
+        keep = keep_full
+    sub = im[y0:y1, x0:x1]
+    lum = sub.mean(axis=2)
+    sat = sub.max(axis=2) - sub.min(axis=2)
+    m = (sat < STREET_SAT) & (lum >= STREET_LUM[0]) & (lum <= STREET_LUM[1])
+    ys, xs = np.nonzero(m & keep)
+    return np.c_[xs + x0, ys + y0]
+
+
+def street_tree(region="main"):
+    key = ("street", region, STREET_SAT, STREET_LUM)
+    if key not in _TREES:
+        pts = cached_pixels(
+            ("street", key, art_stamp("map.png"), EXCLUDE, code_stamp(street_pixels)),
+            lambda: street_pixels(region))
+        _TREES[key] = cKDTree(pts) if len(pts) > 300 else None
+    return _TREES[key]
+
+
+# Short, because the grid is dense and a long reach would let a stretch hop to
+# the next street over. The excursions this exists to close run 15-30 px against
+# a 3 px median, and the coherent field does most of the work: the points either
+# side of an excursion are already on the right street and hold it there.
+#
+# 26 was tried first and was a hair too short for the case that prompted all
+# this. PT 31, 32 and 33 all run the length of Washington Blvd — the GTFS stop
+# list says so, forty consecutive "Washington Blvd & …" — and the warp puts them
+# 26-28 px north of the drawn Washington, in the white between it and Woodbury
+# Rd, which is 58 px away on the other side. At a cap of 26 nothing along that
+# stretch was in reach and the field stayed flat. 34 reaches Washington with
+# margin and still cannot reach past the neighbouring street, and the nearest
+# candidate wins, so the choice between the two is made by the 26 against the 32
+# rather than by the cap.
+STREET_CAPS = (34.0, 20.0, 10.0)
+
+# Feeds with no drawn line of their own, snapped to the grid instead. Metrolink
+# is deliberately not here: it has a livery (a crosshatched railroad gray) and
+# its own anchors in the names the sheet writes along each track.
+STREET_SNAP = {"pasadena"}
 
 # Per-agency drawn-line color seeds, sampled from the map's legend swatches.
 # Thin dashes sample washed-out, so each seed is refined against pixels found
@@ -3015,6 +3104,13 @@ def main():
                 out_pts = snap_coherent(pts, agency_tree, anchors=anc)
                 line_ink = agency_tree
                 shape_isnap[(feed, sid)] = (good, 30.0, toks)
+            elif feed in STREET_SNAP:
+                # No livery, so no anchors either: the sheet prints "PT" beside
+                # the street, never a route number, so there is nothing to tell
+                # 31 from 32 where they part. The snap is unanchored and short-
+                # reaching by design — it refines within the corridor the warp
+                # already chose rather than choosing one.
+                out_pts = snap_coherent(pts, street_tree(), caps=STREET_CAPS)
             if out_pts is not None:
                 snapped += 1
             # Keep the pre-snap polyline alongside the stored one. Stops are
