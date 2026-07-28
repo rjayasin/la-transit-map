@@ -308,7 +308,13 @@ pipeline order is `georef.py` → `georef_inset.py` → `build_data.py`;
   about itself, so a freeze leaves evidence outside the tab that froze.
 - `scripts/freeze_report.py` — reads that recording back and says where the page
   stopped.
-- `index.html` — the whole client: loader, canvas renderer, and controls.
+- `index.html` — markup, styles, and a bootstrapper. Deliberately constant: it
+  is the one URL that cannot carry a version, so instead nothing in it changes
+  between deploys, and a cached copy is byte-identical to a fresh one. It asks
+  `version.json` which build is live and loads the client from that URL.
+- `app.js` — the client: loader, canvas renderer, and controls. Fetched at
+  `app.js?v=<sha>`, so it is content-addressed and a stale page can never be
+  served in place of a current one.
 - `scripts/stall_test.mjs` — `node scripts/stall_test.mjs`. Lifts the visible
   clock and the stall watchdog out of `index.html` and drives them under a fake
   clock, so the one thing that has to be right about a freeze report — that a

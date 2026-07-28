@@ -1,7 +1,7 @@
 // Exercise index.html's visible-clock + stall watchdog under a DOM shim.
 //
-// The page script is far too entangled with canvas/fetch to run whole, so this
-// lifts out the block under test verbatim from index.html — the visible clock,
+// The client is far too entangled with canvas/fetch to run whole, so this
+// lifts out the block under test verbatim from app.js — the visible clock,
 // the snapshot fields that hang off it, and the watchdog — and drives it with a
 // fake clock, a fake visibilitychange, and a fake rAF. If the extraction stops
 // matching the file the guard at the bottom fails.
@@ -11,7 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
-const SRC = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
+const SRC = fs.readFileSync(path.join(ROOT, "app.js"), "utf8");
 
 function slice(from, to) {
   const a = SRC.indexOf(from);
@@ -237,11 +237,11 @@ check("clock: one frame stays inside a day", maxStep * maxSpeed < 86400, true);
 check("clock: dt is clamped and floored", /Math\.min\(MAX_STEP_SEC, Math\.max\(0,/.test(SRC), true);
 
 // ---- guard: the extraction still matches the file -------------------------
-check("index.html still defines the visible clock", SRC.includes("function visibleMs()"), true);
-check("index.html still reports stalledVisibleMs", SRC.includes("stalledVisibleMs:"), true);
+check("app.js still defines the visible clock", SRC.includes("function visibleMs()"), true);
+check("app.js still reports stalledVisibleMs", SRC.includes("stalledVisibleMs:"), true);
 check("frame() marks the visible clock", SRC.includes("frameAtVis = visibleMs();   // the watchdog"), true);
-check("index.html reports the browser's frame clock", SRC.includes("renderTick: renderTick()"), true);
-check("index.html dates the code the tab is running",
+check("app.js reports the browser's frame clock", SRC.includes("renderTick: renderTick()"), true);
+check("app.js dates the code the tab is running",
       SRC.includes("docModified: document.lastModified"), true);
 check("the watchdog reconciles a dropped resize",
       SRC.includes("if (innerWidth !== W || innerHeight !== H) resize();"), true);
