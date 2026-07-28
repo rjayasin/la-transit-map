@@ -314,6 +314,13 @@ pipeline order is `georef.py` → `georef_inset.py` → `build_data.py`;
   clock, so the one thing that has to be right about a freeze report — that a
   backgrounded tab never reads as a stall, and a stalled page always does — is
   checked rather than assumed.
+- `scripts/stamp_build.mjs` — run by the deploy workflow, not by hand. Rewrites
+  `index.html`'s `__BUILD__` / `__V_*__` placeholders with the build id and the
+  data files' content hashes.
+- `scripts/deploy_test.mjs` — `node scripts/deploy_test.mjs`. Stamps a copy into
+  a temp directory, serves it, and checks in a real browser that the page reports
+  its build, asks for its data by content hash, notices a newer build, and offers
+  a reload instead of taking one.
 - `scripts/live_stall_test.mjs` — `node scripts/live_stall_test.mjs`, with the
   map served on :8741. The same watchdog in a real browser: kills `rAF` with the
   page visible and checks the stall is caught, the verdict names the page rather

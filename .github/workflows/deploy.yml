@@ -1,0 +1,74 @@
+name: Deploy map
+
+# Pages used to build this repo straight off the branch, which meant the files
+# served were the files committed and there was nowhere to stamp anything. That
+# cost two rounds of the freeze investigation: a freeze was reported minutes
+# after a fix went live, twice, and the record could not say whether the tab had
+# the fix — it hadn't, both times, because a tab open since before the deploy
+# keeps running the script it loaded. Building through Actions gives a step
+# between the commit and the bytes, which is where the build id goes.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Queue deploys; cancelling mid-deploy collides with the in-flight one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The build id the page reports as its own, and the one version.json
+      # advertises. Short SHA plus the commit date, so it is both unique and
+      # readable in a console line.
+      - name: Stamp the build
+        id: stamp
+        run: |
+          BUILD="$(git rev-parse --short=7 HEAD) $(git log -1 --format=%cd --date=format:'%Y-%m-%d %H:%M')"
+          TILES="$(git log -1 --format=%h -- tiles/)"
+          node scripts/stamp_build.mjs "$BUILD" "$TILES"
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
+
+      # What a running page polls to find out it is stale. Served with the same
+      # max-age as everything else, so the page asks for it with a cache-busting
+      # query — see checkVersion() in index.html.
+      - name: Write version.json
+        run: |
+          printf '{"build":%s,"sha":"%s","at":"%s"}\n' \
+            "$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "${{ steps.stamp.outputs.build }}")" \
+            "$GITHUB_SHA" \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > version.json
+          cat version.json
+
+      - uses: actions/configure-pages@v5
+
+      # Keep git metadata and the build's own inputs out of the published
+      # artifact — data/ alone is a few hundred MB of GTFS zips.
+      - name: Trim the artifact
+        run: rm -rf .git .github data scripts .venv scratch
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
