@@ -1080,6 +1080,14 @@ function resourceStats() {
     spriteCanvases, spriteMB: mb(spritePx),
     canvasMB: mb(cv.width * cv.height),
     zoom: +view.k.toFixed(3), dpr: DPR, frameErrors, slowFrames,
+    // Which copy of this file the tab is running. Twice now a freeze has been
+    // reported minutes after a fix went live and there was no way to tell from
+    // the record whether the frozen tab had it — a tab open since before the
+    // deploy keeps running the old script, and Pages serves this HTML with
+    // max-age=600, so even a reload can be served a stale copy for ten minutes.
+    // document.lastModified is the served file's Last-Modified, so it dates the
+    // code rather than the session, and costs nothing and no build step.
+    docModified: document.lastModified,
   };
   // The one number that matters for a freeze, and now a true one: every decoded
   // surface here is held by this page and released when the page releases it.

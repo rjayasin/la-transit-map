@@ -241,6 +241,8 @@ check("index.html still defines the visible clock", SRC.includes("function visib
 check("index.html still reports stalledVisibleMs", SRC.includes("stalledVisibleMs:"), true);
 check("frame() marks the visible clock", SRC.includes("frameAtVis = visibleMs();   // the watchdog"), true);
 check("index.html reports the browser's frame clock", SRC.includes("renderTick: renderTick()"), true);
+check("index.html dates the code the tab is running",
+      SRC.includes("docModified: document.lastModified"), true);
 check("the watchdog reconciles a dropped resize",
       SRC.includes("if (innerWidth !== W || innerHeight !== H) resize();"), true);
 check("frame() drops a duplicate rAF callback",
