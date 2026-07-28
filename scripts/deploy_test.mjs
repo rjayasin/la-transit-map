@@ -1,7 +1,9 @@
 // Check the deploy stamp end to end, in a real browser.
 //
-// The deploy rewrites index.html on the way to Pages: a build id the page
-// reports as its own, and content identities on the data URLs. If any of that
+// The deploy rewrites app.js on the way to Pages: a build id the page reports as
+// its own, and content identities on the data URLs. index.html stays constant
+// and unversioned on purpose — it is the one URL nobody can put a version on —
+// and the bootstrapper in it is what turns the current build into a URL. If any of that
 // silently stops happening, the symptom is the one this whole mechanism exists
 // to remove — a page that cannot say which code it is — and it would not show up
 // until the next time somebody asked. So it is checked rather than assumed.
@@ -21,6 +23,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const BUILD = "abc1234 2026-01-01 00:00";
 const TILES_REV = "deadbee";
 const LIVE = "zzz9999 2026-01-02 00:00";   // what the server advertises
+const LIVE_SHA = "beef1234567890abcdef";    // and the sha the bootstrapper asks by
 
 function findChrome() {
   if (process.env.CHROME) return process.env.CHROME;
@@ -42,18 +45,26 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "la-deploy-"));
 for (const name of ["stamped", "dev"]) {
   const dir = path.join(tmp, name);
   fs.mkdirSync(dir);
-  fs.copyFileSync(path.join(ROOT, "index.html"), path.join(dir, "index.html"));
+  for (const f of ["index.html", "app.js"]) {
+    fs.copyFileSync(path.join(ROOT, f), path.join(dir, f));
+  }
   for (const f of ["map.png", "schedule.json", "tiles"]) {
     fs.symlinkSync(path.join(ROOT, f), path.join(dir, f));
   }
-  fs.writeFileSync(path.join(dir, "version.json"), JSON.stringify({ build: LIVE }));
+  // Only the deployed copy has a version.json — it is written by the workflow,
+  // so a working copy served off `python3 -m http.server` simply 404s it, which
+  // is the case the bootstrapper's fallback exists for.
+  if (name === "stamped") {
+    fs.writeFileSync(path.join(dir, "version.json"),
+                     JSON.stringify({ build: LIVE, sha: LIVE_SHA }));
+  }
 }
 const stamp = spawn(process.execPath,
   [path.join(ROOT, "scripts/stamp_build.mjs"), BUILD, TILES_REV],
   { cwd: path.join(tmp, "stamped"), stdio: "inherit" });
 await new Promise((res, rej) => stamp.on("exit", c => (c ? rej(new Error(`stamp exited ${c}`)) : res())));
 
-const TYPES = { ".html": "text/html", ".json": "application/json",
+const TYPES = { ".html": "text/html", ".json": "application/json", ".js": "text/javascript",
                 ".png": "image/png", ".webp": "image/webp" };
 const server = http.createServer((req, res) => {
   const [urlPath] = req.url.split("?");
@@ -116,6 +127,15 @@ const h = f => crypto.createHash("sha256").update(fs.readFileSync(path.join(ROOT
 
 console.log("stamped:", { build: s.build, stale: s.staleBuild, frames: s.framesTotal });
 check("stamped: the page reports its build", s.build, BUILD);
+// the bootstrapper asked version.json who is live, then named that build in the
+// URL it loaded the client from — which is the whole mechanism
+check("stamped: version.json read before the client",
+      net.findIndex(u => u.includes("version.json")) < net.findIndex(u => u.includes("app.js")), true);
+check("stamped: the client fetched at the live build's URL",
+      net.some(u => u.endsWith(`app.js?v=${LIVE_SHA.slice(0, 7)}`)), true);
+// index.html is the URL that cannot be versioned, and must not pretend to be
+check("stamped: index.html itself carries no version",
+      net.some(u => /index\.html\?[^"]*[?&]v=/.test(u)), false);
 check("stamped: it is drawing", s.framesTotal > 0, true);
 check("stamped: schedule.json carries its content hash",
       net.some(u => u.includes(`schedule.json?v=${h("schedule.json")}`)), true);
@@ -135,7 +155,9 @@ check("stamped: it did not reload itself", s.framesTotal > 100, true);
 const d = await load("dev");
 console.log("dev:", { build: d.build, stale: d.staleBuild });
 check("dev: build is the placeholder", d.build, "__BUILD__");
-check("dev: no version poll", net.some(u => u.includes("version.json")), false);
+// No version.json to be had, so the bootstrapper falls back and the client
+// itself, seeing an unstamped build, never polls or nags.
+check("dev: the client loads unversioned", net.some(u => u.endsWith("app.js")), true);
 check("dev: nothing stale to report", d.staleBuild, null);
 check("dev: no update button", await ev("!document.getElementById('upd').hidden"), false);
 check("dev: still draws", d.framesTotal > 0, true);

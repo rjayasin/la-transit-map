@@ -1,11 +1,12 @@
-// Rewrite index.html's build placeholders at deploy time.
+// Rewrite app.js's build placeholders at deploy time.
 //
 // Pages serves everything with Cache-Control: max-age=600 and gives no way to
 // change it, so a stale index.html is always possible for up to ten minutes and
 // a tab left open is stale indefinitely. Neither is fixable in the headers. What
 // is fixable is the page not *knowing*: it now carries the id of the build it
 // came from, so a snapshot names its code exactly, and it can ask version.json
-// whether it is the current one.
+// whether it is the current one. index.html is deliberately not stamped — it is
+// the one URL that cannot be versioned, so it is kept constant instead.
 //
 // The data files get the build's content identity in a query string, matching
 // the pattern the site repo uses: a cached index.html can then never pair with a
@@ -33,14 +34,14 @@ const subs = [
   ["__V_TILES__", tilesRev],
 ];
 
-let src = fs.readFileSync("index.html", "utf8");
+let src = fs.readFileSync("app.js", "utf8");
 for (const [from, to] of subs) {
   if (!src.includes(from)) {
-    console.error(`index.html has no ${from} placeholder — stamping would be silent`);
+    console.error(`app.js has no ${from} placeholder — stamping would be silent`);
     process.exit(1);
   }
   src = src.split(from).join(to);
 }
-fs.writeFileSync("index.html", src);
+fs.writeFileSync("app.js", src);
 
 for (const [from, to] of subs) console.log(`  ${from} -> ${to}`);
