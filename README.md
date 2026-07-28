@@ -59,6 +59,22 @@ python3 -m http.server 8741
     PDF. Between consecutive badges the drawn line is walked (a coarse lattice
     and a shortest path) and sampled into intermediate anchors, so the
     correction follows the drawn corridor rather than a chord across it.
+  - A walk is believed only when it comes out about as long as the shape says
+    that stretch is, since the drawn lines are one connected web and a walk
+    cutting a corner the route really turns comes back conspicuously short. But
+    on the first pass the shape saying so is the warp, and where the warp is bad
+    enough to need the walk it is too bad to judge it — so the anchor fit re-runs
+    while it keeps learning something the last pass didn't have: a badge it
+    couldn't reach, *or* a corridor it couldn't believe. Metro 240 comes down
+    Reseda and turns east along Ventura with the warp 94 px north of the corner,
+    which puts the badge above the turn nearest a warp point already past it:
+    the arc between that badge and the next reads 219 px against the drawn
+    corridor's 299, the walk round the corner is thrown out as a detour, and the
+    chord across it is what the snap then followed. Both badges were in reach the
+    whole time, so a pass counting only badges stopped there. Once the fit has
+    put the shape on them the same arc reads 234 px and the corner comes back —
+    as does Metro 246's turn off Pacific onto Paseo del Mar in San Pedro, and 47
+    other routes'.
   - Route numbers collide across agencies, so a candidate badge is kept only
     when its own chip color is best explained by this agency's — measured
     against every *other* agency's drawn colors, but never against this
