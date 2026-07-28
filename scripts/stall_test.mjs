@@ -195,7 +195,39 @@ check("dropped resize: recut once, not once a second", api.win().resizes, r0 + 1
 advance(3000);
 check("no drift: no further recuts", api.win().resizes, r0 + 1);
 
-// 12. the frame clock cannot jump the simulation out of range. One subtraction
+// 12. a record left by an *earlier run* must not swallow this one. localStorage
+//     outlives the session, so "is there a record already" was true on every
+//     machine that had ever frozen — which kept the first freeze ever seen and
+//     silently dropped every later run's snapshot, run-up and verdict. Caught in
+//     the wild: a freeze two minutes after the verdict shipped left a record
+//     from 26 minutes earlier with nothing but `lastAt` changed.
+store.set("transit.freeze", JSON.stringify({
+  at: 1, session: "an-earlier-run", stalls: 5,
+  snapshot: { stale: true }, runup: [{ stale: true }],
+}));
+store.delete("transit.freeze.prev");
+advance(16, 16); drawFrame();          // clear the stall from case 10
+for (let i = 0; i < 8; i++) { advance(1000); browserFrame(); }
+const recN = JSON.parse(store.get("transit.freeze"));
+check("earlier run: superseded, not bumped", recN.session === "an-earlier-run", false);
+check("earlier run: this run's snapshot recorded", recN.snapshot.stale, undefined);
+check("earlier run: this run's run-up recorded", recN.runup.length > 1, true);
+check("earlier run: the verdict is written after all", !!recN.verdict, true);
+check("earlier run: and it is this run's verdict", recN.verdict.browserRendering, true);
+const prevN = JSON.parse(store.get("transit.freeze.prev"));
+check("earlier run: the superseded record stepped back one slot", prevN.at, 1);
+
+// 13. two stalls in the *same* session still keep the first, as before
+const firstAt = recN.at;
+advance(16, 16); drawFrame();
+advance(6000);
+const recS = JSON.parse(store.get("transit.freeze"));
+check("same session: first record kept", recS.at, firstAt);
+check("same session: count bumped", recS.stalls > recN.stalls, true);
+check("same session: nothing pushed to the previous slot",
+      JSON.parse(store.get("transit.freeze.prev")).at, 1);
+
+// 14. the frame clock cannot jump the simulation out of range. One subtraction
 //    of a day is all drawFrame does, so a single frame's advance has to stay
 //    under a day — which is a property of MAX_STEP_SEC against the fastest
 //    speed the page offers, and breaks silently if either is changed.
