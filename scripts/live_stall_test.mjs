@@ -103,7 +103,12 @@ console.log("healthy:", {
 check("healthy: frames are being drawn", a.framesTotal > 0, true);
 check("healthy: no stall", a.stalledVisibleMs < 500, true);
 check("healthy: the browser's frame clock is live", a.renderTick > 0, true);
-check("healthy: canvas matches the window", [a.cvW, a.cvH], [a.winW * a.dpr, a.winH * a.dpr]);
+// The backing store is capped at MAX_CANVAS_PX, so dpr is no longer a round 2 on
+// a wide window and the buffer is the rounded product rather than the exact one.
+check("healthy: canvas matches the window",
+      [a.cvW, a.cvH], [Math.round(a.winW * a.dpr), Math.round(a.winH * a.dpr)]);
+check("healthy: the backing store is within the accelerated size",
+      Math.max(a.cvW, a.cvH) <= 4096, true);
 check("healthy: nothing recorded", await evaluate("transitFreeze() === null"), true);
 check("healthy: the snapshot dates the code it is running",
       typeof a.docModified === "string" && a.docModified.length > 0, true);

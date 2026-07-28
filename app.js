@@ -19,11 +19,35 @@ const DEPLOYED = !BUILD.startsWith("__");     // false in a working copy
 let staleBuild = null;
 
 const cv = document.getElementById("c"), ctx = cv.getContext("2d");
-const DPR = Math.min(devicePixelRatio || 1, 2);
+// A canvas past a certain size stops being accelerated and falls back to
+// software, and it is a cliff rather than a slope. Measured on this page at a
+// fixed view, same window height, same everything else:
+//
+//     canvas 2560x1900   0.5 ms a frame
+//     canvas 4096x1900   0.5 ms a frame
+//     canvas 5120x1900   9.7 ms a frame     <- twenty times, for 25% more pixels
+//
+// The reporter's window in this investigation is 2560 CSS px wide, so at a
+// device-pixel ratio of 2 it lands at 5120 and has been paying that on every
+// frame of every session — the ~43 fps that looked like a large-window tax, and
+// nine tenths of the main thread's frame budget spent on a blit.
+//
+// So the backing store is capped and the ratio follows it: at 2560 CSS px that
+// is 1.6 rather than 2. Well above 1, and the tile pyramid supplies the detail
+// either way, so what it costs is a little sharpness on very wide windows.
+//
+// DPR is read at call time everywhere (transforms, sprite sizes, the tile level,
+// the zoom limit), so it can change with the window; it is no longer a constant.
+const MAX_CANVAS_PX = 4096;
+let DPR = Math.min(devicePixelRatio || 1, 2);
 let W = 0, H = 0;
 function resize() {
-  W = innerWidth; H = innerHeight;
-  cv.width = W * DPR; cv.height = H * DPR;
+  W = Math.max(1, innerWidth); H = Math.max(1, innerHeight);
+  const raw = Math.min(devicePixelRatio || 1, 2);
+  const fit = Math.min(raw, MAX_CANVAS_PX / W, MAX_CANVAS_PX / H);
+  cv.width = Math.max(1, Math.round(W * fit));
+  DPR = cv.width / W;                  // the ratio the buffer actually has
+  cv.height = Math.max(1, Math.round(H * DPR));
   cv.style.width = W + "px"; cv.style.height = H + "px";
 }
 addEventListener("resize", () => { resize(); });
@@ -1009,6 +1033,9 @@ addEventListener("visibilitychange", () => {
 // rates a snapshot reports are since the *previous* snapshot, whoever took it.
 let statsAt = 0, statsFrames = 0, statsComposes = 0, statsEvictions = 0, statsDecodes = 0;
 let peakDecodeRate = 0, peakEvictRate = 0;
+// Reset with the rate baselines below, so these describe the window a snapshot
+// covers rather than the whole session.
+let frameCostSum = 0, frameCostN = 0, frameCostMax = 0;
 
 function resourceStats() {
   let spriteCanvases = 0, spritePx = 0;
@@ -1076,6 +1103,10 @@ function resourceStats() {
     // 13:21 freeze was ~48 decodes and ~50 evictions a second, sustained for 26
     // seconds of zooming, while every instantaneous reading looked healthy.
     peakDecodeRate, peakEvictRate,
+    // Time inside drawFrame, averaged over this snapshot's window, and the worst
+    // one in it. Against fps this says whether the page is the bottleneck.
+    frameCostAvg: frameCostN ? +(frameCostSum / frameCostN).toFixed(1) : 0,
+    frameCostMax: +frameCostMax.toFixed(1),
     // Whether the last compose drew the base PNG, and at what scale — see
     // composeBackground. tileHoldFrames counts frames drawn while tile loading
     // was deliberately held off because the view was still moving.
@@ -1108,6 +1139,7 @@ function resourceStats() {
   s.peakDecodeRate = peakDecodeRate; s.peakEvictRate = peakEvictRate;
   statsAt = now; statsFrames = frames; statsComposes = bgComposes;
   statsEvictions = tileEvictions; statsDecodes = tileDecodes;
+  frameCostSum = 0; frameCostN = 0; frameCostMax = 0;
   rafGapMax = 0; hiddenInWindow = document.hidden;
   return s;
 }
@@ -1253,6 +1285,7 @@ function stallSample() {
            // the churn on the way in, and what the compositor was being handed:
            // `base` is the 17-megapixel PNG going down at `k`*DPR scale
            queued: tileQueue.length, base: baseDrawn, hold: tileHoldFrames,
+           cost: +(frameCostN ? frameCostSum / frameCostN : 0).toFixed(1),
            k: +view.k.toFixed(3) };
 }
 
@@ -1695,6 +1728,15 @@ function frame(now) {
     noteFrameError(err);
   }
   const cost = performance.now() - t0;
+  // What a frame actually costs this page, as opposed to how often it is called.
+  // fps has read ~43 on this display through every freeze, and that is two very
+  // different things: a page spending 23 ms a frame is saturating the main
+  // thread and the canvas is too big for it, while a page spending 3 ms and
+  // still getting 43 callbacks is being given fewer frames than it could use,
+  // and its own drawing is not what to look at. slowFrames cannot tell them
+  // apart — it only fires past 500 ms, and has read 0 in all seven reports.
+  frameCostSum += cost; frameCostN++;
+  if (cost > frameCostMax) frameCostMax = cost;
   traceFrame(cost, gap);
   if (cost > SLOW_FRAME_MS) noteSlowFrame(cost, t0);
 }

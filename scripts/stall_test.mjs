@@ -50,6 +50,7 @@ const env = {
   frames: 0, tileCache: new Map(), tileDecodes: 0, tileEvictions: 0,
   bgComposes: 0, frameErrors: 0, slowFrames: 0, view: { k: 1.5 }, DPR: 2,
   tileQueue: [], baseDrawn: false, tileHoldFrames: 0,
+  frameCostSum: 0, frameCostN: 0,
   DEBUG: false, TRACE: false,
   resourceStats: () => ({ fake: true }),
 };
@@ -242,6 +243,8 @@ check("app.js still defines the visible clock", SRC.includes("function visibleMs
 check("app.js still reports stalledVisibleMs", SRC.includes("stalledVisibleMs:"), true);
 check("frame() marks the visible clock", SRC.includes("frameAtVis = visibleMs();   // the watchdog"), true);
 check("app.js reports the browser's frame clock", SRC.includes("renderTick: renderTick()"), true);
+check("app.js measures what a frame costs",
+      SRC.includes("frameCostAvg: frameCostN"), true);
 check("app.js records what the compositor was handed",
       SRC.includes("queued: tileQueue.length, base: baseDrawn, hold: tileHoldFrames"), true);
 check("app.js holds tile loading while the view moves",
