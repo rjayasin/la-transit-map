@@ -23,6 +23,12 @@
   #bar button { background: transparent; color: #fff; border: 0; border-radius: 8px;
                 width: 38px; height: 30px; font-size: 15px; cursor: pointer; }
   #bar button:hover { background: rgba(255,255,255,.16); }
+  /* Wider than the icon buttons because it carries a word, and tinted so it
+     reads as new rather than as one more control that was always there. */
+  #bar #upd { width: auto; padding: 0 10px; font-size: 13px; background: #e8a33d;
+              color: #201800; font-weight: 600; }
+  #bar #upd:hover { background: #f0b459; }
+  #bar #upd[hidden] { display: none; }
   #bar input[type=range] { flex: 1 1 auto; min-width: 60px; width: min(46vw, 520px); }
   #bar select { background: #333; color: #fff; border: 0; border-radius: 6px; padding: 4px; }
   #stats { font-variant-numeric: tabular-nums; opacity: .85; font-size: 13px; min-width: 0;
@@ -59,6 +65,7 @@
     <option value="400">400×</option>
   </select>
   <span id="stats"></span>
+  <button id="upd" title="a newer build is live — click to reload" hidden>↻ update</button>
   <button id="sys" title="transit systems">
     <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-2px">
       <path d="M3 4h18l-7.2 8.4V19l-3.6 2.4v-9L3 4z"/>
@@ -67,6 +74,25 @@
 </div>
 <script>
 "use strict";
+// ---- which build this is ----
+// Replaced at deploy time by scripts/stamp_build.mjs; left as the placeholder
+// when the file is served straight from a checkout, which is how a dev copy
+// tells itself apart from a published one.
+//
+// Pages serves every file with Cache-Control: max-age=600 and offers no way to
+// change it, so a stale index.html is possible for ten minutes after any deploy
+// and a tab left open is stale for as long as it stays open. Neither is fixable
+// in the headers. What is fixable is not being able to *tell*: the build id
+// travels in every snapshot, so a freeze record names the exact code that
+// produced it, and the data files carry it in their URLs, so a cached page can
+// never pair with a newer schedule.json than the one it was built against.
+const BUILD = "__BUILD__";
+const V_SCHEDULE = "__V_SCHEDULE__", V_MAP = "__V_MAP__", V_TILES = "__V_TILES__";
+const DEPLOYED = !BUILD.startsWith("__");     // false in a working copy
+// Set by checkVersion() below, and reported in every snapshot. Declared up here
+// because resourceStats() reads it and is defined long before the poll is.
+let staleBuild = null;
+
 const cv = document.getElementById("c"), ctx = cv.getContext("2d");
 const DPR = Math.min(devicePixelRatio || 1, 2);
 let W = 0, H = 0;
@@ -344,7 +370,7 @@ async function fetchTile(t) {
   t.ctl = new AbortController();
   tileInflight++;
   try {
-    const res = await fetch(`tiles/${t.level}/${t.c}_${t.r}.webp`, { signal: t.ctl.signal });
+    const res = await fetch(`tiles/${t.level}/${t.c}_${t.r}.webp?v=${V_TILES}`, { signal: t.ctl.signal });
     if (!res.ok) throw new Error(`tile ${t.key}: HTTP ${res.status}`);
     const bmp = await createImageBitmap(await res.blob());
     if (t.dead) { bmp.close(); tileDiscards++; return; }   // evicted mid-flight
@@ -727,8 +753,8 @@ function spriteSize(half, s) {
 
 // ---- load ----
 Promise.all([
-  new Promise(res => { const im = new Image(); im.onload = () => res(im); im.src = "map.png"; }),
-  fetch("schedule.json").then(r => r.json()),
+  new Promise(res => { const im = new Image(); im.onload = () => res(im); im.src = `map.png?v=${V_MAP}`; }),
+  fetch(`schedule.json?v=${V_SCHEDULE}`).then(r => r.json()),
 ]).then(([im, d]) => {
   map = im; data = d;
   fitView(im.width, im.height);
@@ -1086,8 +1112,9 @@ function resourceStats() {
     // deploy keeps running the old script, and Pages serves this HTML with
     // max-age=600, so even a reload can be served a stale copy for ten minutes.
     // document.lastModified is the served file's Last-Modified, so it dates the
-    // code rather than the session, and costs nothing and no build step.
-    docModified: document.lastModified,
+    // code rather than the session, and costs nothing and no build step. `build`
+    // names it exactly, once the deploy has stamped one in.
+    build: BUILD, docModified: document.lastModified, staleBuild,
   };
   // The one number that matters for a freeze, and now a true one: every decoded
   // surface here is held by this page and released when the page releases it.
@@ -1143,6 +1170,46 @@ setInterval(() => {
   memWarnings++;
   console.warn(`[transit] ${s.imageMB} MB of decoded images live. Snapshot:`, s);
 }, 10000);
+
+// ---- am I the current build? ----
+// A tab open across a deploy keeps running the script it loaded, for as long as
+// it stays open. That is ordinary browser behaviour and not a fault, but it cost
+// this investigation two rounds: a freeze was reported minutes after a fix went
+// live, twice, and both times the tab predated it — which took reading the shape
+// of the stored record to work out, after the fact.
+//
+// So the page asks. version.json carries the build the deploy published; the
+// query string is what gets past the CDN, which would otherwise answer from the
+// same ten-minute cache that made the page stale in the first place, and
+// no-store keeps it out of the browser's own.
+//
+// It never reloads by itself. This is a simulation someone watches for a long
+// time at a zoom and a clock they chose, and throwing that away to pick up a
+// change they haven't asked for would be worse than being a version behind. It
+// offers, in the bar, and says so on the console.
+const VERSION_POLL_MS = 300000;   // 5 min; a deploy is not an urgent event
+const updEl = document.getElementById("upd");
+updEl.addEventListener("click", () => location.reload());
+
+async function checkVersion() {
+  if (!DEPLOYED || staleBuild || document.hidden) return;
+  try {
+    const res = await fetch(`version.json?ts=${Date.now()}`, { cache: "no-store" });
+    if (!res.ok) return;
+    const v = await res.json();
+    if (!v.build || v.build === BUILD) return;
+    staleBuild = v.build;
+    updEl.hidden = false;
+    console.warn(`[transit] this tab is running build ${BUILD}; ${v.build} is live. `
+               + "Nothing is wrong with it — but a freeze reported from this tab is a "
+               + "freeze in the older code. The update button in the bar reloads.");
+  } catch (e) { /* offline, or the deploy is mid-flight; ask again next time */ }
+}
+setInterval(checkVersion, VERSION_POLL_MS);
+// and whenever the tab is picked up again, which is when a long-open one is
+// most likely to have missed something
+addEventListener("visibilitychange", () => { if (!document.hidden) checkVersion(); });
+checkVersion();
 
 // ---- stall watchdog (always on) ----
 // Three freezes, three snapshots, and not one of them taken while the page was
