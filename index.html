@@ -967,6 +967,29 @@ function visibleMs() {
   return visClock + (visSince ? performance.now() - visSince : 0);
 }
 
+// The browser's own frame clock, and the one number that says whose fault a
+// stall is.
+//
+// `document.timeline.currentTime` is the timestamp rAF callbacks are handed. It
+// is set once per "update the rendering" pass and does not move between them, so
+// reading it from a *timer* asks the browser directly: are you still producing
+// frames? It is not the page's bookkeeping — nothing this file does can advance
+// it or hold it back.
+//
+// Against `stalledVisibleMs` it splits the freeze in two, and the split is the
+// whole question:
+//
+//   climbing, while the page has no frames  — the browser is rendering and this
+//     page's rAF registration is gone. A page bug, and re-arming recovers it.
+//   frozen at the same value                — the browser stopped updating the
+//     rendering for a document that is visible and asking. Nothing the page
+//     draws can reach the screen, because the compositing pass is the one that
+//     stopped. Not fixable from in here; survivable, and reported as such.
+function renderTick() {
+  const t = document.timeline && document.timeline.currentTime;
+  return typeof t === "number" ? Math.round(t) : -1;
+}
+
 addEventListener("visibilitychange", () => {
   const now = performance.now();
   if (document.hidden) {
@@ -1026,6 +1049,16 @@ function resourceStats() {
     visibilityAgeMs: Math.round(now - visibleSince),
     visibleMs: Math.round(visibleMs()),
     rafGapMax: Math.round(rafGapMax),
+    // Whether the *browser* is still producing frames, independent of whether
+    // this page is getting any — see renderTick(). Read it second, right after
+    // stalledVisibleMs, and it names the culprit outright.
+    renderTick: renderTick(),
+    // The window against the canvas cut for it. These agree unless a resize
+    // event went undelivered, and one that did is worth as much as renderTick:
+    // resize steps and animation-frame callbacks are dispatched by the same
+    // "update the rendering" pass, so a canvas still cut for a window that has
+    // since changed size is the same finding by another route.
+    winW: innerWidth, winH: innerHeight, cvW: cv.width, cvH: cv.height,
     // tilesDrawn/tileDemand are per frame: if demand ever approaches the budget
     // the cache is thrashing, and evictions will be climbing by thousands/sec.
     tilesCached: tileCache.size, tilesDrawn, tileDemand: Math.round(tileDemand),
@@ -1138,27 +1171,112 @@ let stallRunup = [], inStall = false;   // stalls/firstStallAt live with the clo
 function stallSample() {
   return { t: Math.round(performance.now()), vis: Math.round(visibleMs()),
            frames, hidden: document.hidden, stalled: Math.round(visibleMs() - frameAtVis),
+           // the browser's frame clock beside this page's frame count: the pair
+           // is what dates the moment rendering stopped, and says whose it was
+           tick: renderTick(), winH: innerHeight, cvH: cv.height,
            tiles: tileCache.size, decodes: tileDecodes, evictions: tileEvictions,
            composes: bgComposes, errors: frameErrors, slow: slowFrames,
            k: +view.k.toFixed(3) };
 }
 
+// Whether the stored record is this session's, so the verdict and the recovery
+// below attach to the stall they describe rather than to an older one kept for
+// its run-up.
+let ownsRecord = false, verdictPending = false;
+let stallTick = 0, stallFrames = 0, stallAtVis = 0;
+const PAGE_TITLE = document.title;
+
+// Amend the stored record in place. The stall is the one time storage is worth
+// touching more than once: nothing is drawing, so there is no hot path to stay
+// off, and what happens *after* detection is half the evidence.
+function amendRecord(fields) {
+  if (!ownsRecord) return;
+  try {
+    const rec = JSON.parse(localStorage.getItem(STALL_KEY) || "null");
+    if (rec) localStorage.setItem(STALL_KEY, JSON.stringify(Object.assign(rec, fields)));
+  } catch (e) { /* storage full or disabled; the console record still stands */ }
+}
+
 setInterval(() => {
+  // A resize event that was never delivered leaves the canvas cut for a window
+  // that no longer exists, and it stays that way until the next resize — the
+  // drawing buffer permanently the wrong size for the CSS box, which stretches
+  // everything drawn into it. That is not hypothetical: the freeze this
+  // watchdog caught reported a 2560x1331 canvas in a 2560x1081 window, because
+  // resize steps ride the same "update the rendering" pass as rAF and stopped
+  // with it. Reconciling here costs two property reads a second and heals it
+  // whenever frames come back, whatever ate the event.
+  if (innerWidth !== W || innerHeight !== H) resize();
+
   if (!frames) return;                 // nothing has drawn yet; still loading
   const sample = stallSample();
   stallRunup.push(sample);
   if (stallRunup.length > STALL_RUNUP) stallRunup.shift();
-  if (sample.stalled < STALL_VISIBLE_MS) { inStall = false; return; }
-  if (inStall) return;                 // already recorded this one
+
+  if (sample.stalled < STALL_VISIBLE_MS) {
+    if (inStall) {                     // it came back
+      document.title = PAGE_TITLE;
+      console.warn(`[transit] frames resumed after ${Math.round(sample.vis - stallAtVis)} ms `
+                 + "of visible stall.");
+      amendRecord({ recovered: {
+        afterVisibleMs: Math.round(sample.vis - stallAtVis),
+        framesSince: frames - stallFrames, tickSince: sample.tick - stallTick,
+      } });
+    }
+    inStall = false;
+    return;
+  }
+
+  if (inStall) {
+    // Keep asking for a frame, once a second, for as long as it is stalled. One
+    // request at detection only covers a registration dropped at that instant;
+    // if the browser stopped delivering and later starts again, whether the loop
+    // comes back depends on there being a live request when it does. frame()
+    // drops a duplicate callback, so the standing request and this one cannot
+    // both take.
+    requestAnimationFrame(frame);
+    // One tick after detection, still stalled: the browser's frame clock has
+    // had a full second to move, and whether it did is the whole diagnosis.
+    // Recorded once — after that there is nothing further to learn by watching.
+    if (verdictPending) {
+      verdictPending = false;
+      const browserRendering = sample.tick > stallTick;
+      console.error(browserRendering
+        ? "[transit] the browser is still producing frames and this page is not being "
+        + "called — the rAF registration was lost. Re-armed; if this line is followed "
+        + "by a resume, that was it."
+        : "[transit] the browser has produced no frames for a second while this document "
+        + "is visible and asking to draw. The stall is below the page: nothing drawn from "
+        + "here can reach the screen. Reopen the tab — a reload keeps the same process.");
+      amendRecord({ verdict: {
+        browserRendering, tickAtStall: stallTick, tickAfter: sample.tick,
+        framesAfter: frames - stallFrames, winH: innerHeight, cvH: cv.height,
+      } });
+    }
+    return;                            // already recorded this one
+  }
+
   inStall = true;
   stalls++;
   if (!firstStallAt) firstStallAt = Math.round(Date.now());
   // resourceStats() is called here and only here, so the run-up above stays
   // cheap and the snapshot below is the expensive one, taken once.
   const snap = resourceStats();
+  stallTick = sample.tick; stallFrames = frames; stallAtVis = sample.vis;
+  verdictPending = true;
   console.error(`[transit] the page has been visible and not drawing for `
               + `${sample.stalled} ms — this is the freeze, recorded. `
               + "transitFreeze() reads it back, and survives closing the tab.", snap);
+  // The tab strip is painted by the browser, not by this document, so the title
+  // still reaches the user when nothing drawn here can. It is the only channel
+  // left when the rendering pass itself has stopped — an overlay would sit in
+  // the same dead pass as the canvas.
+  document.title = "⚠ frozen — " + PAGE_TITLE;
+  // And ask for a frame again. If the loop merely lost its registration this
+  // recovers it within a frame and costs one call; if the browser has stopped
+  // rendering, it is ignored along with the registration already outstanding.
+  // frame() drops a duplicate callback, so recovering cannot leave two loops.
+  requestAnimationFrame(frame);
   try {
     const prior = JSON.parse(localStorage.getItem(STALL_KEY) || "null");
     // Keep the first stall of the session: it is the one with the healthy-to-
@@ -1172,6 +1290,7 @@ setInterval(() => {
         at: Date.now(), stalls, ua: navigator.userAgent,
         screen: [innerWidth, innerHeight, DPR], snapshot: snap, runup: stallRunup,
       }));
+      ownsRecord = true;
     }
   } catch (e) { /* storage full or disabled; the console record still stands */ }
 }, STALL_TICK_MS);
@@ -1447,7 +1566,16 @@ window.transitTrace = () => {
 // Either one throwing would have ended the animation while reporting
 // `frameErrors: 0`, making it indistinguishable from a freeze below the page.
 // Asking for the next frame up front costs nothing and removes the ambiguity.
+// Callbacks registered for the same frame are handed the same timestamp, so this
+// is what makes the watchdog's re-arm safe: if the original registration was
+// live all along and the browser simply wasn't ticking, both fire when it
+// resumes, and the second returns here without re-arming. One loop survives,
+// which is the point — two would double every frame's work for the rest of the
+// session, permanently, as the price of a recovery that already worked.
+let lastRafNow = -1;
 function frame(now) {
+  if (now === lastRafNow) return;      // duplicate registration; one loop is enough
+  lastRafNow = now;
   requestAnimationFrame(frame);
   const t0 = performance.now();
   frames++;
