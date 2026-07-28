@@ -249,12 +249,52 @@ function evictTiles(budget) {
 const TILE_RETRY_MS = 4000;    // before a failed tile is asked for again
 const TILE_TRIES = 3;          // attempts before it is left alone for good
 
+// Nothing is fetched for a view that is still moving.
+//
+// A zoom gesture walks through every level on the way, and each stop of it asks
+// for a full screen of tiles it will have left before they arrive. Measured on
+// the freeze of 2026-07-28 13:21: 26 seconds of hard zooming, k swinging between
+// 0.15 and 4 over and over, produced **1237 decodes and 1322 evictions** — about
+// fifty ImageBitmaps a second created and fifty closed, none of which was on
+// screen long enough to be seen. The tile budget bounds what is *resident* and
+// says nothing about that: the cache sat at ~230 of 256 the whole time and every
+// snapshot read healthy.
+//
+// A tile asked for mid-gesture is waste twice over, so the ask is simply
+// deferred: the view is drawn from whatever is already cached — which is what
+// the coarse levels are for, they back-fill exactly this — and the moment it
+// holds still the tiles for where it actually landed are fetched. This is how a
+// map app behaves anyway; it is only visible as slightly softer artwork during
+// the gesture itself.
+//
+// TILE_SETTLE_MS is under a frame at 60 Hz times ten, so a deliberate slow zoom
+// still streams continuously and only a flung one is held back.
+const TILE_SETTLE_MS = 140;
+let viewMovedAt = 0, viewSeen = "";
+let tilesMayLoad = true;      // set once a frame, from the view's own stillness
+let tileHoldFrames = 0;       // how many frames were drawn with loading held off
+// A tile that was never asked for. Returned instead of a cache entry on a miss
+// while the view moves, because *recording* the miss is itself the damage:
+// inserting a placeholder counts against the budget and evicts a decoded tile
+// that is still on screen, to reserve room for one nobody has asked for.
+const COLD = { state: "idle", bmp: null };
+
+function wantTile(t) {
+  // "idle" is a tile the cache knows it needs and has deliberately not asked
+  // for yet. It becomes "queued" on the first look after the view settles.
+  if (t.state !== "idle") return;
+  t.state = "queued";
+  tileQueue.push(t);
+  pumpTiles();
+}
+
 function getTile(level, c, r) {
   const key = `${level}/${c}_${r}`;
   let t = tileCache.get(key);
   if (t) {                                // re-insert: Map iterates in insertion
     tileCache.delete(key);                // order, so this is the LRU bookkeeping
     tileCache.set(key, t);
+    if (tilesMayLoad) wantTile(t);
     if (t.state === "error" && t.tries < TILE_TRIES
         && performance.now() - t.errAt >= TILE_RETRY_MS) {
       t.state = "queued";
@@ -263,12 +303,12 @@ function getTile(level, c, r) {
     }
     return t;
   }
+  if (!tilesMayLoad) return COLD;
   evictTiles(tileBudget());
-  t = { level, c, r, key, bmp: null, ctl: null, state: "queued", dead: false,
+  t = { level, c, r, key, bmp: null, ctl: null, state: "idle", dead: false,
         tries: 0, errAt: 0 };
   tileCache.set(key, t);
-  tileQueue.push(t);
-  pumpTiles();
+  wantTile(t);
   return t;
 }
 
@@ -442,6 +482,12 @@ function drawTiles(g) {
 const bg = document.createElement("canvas");
 const bgCtx = bg.getContext("2d");
 let bgKey = "", bgDirty = true, bgComposes = 0;
+// What the last compose actually asked the compositor for. The base PNG is the
+// largest single draw this page makes and it is drawn whenever the tiles do not
+// yet cover — scaled by DPR*view.k, which at the deepest zoom is 8, putting a
+// 4096x4139 image on a 32768 px destination rect. Whether that was happening
+// when a freeze hit has been guessed at for five rounds and never recorded.
+let baseDrawn = false, baseScale = 0;
 
 function composeBackground() {
   const key = `${view.x}|${view.y}|${view.k}`;
@@ -460,6 +506,8 @@ function composeBackground() {
   // scaling a 17-megapixel image under an opaque layer is pure waste.
   if (map) {
     const probe = tilesCover();
+    baseDrawn = !probe;
+    baseScale = +(DPR * view.k).toFixed(2);
     if (!probe) bgCtx.drawImage(map, 0, 0);
     drawTiles(bgCtx);
   }
@@ -960,6 +1008,7 @@ addEventListener("visibilitychange", () => {
 // Baselines for the per-second rates below, refreshed by every snapshot: the
 // rates a snapshot reports are since the *previous* snapshot, whoever took it.
 let statsAt = 0, statsFrames = 0, statsComposes = 0, statsEvictions = 0, statsDecodes = 0;
+let peakDecodeRate = 0, peakEvictRate = 0;
 
 function resourceStats() {
   let spriteCanvases = 0, spritePx = 0;
@@ -1021,6 +1070,16 @@ function resourceStats() {
     // it just dropped and the budget is under the working set.
     tileDecodes, decodesPerSec: rate(tileDecodes - statsDecodes),
     tileEvictions, evictsPerSec: rate(tileEvictions - statsEvictions),
+    // The rates above are since the last snapshot, so at a freeze they read 0 —
+    // nothing is happening, which is the point. These are the worst the session
+    // ever saw, and are what the churn actually looked like on the way in: the
+    // 13:21 freeze was ~48 decodes and ~50 evictions a second, sustained for 26
+    // seconds of zooming, while every instantaneous reading looked healthy.
+    peakDecodeRate, peakEvictRate,
+    // Whether the last compose drew the base PNG, and at what scale — see
+    // composeBackground. tileHoldFrames counts frames drawn while tile loading
+    // was deliberately held off because the view was still moving.
+    baseDrawn, baseScale, tileHoldFrames,
     tileDiscards, tileErrors,
     // bgComposes should sit still while the view is still; climbing at frame
     // rate means the blit cache is missing and every frame recomposites.
@@ -1044,6 +1103,9 @@ function resourceStats() {
   // The one number that matters for a freeze, and now a true one: every decoded
   // surface here is held by this page and released when the page releases it.
   s.imageMB = +(s.tileMB + s.bgMB + s.mapMB + s.spriteMB + s.canvasMB).toFixed(1);
+  if (s.decodesPerSec > peakDecodeRate) peakDecodeRate = s.decodesPerSec;
+  if (s.evictsPerSec > peakEvictRate) peakEvictRate = s.evictsPerSec;
+  s.peakDecodeRate = peakDecodeRate; s.peakEvictRate = peakEvictRate;
   statsAt = now; statsFrames = frames; statsComposes = bgComposes;
   statsEvictions = tileEvictions; statsDecodes = tileDecodes;
   rafGapMax = 0; hiddenInWindow = document.hidden;
@@ -1188,6 +1250,9 @@ function stallSample() {
            tick: renderTick(), winH: innerHeight, cvH: cv.height,
            tiles: tileCache.size, decodes: tileDecodes, evictions: tileEvictions,
            composes: bgComposes, errors: frameErrors, slow: slowFrames,
+           // the churn on the way in, and what the compositor was being handed:
+           // `base` is the 17-megapixel PNG going down at `k`*DPR scale
+           queued: tileQueue.length, base: baseDrawn, hold: tileHoldFrames,
            k: +view.k.toFixed(3) };
 }
 
@@ -1660,7 +1725,17 @@ function drawFrame(now) {
     if (simT >= 86400) simT -= 86400;
     scrub.value = simT | 0;
   }
-  // background comes from the offscreen compositor, blitted 1:1 in device px
+  // Whether tiles may be fetched this frame — see getTile. Decided once, here,
+  // so every lookup in the frame agrees, and so the moment the view lands can be
+  // seen: nothing has changed at that instant, so composeBackground would skip,
+  // and the frame that would have asked for the tiles never runs. One forced
+  // recompose is what turns "stopped moving" into "fetch what is on screen".
+  const vkey = `${view.x}|${view.y}|${view.k}`;
+  if (vkey !== viewSeen) { viewSeen = vkey; viewMovedAt = performance.now(); }
+  const still = performance.now() - viewMovedAt >= TILE_SETTLE_MS;
+  if (still && !tilesMayLoad) bgDirty = true;
+  tilesMayLoad = still;
+  if (!still) tileHoldFrames++;
   composeBackground();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.drawImage(bg, 0, 0);
