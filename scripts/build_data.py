@@ -565,44 +565,149 @@ DRAWN_COLORS = {
 # ever having to choose a street, because the stretches either side of an
 # excursion are already on the right one and the smoothed field carries it.
 #
-# Not a color test: PT's gray, the street gray and the gray the sheet
-# antialiases its text with are all the same hue, and a tolerance wide enough to
-# take the line takes the lettering with it. Low saturation excludes every
-# colored livery; the luminance floor excludes the near-black label text, and the
-# ceiling the cream page. Checked against Big Blue Bus, which is gray-liveried
-# and *is* snapped: its shapes sit at a median of 0.0 px from this mask, so the
-# mask is the drawn line work and not an approximation of it.
-STREET_SAT = 22            # max(RGB) - min(RGB)
-STREET_LUM = (130, 215)    # page is lighter, label text darker
+# The mask for it is the PDF's street strokes, and it had to be: a raster
+# version was tried first and got the median down to 1.0 px while leaving the
+# case that prompted all this untouched. See street_ink() for why — in short,
+# the sheet's lettering is gray of the same hue, and a word's strokes are a
+# better match for a route than the one-px street 27 px away.
+# A grid runs both ways at once, and that is the whole difficulty: a route
+# crossing it is *on* ink at every intersection. PT 31, 32 and 33 run the length
+# of Washington Blvd — the GTFS stop list says so, forty consecutive
+# "Washington Blvd & …" — with the warp 26 px north of the drawn Washington, and
+# the only ink under that run is where it crosses Fair Oaks, Lake and Altadena
+# Dr, each 0-2 px away. Those crossings contribute a displacement of zero, and
+# smoothed over the 61-point window they outvote every point that wants to move
+# and hold the whole run out in the white. Widening the cap does nothing at all —
+# tried, 26 to 34, no change — because reach was never the problem. The problem
+# is that a street running north-south is allowed to claim a point travelling
+# east-west.
+#
+# So the ink is binned by the direction it runs, and a point may only be claimed
+# by ink going roughly its own way. For a colored livery this would be pointless:
+# the mask is already that one route's line and everything in it is the right
+# direction by construction. For the grid it is what makes the mask usable at all.
+DIR_BINS = 6                # 30 deg apart; a line has no sense, so 0..180
+DIR_SLACK = 1               # bins either side: accept within ~45 deg
 
 
-def street_pixels(region="main"):
-    """Coordinates of every gray line-work pixel, as an Nx2 array."""
-    im, keep_full = map_image()
-    if region == "inset":
-        x0, y0, x1, y1 = INSET_RECT
-        keep = np.ones((y1 - y0, x1 - x0), dtype=bool)
-        lx0, ly0, lx1, ly1 = INSET_LEGEND
-        keep[ly0 - y0:ly1 - y0, lx0 - x0:lx1 - x0] = False
-    else:
-        x0, y0 = 0, 0
-        y1, x1 = keep_full.shape
-        keep = keep_full
-    sub = im[y0:y1, x0:x1]
-    lum = sub.mean(axis=2)
-    sat = sub.max(axis=2) - sub.min(axis=2)
-    m = (sat < STREET_SAT) & (lum >= STREET_LUM[0]) & (lum <= STREET_LUM[1])
-    ys, xs = np.nonzero(m & keep)
-    return np.c_[xs + x0, ys + y0]
+# The street layer, taken from the PDF's strokes rather than from the raster.
+#
+# A raster mask cannot be used for this one. Every other agency's mask is keyed
+# on a color only that agency's lines are drawn in, so lettering that happens to
+# fall inside the tolerance is a rim of speckle around the words and
+# solid_pixels() deals with it. The street gray has no such luck: the sheet sets
+# its labels in a gray of the same hue, and the antialiased strokes of a word are
+# indistinguishable from a one-px street — the "NEW YORK" label sits 8 px from
+# where PT 31/32/33 run and drew them to itself, while the drawn Washington Blvd
+# 27 px away is a single row of pixels at this resolution. No luminance band
+# separates the two, and no direction test can either, since a horizontal word is
+# horizontal.
+#
+# get_drawings() returns strokes, and text is not a stroke. It also gives the
+# direction exactly, from the segment itself, instead of having it estimated off
+# a blurred raster.
+STREET_STROKES = [(0.604, 0.561, 0.579), (0.61, 0.563, 0.583)]
+STREET_STEP = 2.0          # px between sampled points along a stroke
 
 
-def street_tree(region="main"):
-    key = ("street", region, STREET_SAT, STREET_LUM)
+def street_ink(step=STREET_STEP):
+    """Points along every street stroke, as (x, y, direction bin) — Nx3."""
+    def build():
+        try:
+            import fitz
+        except Exception as e:
+            print(f"PDF ink extraction unavailable: {e}")
+            return np.zeros((0, 3))
+        page = fitz.open(PDF)[0]
+        s = map_image()[0].shape[1] / page.rect.width
+        out = []
+        for it in page.get_drawings():
+            c = it.get("color")
+            if c is None or not any(sum((a - b) ** 2 for a, b in zip(c, k)) < 1e-4
+                                    for k in STREET_STROKES):
+                continue
+            runs = []
+            for seg in it["items"]:
+                if seg[0] == "l":
+                    runs.append([(seg[1].x * s, seg[1].y * s),
+                                 (seg[2].x * s, seg[2].y * s)])
+                elif seg[0] == "c":
+                    p = [np.array([q.x * s, q.y * s]) for q in seg[1:5]]
+                    t = np.linspace(0, 1, 12)[:, None]
+                    b = ((1 - t) ** 3 * p[0] + 3 * (1 - t) ** 2 * t * p[1]
+                         + 3 * (1 - t) * t ** 2 * p[2] + t ** 3 * p[3])
+                    runs.append([tuple(q) for q in b])
+            for r in runs:
+                if len(r) < 2:
+                    continue
+                q = np.asarray(densify(r, step), dtype=float)
+                if len(q) < 2:
+                    continue
+                d = np.gradient(q, axis=0)
+                a = np.mod(np.arctan2(d[:, 1], d[:, 0]), np.pi)
+                bins = np.minimum((a / (np.pi / DIR_BINS)).astype(np.int64),
+                                  DIR_BINS - 1)
+                out.append(np.c_[q, bins])
+        if not out:
+            return np.zeros((0, 3))
+        P = np.vstack(out)
+        keep = map_image()[1]
+        h, w = keep.shape
+        P = P[(P[:, 0] >= 0) & (P[:, 0] < w) & (P[:, 1] >= 0) & (P[:, 1] < h)]
+        P = P[keep[P[:, 1].astype(int), P[:, 0].astype(int)]]
+        return P[~inside_callout(P[:, :2])]
+
+    return cached_pixels(
+        ("street-ink", tuple(map(tuple, STREET_STROKES)), step, DIR_BINS,
+         art_stamp(PDF), EXCLUDE, CALLOUT,
+         code_stamp(street_ink, densify, inside_callout)),
+        build)
+
+
+class DirectionalTree:
+    """A KD-tree that will only match ink running the same way as the line.
+
+    Stands in for a cKDTree everywhere snap_coherent uses one: `.data`, and a
+    `.query` that takes the polyline in order — which is what lets it know the
+    heading at all, since the points arrive along the line rather than as a bag.
+    `.plain` is the undirected tree, for solid_pixels."""
+
+    def __init__(self, xyb):
+        self.data = np.ascontiguousarray(xyb[:, :2], dtype=float)
+        self.plain = cKDTree(self.data)
+        bins = xyb[:, 2].astype(int)
+        self._idx = [np.nonzero(bins == b)[0] for b in range(DIR_BINS)]
+        self._trees = [cKDTree(self.data[i]) if len(i) else None
+                       for i in self._idx]
+
+    def query(self, P):
+        P = np.asarray(P, dtype=float)
+        step = np.gradient(P, axis=0)
+        ang = np.mod(np.arctan2(step[:, 1], step[:, 0]), np.pi)
+        pb = np.minimum((ang / (np.pi / DIR_BINS)).astype(np.int64), DIR_BINS - 1)
+        best_d = np.full(len(P), np.inf)
+        best_j = np.zeros(len(P), dtype=np.int64)
+        for b in range(DIR_BINS):
+            sel = np.nonzero(pb == b)[0]
+            if not len(sel):
+                continue
+            for o in range(-DIR_SLACK, DIR_SLACK + 1):
+                nb = (b + o) % DIR_BINS
+                t = self._trees[nb]
+                if t is None:
+                    continue
+                d, j = t.query(P[sel])
+                win = d < best_d[sel]
+                best_d[sel[win]] = d[win]
+                best_j[sel[win]] = self._idx[nb][j[win]]
+        return best_d, best_j
+
+
+def street_tree():
+    key = ("street-ink", tuple(map(tuple, STREET_STROKES)), DIR_BINS, STREET_STEP)
     if key not in _TREES:
-        pts = cached_pixels(
-            ("street", key, art_stamp("map.png"), EXCLUDE, code_stamp(street_pixels)),
-            lambda: street_pixels(region))
-        _TREES[key] = cKDTree(pts) if len(pts) > 300 else None
+        xyb = street_ink()
+        _TREES[key] = DirectionalTree(xyb) if len(xyb) > 300 else None
     return _TREES[key]
 
 
@@ -2053,8 +2158,11 @@ def solid_pixels(tree):
     and would fail this test everywhere — see snap_coherent's `speckled`."""
     key = id(tree)
     if key not in _SOLID:
-        n = min(SOLID_MIN, len(tree.data))
-        _SOLID[key] = tree.query(tree.data, k=n)[0][:, -1] <= SOLID_R
+        # DirectionalTree.query wants the points in line order; crowding is a
+        # question about the mask alone, so ask its undirected tree.
+        base = getattr(tree, "plain", tree)
+        n = min(SOLID_MIN, len(base.data))
+        _SOLID[key] = base.query(base.data, k=n)[0][:, -1] <= SOLID_R
     return _SOLID[key]
 
 
@@ -3110,7 +3218,8 @@ def main():
                 # 31 from 32 where they part. The snap is unanchored and short-
                 # reaching by design — it refines within the corridor the warp
                 # already chose rather than choosing one.
-                out_pts = snap_coherent(pts, street_tree(), caps=STREET_CAPS)
+                out_pts = snap_coherent(pts, street_tree(), caps=STREET_CAPS,
+                                        speckled=False)
             if out_pts is not None:
                 snapped += 1
             # Keep the pre-snap polyline alongside the stored one. Stops are
