@@ -1806,8 +1806,16 @@ def trace_anchors(s, D, A, P, cum, tree):
     the stretch should be. The drawn lines are one connected web, so a walk
     that cuts a corner the route actually turns shows up as conspicuously
     shorter than the shape; anything outside the band keeps the straight
-    interpolation."""
-    out_s, out_D = [s[:1]], [D[:1]]
+    interpolation.
+
+    "As long as the shape says" is measured on the shape as it stands, which on
+    the first pass is the warp — so where the warp is bad enough to need this,
+    the yardstick is bad too, and the walk that would fix it can read as a
+    detour. That is why the count of walks taken comes back with the anchors:
+    the caller re-fits while it keeps rising, and a stretch the warp talked it
+    out of is walked on a later pass, once the badges have brought the arc
+    length to something like the truth."""
+    out_s, out_D, walked = [s[:1]], [D[:1]], 0
     for i in range(len(s) - 1):
         ds = s[i + 1] - s[i]
         if ds > 0 and TRACE_SPAN[0] < math.dist(A[i], A[i + 1]) < TRACE_SPAN[1]:
@@ -1822,9 +1830,10 @@ def trace_anchors(s, D, A, P, cum, tree):
                 out_s.append(sv)
                 out_D.append(q - np.c_[np.interp(sv, cum, P[:, 0]),
                                        np.interp(sv, cum, P[:, 1])])
+                walked += 1
         out_s.append(s[i + 1:i + 2])
         out_D.append(D[i + 1:i + 2])
-    return np.concatenate(out_s), np.concatenate(out_D)
+    return np.concatenate(out_s), np.concatenate(out_D), walked
 
 
 ANCHOR_PASSES = 3     # times the anchor fit may be re-run to pick up more badges
@@ -1975,15 +1984,29 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
     walking the drawn line — then snap with tighter caps so the corrected line
     can't wander back onto a neighboring route.
 
-    The anchor fit is re-run while it keeps reaching new badges. A badge only
-    counts for a shape it passes within `anchor_gate` of, and where the warp is
-    poor the badges that would fix it start out beyond that: Metro 690 runs 190
-    px north of drawn Foothill Blvd in the far valley, out of reach of the two
-    badges at the ends of the error. One fit on the badges it can see brings the
-    rest within reach, and the second pass lands every one of them. Re-fitting
-    is self-limiting in a way that simply widening the gate is not — a badge on
-    another branch of the route stays far from the corrected line and never
-    joins in.
+    The anchor fit is re-run while it keeps learning something the last pass
+    didn't have — a badge it couldn't reach, or a corridor it couldn't walk.
+    A badge only counts for a shape it passes within `anchor_gate` of, and
+    where the warp is poor the badges that would fix it start out beyond that:
+    Metro 690 runs 190 px north of drawn Foothill Blvd in the far valley, out
+    of reach of the two badges at the ends of the error. One fit on the badges
+    it can see brings the rest within reach, and the second pass lands every
+    one of them. Re-fitting is self-limiting in a way that simply widening the
+    gate is not — a badge on another branch of the route stays far from the
+    corrected line and never joins in.
+
+    The walks need the re-fit for the same reason, and are the half of it the
+    badge count cannot see. `trace_anchors` trusts a badge-to-badge walk only
+    when it comes out about as long as the shape says that stretch is, and on
+    the first pass the shape saying so is the warp. Metro 240 comes down Reseda
+    and turns east along Ventura with the warp 94 px north of the corner, so
+    the badge printed above the turn is nearest a warp point already past it,
+    the arc between that badge and the next reads 219 px against the drawn
+    corridor's 299, and the walk round the corner is thrown out as a detour —
+    leaving the straight interpolation, which is the chord across it. Both
+    badges were in reach the whole time, so a pass counting only badges stops
+    there. Once the fit has put the shape on them the same arc reads 234 px,
+    the walk is believed, and the corner comes back.
 
     tail: (cap, window) for one last pass with a short smoothing window. The
     wide window that keeps whole stretches together also averages the
@@ -2017,7 +2040,7 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
         caps = (40.0, 26.0, 14.0)
     if anchors:
         A = np.asarray(anchors, dtype=float)
-        used = 0
+        used = walked = 0
         for _ in range(ANCHOR_PASSES):
             cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(P, axis=0).T))])
             d2 = ((P[None, :, :] - A[:, None, :]) ** 2).sum(2)
@@ -2030,13 +2053,15 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
                 d2 = ((P[None, :, :] - S[:, None, :]) ** 2).sum(2)
                 j = d2.argmin(1)
                 near = np.sqrt(d2[np.arange(len(A)), j]) < anchor_gate
-            if near.sum() <= used:             # no badge the last fit couldn't reach
-                break
-            used = int(near.sum())
             order = np.argsort(cum[j[near]], kind="stable")
             s = cum[j[near]][order]
             D = (A[near] - P[j[near]])[order]
-            s, D = trace_anchors(s, D, A[near][order], P, cum, tree)
+            s, D, w = trace_anchors(s, D, A[near][order], P, cum, tree)
+            # nothing the last fit didn't already have: no badge it couldn't
+            # reach, and no corridor it couldn't walk
+            if near.sum() <= used and w <= walked:
+                break
+            used, walked = max(used, int(near.sum())), max(walked, w)
             P = P + np.c_[np.interp(cum, s, D[:, 0]), np.interp(cum, s, D[:, 1])]
         if used and default_caps:
             caps = (26.0, 14.0)            # anchors pin the street; stay tight
