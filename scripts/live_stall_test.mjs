@@ -105,6 +105,8 @@ check("healthy: no stall", a.stalledVisibleMs < 500, true);
 check("healthy: the browser's frame clock is live", a.renderTick > 0, true);
 check("healthy: canvas matches the window", [a.cvW, a.cvH], [a.winW * a.dpr, a.winH * a.dpr]);
 check("healthy: nothing recorded", await evaluate("transitFreeze() === null"), true);
+check("healthy: the snapshot dates the code it is running",
+      typeof a.docModified === "string" && a.docModified.length > 0, true);
 const title0 = await evaluate("document.title");
 
 // the frame clock keeps moving on its own
