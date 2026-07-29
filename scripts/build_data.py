@@ -800,6 +800,33 @@ def tile_pixel(x, y, level=SPRITE_LEVEL):
     return im[ty % TILE, tx % TILE].astype(np.int32)
 
 
+def tile_patch(cx, cy, r, level=SPRITE_LEVEL):
+    """The pixels of a (2r+1) map-px square around (cx, cy), off the tile
+    pyramid, as an Nx3 array — or None where the pyramid doesn't cover it.
+    Spans tile boundaries; the tiles it touches join `tile_pixel`'s cache."""
+    x0, y0 = int((cx - r) * level), int((cy - r) * level)
+    x1, y1 = int((cx + r) * level) + 1, int((cy + r) * level) + 1
+    if x0 < 0 or y0 < 0:
+        return None
+    out = []
+    for ty in range(y0 // TILE, (y1 - 1) // TILE + 1):
+        for tx in range(x0 // TILE, (x1 - 1) // TILE + 1):
+            key = (level, tx, ty)
+            im = _TILES.get(key)
+            if im is None:
+                path = f"{TILES}/{level}/{tx}_{ty}.webp"
+                if not os.path.exists(path):
+                    return None
+                im = _TILES[key] = np.asarray(Image.open(path).convert("RGB"))
+            ax0, ay0 = max(x0, tx * TILE), max(y0, ty * TILE)
+            ax1, ay1 = min(x1, (tx + 1) * TILE), min(y1, (ty + 1) * TILE)
+            if ax1 <= ax0 or ay1 <= ay0:
+                continue
+            out.append(im[ay0 - ty * TILE:ay1 - ty * TILE,
+                          ax0 - tx * TILE:ax1 - tx * TILE].reshape(-1, 3))
+    return np.vstack(out).astype(int) if out else None
+
+
 def drawn_color(shape_pts, seed, r2=55 * 55, need=250, level=SPRITE_LEVEL):
     """The color the map prints this agency's lines in, for its vehicle sprites.
 
@@ -1108,13 +1135,30 @@ def badge_line_color(cx, cy, r=7):
     A plain median would blend chip and glyph and pull a saturated orange chip
     halfway to gray; the dominant cluster recovers the true fill (orange badges
     land within ~1 px of orange this way, ~48 px via the median). Returns None
-    when there's no fill to read."""
-    im, _ = map_image()
-    h, w = im.shape[:2]
-    xi, yi = int(round(cx)), int(round(cy))
-    if not (r <= xi < w - r and r <= yi < h - r):
-        return None
-    sub = im[yi - r:yi + r + 1, xi - r:xi + r + 1].reshape(-1, 3).astype(int)
+    when there's no fill to read.
+
+    Read off the tile pyramid, where the print is faithful, and only from
+    map.png where the pyramid doesn't reach. map.png is a 4096 px reduction of
+    a 47" sheet and a badge chip is a few px across in it, so its fill is mixed
+    with the page before anything here can look at it — and the gate above this
+    reads that mix as some *other* agency's color and throws the badge away.
+    Foothill's seven "190" chips read (78,111,89) through (160,173,153) in
+    map.png, a 131 px spread over one printed color, and six of the seven were
+    rejected: 190 kept a single badge for the whole route and, with nothing
+    pinning it, cut the corner at Badillo and again across Workman. Off the
+    tiles the same seven all read (53-56,103-104,78-81), within a few px of the
+    (62,100,78) legend seed. The reduction was the whole of the difference.
+
+    This makes the color gate sharper rather than looser: against a chip read
+    true, the nearest rival color sits 75 px away instead of 18."""
+    sub = tile_patch(cx, cy, r)
+    if sub is None:
+        im, _ = map_image()
+        h, w = im.shape[:2]
+        xi, yi = int(round(cx)), int(round(cy))
+        if not (r <= xi < w - r and r <= yi < h - r):
+            return None
+        sub = im[yi - r:yi + r + 1, xi - r:xi + r + 1].reshape(-1, 3).astype(int)
     fill = sub[(sub.min(1) <= 190) & (sub.max(1) >= 70)]   # not cream, not glyph
     if len(fill) < 6:
         return None
@@ -1964,15 +2008,128 @@ def branch_anchors(anchors, sid, sids, kd_for):
 
 
 TRACE_STEP = 4.0          # px; lattice pitch for walking the drawn line
-TRACE_PAD = 60.0          # px of slack around the two badges, for a bowed line
+TRACE_PAD = 80.0          # px of slack around the two badges, for a bowed line —
+                          # and for a corridor that leaves their box entirely, which
+                          # a route turning a corner between two badges does: Metro
+                          # 182 runs 63 px east of the eastern badge before turning
+                          # back, so at 60 the lattice cut the corner off the map and
+                          # the walk came back "no path" for a corridor that is drawn
 TRACE_REACH = 5.0         # px; how close a lattice cell must be to drawn pixels,
                           # loose enough to step over the glyphs crossing a line
-TRACE_SPAN = (60.0, 700.0)   # px between badges worth walking between
-TRACE_DETOUR = (0.75, 1.35)  # trusted band of walked length / shape length
+TRACE_SPAN = (float(os.environ.get("TRACE_MIN", 60.0)), 700.0)   # px between badges
+                          # worth walking between
+TRACE_DETOUR = (float(os.environ.get("TRACE_LO", 0.75)),
+                float(os.environ.get("TRACE_HI", 1.35)))  # trusted band of
+                          # walked length / shape length; sweepable, since what it
+                          # costs is measured in routes rather than argued
 TRACE_SAMPLE = 30.0       # px of walked line per intermediate anchor
+BRIDGE_MAX = 40.0         # px of interruption a walk may step across
+BRIDGE_HOOD = 7.0         # px of drawing read to say which way a line runs there
+BRIDGE_INTO = 0.5         # cos 60 deg: how squarely each side must run into
+                          # the hole, which allows a corner inside it
 
 _PATHS = {}   # keyed by tree identity, safe because _TREES holds every tree
               # for the life of the process, so no id is ever reused
+
+
+def line_headings(P, tree, hood=BRIDGE_HOOD):
+    """Unit direction the drawing runs in at each of the points P, or (0,0)
+    where there isn't enough of it nearby to say.
+
+    The principal axis of the drawn pixels around a point: a line's pixels lie
+    along it, so the largest eigenvector of their covariance is the direction
+    it runs. Sign is arbitrary and every caller treats it that way."""
+    out = np.zeros((len(P), 2))
+    for i, nb in enumerate(tree.query_ball_point(P, hood)):
+        if len(nb) < 4:
+            continue
+        Q = np.asarray(tree.data)[nb]
+        Q = Q - Q.mean(0)
+        w, v = np.linalg.eigh(Q.T @ Q)
+        if w[1] > 3 * max(w[0], 1e-9):        # a line, not a blob or a corner
+            out[i] = v[:, 1]
+    return out
+
+
+def bridges(C, free, tree, step, gap=BRIDGE_MAX):
+    """Edges that step across an interruption in the drawing, as (rows, cols,
+    weights) for the lattice graph.
+
+    The sheet interrupts its own lines. It knocks the stroke out to make room
+    for the chips it prints on them — Metro 182's corridor stops either side of
+    the "81"/"182" pair on Figueroa, a 28 px hole — and a label crossing a line
+    takes a bite out of any mask of it. Either way the corridor walk stops
+    dead, `trace_anchors` gets nothing, and the stretch is interpolated
+    straight: the chord across whatever corner the route turns there. That is
+    Metro 182 cutting the corner at St George, Metro 134 leaving the coast
+    road, and it is the root cause these notes have been describing since
+    Montebello 20 without fixing.
+
+    A hole is not a shortcut, and the difference is legible: at a hole the line
+    stops and starts again *on the same heading*, while a shortcut leaves one
+    line for another that runs some other way. So from every cell where the
+    drawing runs in a definite direction, look along that direction: if the
+    lattice goes unfree and then free again within `gap`, and the drawing at
+    the far side runs the same way, connect them. The edge costs what it spans,
+    so a bridged walk is still judged on its length by the band above.
+
+    This is the directed bridge the notes reached for and ruled the isotropic
+    version out of: a closing operation hangs word-shaped blobs off the
+    underside of every street it touches, because it fills in all directions at
+    once. This one fills along the line and nowhere else."""
+    nx, ny = free.shape
+    P = C.reshape(-1, 2)
+    cand = np.flatnonzero(free)
+    if not len(cand):
+        return np.empty(0, int), np.empty(0, int), np.empty(0)
+    H = line_headings(P[cand], tree)
+    known = np.abs(H).sum(1) > 0
+    cand, H = cand[known], H[known]
+    if not len(cand):
+        return np.empty(0, int), np.empty(0, int), np.empty(0)
+
+    # Where the drawing stops: one step on along its own heading is off it.
+    # `out` is the way it was running when it stopped, so it points into the
+    # hole. Only these can carry a bridge, which is most of the safety in this:
+    # a line crossing another, or running past it, is not an end and is never a
+    # candidate, so nothing here can hop between two lines that merely meet.
+    ends, out = [], []
+    for sign in (1.0, -1.0):
+        nxt = P[cand] + sign * H * step
+        gx = np.clip(np.rint((nxt[:, 0] - C[0, 0, 0]) / step).astype(int), 0, nx - 1)
+        gy = np.clip(np.rint((nxt[:, 1] - C[0, 0, 1]) / step).astype(int), 0, ny - 1)
+        for i in np.flatnonzero(~free[gx, gy]):
+            ends.append(int(i))
+            out.append(sign * H[i])
+    if not ends:
+        return np.empty(0, int), np.empty(0, int), np.empty(0)
+    ends, out = np.asarray(ends), np.asarray(out)
+
+    # Two ends bridge when each runs into the hole the other runs into. A
+    # straight line interrupted mid-run is the easy case, both pointing along
+    # the same axis; the case that matters more is a corner whose *junction* is
+    # what got knocked out — Metro 182's diagonal and the horizontal it turns
+    # onto both stop at the Highland Park station marker, 24 px apart, and no
+    # test of "same heading" can join them because the drawing turns inside the
+    # hole. Facing each other is what they still do, so that is what is asked.
+    # Anything perpendicular — the gap between two parallel streets, which is
+    # the failure to avoid — fails it flat.
+    kd = cKDTree(P[cand[ends]])
+    rows, cols, w = [], [], []
+    for i in range(len(ends)):
+        best, bestd = None, np.inf
+        for k in kd.query_ball_point(P[cand[ends[i]]], gap):
+            d = P[cand[ends[k]]] - P[cand[ends[i]]]
+            n = float(np.hypot(*d))
+            if n <= step or n >= bestd:
+                continue
+            u = d / n
+            if u @ out[i] < BRIDGE_INTO or -u @ out[k] < BRIDGE_INTO:
+                continue                    # not the two sides of one hole
+            best, bestd = k, n
+        if best is not None:
+            rows.append(cand[ends[i]]); cols.append(cand[ends[best]]); w.append(bestd)
+    return (np.asarray(rows, int), np.asarray(cols, int), np.asarray(w, float))
 
 
 def mask_path(a, b, tree, step=TRACE_STEP, pad=TRACE_PAD, reach=TRACE_REACH):
@@ -1983,7 +2140,14 @@ def mask_path(a, b, tree, step=TRACE_STEP, pad=TRACE_PAD, reach=TRACE_REACH):
     pixels are within `reach`, 8-connected, Dijkstra. The lattice is
     deliberately blunt: drawn lines are ~8 px wide, so a 4 px pitch keeps every
     corridor connected while leaving only a few thousand nodes to search. The
-    walk is only ever used to aim the snap, which then refines onto the pixels."""
+    walk is only ever used to aim the snap, which then refines onto the pixels.
+
+    The drawing is interrupted, and the walk steps across the interruptions it
+    can justify — see `bridges` below. Widening `reach` instead is the wrong
+    tool and these notes have said so since BBB 14: at 6 px the lattice steps
+    onto the glyphs beside a line and comes back with a shortcut through the
+    words. A bridge crosses blank page only where the line resumes on the same
+    heading, which is what an interruption looks like and a shortcut doesn't."""
     key = (id(tree), round(a[0]), round(a[1]), round(b[0]), round(b[1]))
     if key in _PATHS:                  # a route's variants share their badges
         return _PATHS[key]
@@ -2004,10 +2168,26 @@ def mask_path(a, b, tree, step=TRACE_STEP, pad=TRACE_PAD, reach=TRACE_REACH):
         rows.append(s0[ok])
         cols.append(s1[ok])
         w.append(np.full(int(ok.sum()), step * math.hypot(dx, dy)))
-    G = sparse.coo_matrix((np.concatenate(w),
-                           (np.concatenate(rows), np.concatenate(cols))),
-                          shape=(nx * ny, nx * ny))
-    dist, pred = dijkstra(G + G.T, indices=ia, return_predecessors=True)
+
+    def solve(extra=None):
+        r, c, ww = list(rows), list(cols), list(w)
+        if extra is not None:
+            r.append(extra[0]); c.append(extra[1]); ww.append(extra[2])
+        G = sparse.coo_matrix((np.concatenate(ww),
+                               (np.concatenate(r), np.concatenate(c))),
+                              shape=(nx * ny, nx * ny))
+        return dijkstra(G + G.T, indices=ia, return_predecessors=True)
+
+    dist, pred = solve()
+    if not np.isfinite(dist[ib]):
+        # Only now, and this ordering is the whole safety of it. A bridge is for
+        # a corridor the drawing does not connect at all; where it does connect,
+        # the drawn way round is the one to take. Offered as an ordinary edge
+        # instead, a bridge cuts corners that are drawn: Big Blue Bus 7 turns
+        # from Pico onto Crenshaw and the two ends either side of that corner
+        # face each other across it, so the shortcut won on length and the route
+        # left the grey it had been sitting on to a median 0.5 px.
+        dist, pred = solve(bridges(C, free, tree, step))
     if not np.isfinite(dist[ib]):
         _PATHS[key] = (None, None)
         return _PATHS[key]
