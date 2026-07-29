@@ -513,6 +513,40 @@ let bgKey = "", bgDirty = true, bgComposes = 0;
 // when a freeze hit has been guessed at for five rounds and never recorded.
 let baseDrawn = false, baseScale = 0;
 
+// Whether the browser took the canvases away.
+//
+// Every freeze so far ends the same way: the page is visible, its timers run,
+// its input handlers run, and `document.timeline.currentTime` stops — the
+// browser has stopped updating the rendering for this document. That is the
+// browser's side of the line, and the page has had no way to say *why*. There
+// is one thing it can still be told: a 2D context is lost when the process
+// holding its surfaces goes away (the GPU process dying is the usual reason),
+// and the browser says so with an event, on the main thread, which every one of
+// these freezes has left running. If a freeze is a lost context, this catches
+// it outright; if `ctxLost` is still 0 in the next record, that is ruled out
+// for good rather than argued about.
+//
+// The event is not cancelled, so the browser restores the context on its own.
+// What it cannot restore is what was drawn: the composed background and every
+// sprite bitmap come back blank, so both caches are invalidated here. Without
+// that a survived loss would leave the map painting nothing over nothing, which
+// would look exactly like the freeze it just recovered from.
+let ctxLost = 0, ctxRestored = 0, ctxLostAt = 0;
+for (const c of [cv, bg]) {
+  c.addEventListener("contextlost", () => {
+    ctxLost++; ctxLostAt = Math.round(performance.now());
+    noteEvent("contextlost");
+    console.error("[transit] canvas context lost — the browser took the drawing "
+                  + "surfaces away. Recorded; transitFreeze() reads it back.");
+  });
+  c.addEventListener("contextrestored", () => {
+    ctxRestored++;
+    noteEvent("contextrestored");
+    bgDirty = true;                                  // recompose from scratch
+    for (const s of spriteBmp) if (s) s.px = -1;      // and re-raster the fleet
+  });
+}
+
 function composeBackground() {
   const key = `${view.x}|${view.y}|${view.k}`;
   if (!bgDirty && key === bgKey && bg.width === cv.width && bg.height === cv.height) return;
@@ -1036,6 +1070,19 @@ let peakDecodeRate = 0, peakEvictRate = 0;
 // Reset with the rate baselines below, so these describe the window a snapshot
 // covers rather than the whole session.
 let frameCostSum = 0, frameCostN = 0, frameCostMax = 0;
+// And what the frame spent it on. One number said the canvas was too big for
+// the machine and the cap fixed it; the two freezes after the cap say the
+// number is not flat — it sits at 3-4 ms zoomed out and 10-16 ms past k≈3, and
+// both stalls happened at the top of that. A single average cannot say which
+// part of the frame grows, and the three candidates fail differently: the
+// compose is one huge draw of the base PNG or the tile cascade and only runs
+// when the view moves, the blit is the whole canvas every frame and scales with
+// its size, and the sprites are thousands of small draws whose *on-screen* size
+// grows as sqrt(k) — so at deep zoom each one covers five times the pixels it
+// does at k=1, over a fleet that also changes size with the simulated clock.
+// Timed separately, a rising cost names its own cause.
+let costComposeSum = 0, costBlitSum = 0, costSpriteSum = 0, costComposeMax = 0;
+let frameComposeMs = 0, frameBlitMs = 0, spriteDraws = 0;
 
 function resourceStats() {
   let spriteCanvases = 0, spritePx = 0;
@@ -1107,6 +1154,16 @@ function resourceStats() {
     // one in it. Against fps this says whether the page is the bottleneck.
     frameCostAvg: frameCostN ? +(frameCostSum / frameCostN).toFixed(1) : 0,
     frameCostMax: +frameCostMax.toFixed(1),
+    // and where it went: one compose (only when the view moved), one
+    // full-canvas blit, and the fleet. costSprites climbing with `zoom` while
+    // the other two sit still is the sqrt(k) sprite growth; costCompose is the
+    // base PNG or the tile cascade and shows up as a spike in the max rather
+    // than in the average, since most frames skip it.
+    costCompose: frameCostN ? +(costComposeSum / frameCostN).toFixed(1) : 0,
+    costComposeMax: +costComposeMax.toFixed(1),
+    costBlit: frameCostN ? +(costBlitSum / frameCostN).toFixed(1) : 0,
+    costSprites: frameCostN ? +(costSpriteSum / frameCostN).toFixed(1) : 0,
+    spriteDraws,
     // Whether the last compose drew the base PNG, and at what scale — see
     // composeBackground. tileHoldFrames counts frames drawn while tile loading
     // was deliberately held off because the view was still moving.
@@ -1121,6 +1178,11 @@ function resourceStats() {
     spriteCanvases, spriteMB: mb(spritePx),
     canvasMB: mb(cv.width * cv.height),
     zoom: +view.k.toFixed(3), dpr: DPR, frameErrors, slowFrames,
+    // The two ways a rendering pass dies that are not this page's doing: the
+    // browser taking the drawing surfaces away, and the process being suspended
+    // rather than wedged (see the canvas listeners and CLOCK_SKEW0).
+    ctxLost, ctxRestored, ctxLostAt,
+    driftMs: Math.round(Date.now() - performance.now() - CLOCK_SKEW0),
     // Which copy of this file the tab is running. Twice now a freeze has been
     // reported minutes after a fix went live and there was no way to tell from
     // the record whether the frozen tab had it — a tab open since before the
@@ -1140,6 +1202,7 @@ function resourceStats() {
   statsAt = now; statsFrames = frames; statsComposes = bgComposes;
   statsEvictions = tileEvictions; statsDecodes = tileDecodes;
   frameCostSum = 0; frameCostN = 0; frameCostMax = 0;
+  costComposeSum = 0; costBlitSum = 0; costSpriteSum = 0; costComposeMax = 0;
   rafGapMax = 0; hiddenInWindow = document.hidden;
   return s;
 }
@@ -1270,6 +1333,42 @@ const STALL_RUNUP = 30;          // cheap liveness samples kept before the stall
 const STALL_SESSION = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 let stallRunup = [], inStall = false;   // stalls/firstStallAt live with the clock
 
+// What the page was being asked to do on the way in.
+//
+// Every record so far describes the page's own state and none of them says what
+// the user was doing, which has left the run-up readable only by inference —
+// the two freezes on 2026-07-28 were both at or just off the deepest zoom, and
+// the only reason anyone knows that is that `k` happens to be sampled. A ring
+// of the events themselves says it directly, and says the ones no counter
+// reflects at all: a resize, a display change, the page being frozen or resumed
+// by the browser's own lifecycle.
+//
+// Runs of one kind are coalesced — a pinch is hundreds of wheel events and
+// would otherwise be the whole ring — so an entry is "wheel x214, from 41.2 s
+// to 43.9 s". Registered passively and in the capture phase, so nothing here
+// can change what the page's own handlers see.
+const EVENT_KEEP = 24;
+const EVENT_JOIN = 1000;     // ms of quiet that ends a run of one kind
+const stallEvents = [];
+function noteEvent(kind) {
+  const t = Math.round(performance.now());
+  const last = stallEvents[stallEvents.length - 1];
+  if (last && last.e === kind && t - last.t1 <= EVENT_JOIN) { last.n++; last.t1 = t; return; }
+  stallEvents.push({ e: kind, n: 1, t0: t, t1: t });
+  if (stallEvents.length > EVENT_KEEP) stallEvents.shift();
+}
+for (const ev of ["pointerdown", "pointerup", "wheel", "keydown", "resize",
+                  "visibilitychange", "pagehide", "pageshow", "freeze", "resume"]) {
+  addEventListener(ev, () => noteEvent(ev), { passive: true, capture: true });
+}
+
+// The wall clock against the monotonic one. They diverge when the process is
+// suspended rather than wedged — a laptop lid, a sleeping machine, a tab the
+// browser froze — which reproduces the freeze signature exactly and is the
+// first thing to rule out. The ?trace worker has reported this all along and
+// the freeze record never has.
+const CLOCK_SKEW0 = Date.now() - performance.now();
+
 // One sample per tick, and deliberately not resourceStats(): that resets the
 // rate baselines the ?debug log and the memory watchdog read from, so polling it
 // would quietly zero everyone else's rates. These are counters already being
@@ -1286,7 +1385,16 @@ function stallSample() {
            // `base` is the 17-megapixel PNG going down at `k`*DPR scale
            queued: tileQueue.length, base: baseDrawn, hold: tileHoldFrames,
            cost: +(frameCostN ? frameCostSum / frameCostN : 0).toFixed(1),
-           k: +view.k.toFixed(3) };
+           // and the same millisecond split three ways, so the run-up says
+           // which phase was growing rather than only that the frame was
+           k: +view.k.toFixed(3), sprites: spriteDraws,
+           cCompose: +(frameCostN ? costComposeSum / frameCostN : 0).toFixed(1),
+           cBlit: +(frameCostN ? costBlitSum / frameCostN : 0).toFixed(1),
+           cSprites: +(frameCostN ? costSpriteSum / frameCostN : 0).toFixed(1),
+           // suspension, and the browser taking the surfaces away: the two
+           // explanations for a dead rendering pass that are not this page's
+           drift: Math.round(Date.now() - performance.now() - CLOCK_SKEW0),
+           lost: ctxLost };
 }
 
 // Whether the stored record is this session's, so the verdict and the recovery
@@ -1404,6 +1512,7 @@ setInterval(() => {
       localStorage.setItem(STALL_KEY, JSON.stringify({
         at: Date.now(), session: STALL_SESSION, stalls, ua: navigator.userAgent,
         screen: [innerWidth, innerHeight, DPR], snapshot: snap, runup: stallRunup,
+        events: stallEvents.slice(),
       }));
       ownsRecord = true;
     }
@@ -1737,6 +1846,14 @@ function frame(now) {
   // apart — it only fires past 500 ms, and has read 0 in all seven reports.
   frameCostSum += cost; frameCostN++;
   if (cost > frameCostMax) frameCostMax = cost;
+  // The same millisecond, split three ways. Charged after the fact so a frame
+  // that threw is still counted whole by the line above: drawFrame sets the two
+  // measured phases and the sprites are the remainder, floored at zero in case
+  // an exception left last frame's values behind.
+  costComposeSum += frameComposeMs; costBlitSum += frameBlitMs;
+  costSpriteSum += Math.max(0, cost - frameComposeMs - frameBlitMs);
+  if (frameComposeMs > costComposeMax) costComposeMax = frameComposeMs;
+  frameComposeMs = frameBlitMs = 0;
   traceFrame(cost, gap);
   if (cost > SLOW_FRAME_MS) noteSlowFrame(cost, t0);
 }
@@ -1778,10 +1895,16 @@ function drawFrame(now) {
   if (still && !tilesMayLoad) bgDirty = true;
   tilesMayLoad = still;
   if (!still) tileHoldFrames++;
+  const tCompose = performance.now();
   composeBackground();
+  const tBlit = performance.now();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.drawImage(bg, 0, 0);
   ctx.setTransform(DPR * view.k, 0, 0, DPR * view.k, -view.x * DPR * view.k, -view.y * DPR * view.k);
+  // The two phases that are one draw each. Everything after this is sprites,
+  // and frame() charges it what the frame cost less these two.
+  frameComposeMs = tBlit - tCompose;
+  frameBlitMs = performance.now() - tBlit;
 
   // clock above the Metro logo (map px: logo x 240-460, y 3640-3900)
   ctx.fillStyle = "#1a1a1a";
@@ -1815,7 +1938,7 @@ function drawFrame(now) {
   }
 
   // vehicles
-  let active = 0;
+  let active = 0, drawn = 0;
   const t = simT;
   const s = spriteScale();
   const insetDraws = [];
@@ -1843,6 +1966,7 @@ function drawFrame(now) {
     if (a < 1) ctx.globalAlpha = a;
     const [spx, sw] = spriteSize(sp.half, s);
     ctx.drawImage(spriteAt(tr.r, spx), x - sw / 2, y - sw / 2, sw, sw);
+    drawn++;
     if (i === pathTrip) {   // ring the vehicle whose path is shown
       ctx.beginPath(); ctx.arc(x, y, (sp.half + 4) * s, 0, 7);
       ctx.lineWidth = 2 * s; ctx.strokeStyle = "#111"; ctx.stroke();
@@ -1885,10 +2009,15 @@ function drawFrame(now) {
       if (a < 1) ctx.globalAlpha = a;
       const [spx, sw] = spriteSize(sprites[ri].half, s);
       ctx.drawImage(spriteAt(ri, spx), x - sw / 2, y - sw / 2, sw, sw);
+      drawn++;
       if (a < 1) ctx.globalAlpha = 1;
     }
     ctx.restore();
   }
+  // How many draws the sprite phase above actually made. The cull is against
+  // the drawn *map*, not the viewport, so at deep zoom most of these land
+  // entirely outside the canvas — worth knowing beside what the phase cost.
+  spriteDraws = drawn;
   const hhmm = `${hh}:${mm}`;
   stats.textContent = `${hhmm} · ${active} vehicles` +
     (pathTrip >= 0 && trips[pathTrip] ? ` · path: ${data.routes[trips[pathTrip].r].n}` : "") +

@@ -51,6 +51,8 @@ const env = {
   bgComposes: 0, frameErrors: 0, slowFrames: 0, view: { k: 1.5 }, DPR: 2,
   tileQueue: [], baseDrawn: false, tileHoldFrames: 0,
   frameCostSum: 0, frameCostN: 0,
+  // the frame-cost split and the two non-page explanations the samples copy
+  costComposeSum: 0, costBlitSum: 0, costSpriteSum: 0, spriteDraws: 0, ctxLost: 0,
   DEBUG: false, TRACE: false,
   resourceStats: () => ({ fake: true }),
 };
@@ -94,6 +96,7 @@ const body = `
            setWin: (w, h) => { innerWidth = w; innerHeight = h; },
            win: () => ({ W, H, cvW: cv.width, cvH: cv.height, resizes }),
            rafArmed: () => rafArmed,
+           events: () => stallEvents, noteEvent,
            runRaf: () => { const f = rafFn; rafFn = null; if (f) f(); } };
 `;
 const names = Object.keys(env);
@@ -214,6 +217,11 @@ const recN = JSON.parse(store.get("transit.freeze"));
 check("earlier run: superseded, not bumped", recN.session === "an-earlier-run", false);
 check("earlier run: this run's snapshot recorded", recN.snapshot.stale, undefined);
 check("earlier run: this run's run-up recorded", recN.runup.length > 1, true);
+// What the user was doing on the way in. The shim's own visibility changes are
+// seconds apart, so each stands alone; the coalescing is exercised below.
+check("earlier run: the input run-up recorded", Array.isArray(recN.events), true);
+check("earlier run: and it is this run's events",
+      recN.events.every(e => e.e && e.n >= 1 && e.t1 >= e.t0), true);
 check("earlier run: the verdict is written after all", !!recN.verdict, true);
 check("earlier run: and it is this run's verdict", recN.verdict.browserRendering, true);
 const prevN = JSON.parse(store.get("transit.freeze.prev"));
@@ -233,6 +241,18 @@ check("same session: nothing pushed to the previous slot",
 //    of a day is all drawFrame does, so a single frame's advance has to stay
 //    under a day — which is a property of MAX_STEP_SEC against the fastest
 //    speed the page offers, and breaks silently if either is changed.
+// A pinch is hundreds of wheel events a second and the ring holds 24 entries,
+// so without coalescing the run-up would be one gesture and nothing before it.
+const evBefore = api.events().length;
+for (let i = 0; i < 300; i++) api.noteEvent("wheel");
+advance(2000, 1000);
+api.noteEvent("wheel");
+const evs = api.events().slice(evBefore);
+check("events: a burst of one kind is one entry", evs.length, 2);
+check("events: and it counts them", evs[0].n, 300);
+check("events: quiet ends the run", evs[1].n, 1);
+check("events: the ring is bounded", api.events().length <= 24, true);
+
 const maxStep = +SRC.match(/const MAX_STEP_SEC = ([\d.]+)/)[1];
 const maxSpeed = Math.max(...[...SRC.matchAll(/<option value="(\d+)"/g)].map(m => +m[1]));
 check("clock: one frame stays inside a day", maxStep * maxSpeed < 86400, true);
@@ -247,6 +267,15 @@ check("app.js measures what a frame costs",
       SRC.includes("frameCostAvg: frameCostN"), true);
 check("app.js records what the compositor was handed",
       SRC.includes("queued: tileQueue.length, base: baseDrawn, hold: tileHoldFrames"), true);
+check("app.js splits the frame cost by phase",
+      SRC.includes("costCompose: frameCostN") && SRC.includes("costSprites: frameCostN"), true);
+check("the run-up carries the split too", SRC.includes("cSprites:"), true);
+check("app.js notices the browser taking the canvas away",
+      /addEventListener\("contextlost"/.test(SRC) && SRC.includes("ctxLost, ctxRestored"), true);
+check("app.js separates suspension from a wedged pass",
+      SRC.includes("CLOCK_SKEW0 = Date.now() - performance.now()"), true);
+check("the freeze record keeps what the user was doing",
+      SRC.includes("events: stallEvents.slice()"), true);
 check("app.js holds tile loading while the view moves",
       SRC.includes("if (!tilesMayLoad) return COLD;"), true);
 check("app.js dates the code the tab is running",
