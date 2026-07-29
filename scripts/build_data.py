@@ -523,6 +523,7 @@ def mask_pixels(colors, tol, region):
 ORANGE = (217, 129, 83)     # Metro Local/Rapid orange
 RAPID_RED = (180, 51, 61)   # 720/754/761
 BUSWAY_GRAY = "969CA0"      # J Line 910/950 freeway busway ribbon
+JLINE_GRAY = (173, 184, 191)     # that ribbon as the PDF strokes it (see JLINE_INK)
 BUSWAY_ORANGE = (243, 123, 33)   # G Line busway ribbon, as printed on the sheet
 BUSWAY_TOL = 30.0
 # The busway holds that one ribbon and nothing else, so the snap can reach much
@@ -906,6 +907,12 @@ RAIL_INK = [(0.655, 0.664, 0.673)]
 ORANGE_INK = [(0.961, 0.513, 0.272)]                       # Metro Local
 RAPID_RED_INK = [(0.844, 0.086, 0.207)]                    # 720/754/761 rapid ribbon
 BUSWAY_INK = [(0.957, 0.474, 0.126)]                       # G Line busway ribbon
+# The J Line's transitway ribbon, drawn 5.5 wide in the line's own #ADB8BF —
+# which is, to the byte, the route_color Metro's GTFS gives it. The raster is
+# where its color collides with freeway gray, not the PDF: 1104 stroke points,
+# all of them on this line bar two legend swatches down at y≈3700, which no cap
+# here can reach from the route.
+JLINE_INK = [(0.678, 0.723, 0.75)]
 LADOT_INK = [(0.409, 0.398, 0.173), (0.419, 0.4, 0.164)]   # DASH + Commuter Express
 
 # The mask holds railroads and nothing else, so — as with the busway ribbon —
@@ -3335,6 +3342,24 @@ def main():
                 color = "%02X%02X%02X" % tuple(round(v * 255) for v in RAPID_RED_INK[0])
             if row["route_id"].split("-")[0] in ("910", "950"):
                 color, text = BUSWAY_GRAY, "FFFFFF"   # J Line rides the gray busway
+                # And it is badged by number, not by letter. Metro's
+                # route_short_name is "Metro J Line (Silver) 910/950", whose
+                # first token is short enough that route_label takes it and
+                # stops — so every one of these vehicles carried a "J" that
+                # appears nowhere on the sheet: badge_words() finds the token
+                # zero times on the main map and zero times in the call-out,
+                # against gray "910" over "950" chips at four places along the
+                # transitway and a "950" on its own where only that working
+                # runs, down Pacific Ave in San Pedro. This is the case
+                # route_label's own docstring describes and cannot reach here,
+                # the designation being four characters already.
+                #
+                # "910" of the pair, for the same reason it returns "14" from
+                # "14/37": the first part the sheet prints. It is also the
+                # working most of these trips are — 211 of 291 turn back at
+                # Harbor Gateway — though the choice does cost the San Pedro
+                # trips a badge, since down there the sheet prints only "950".
+                label = "910"
             if row["route_id"].split("-")[0] == "901":
                 color, text = "%02X%02X%02X" % BUSWAY_ORANGE, "FFFFFF"   # G Line's own
             rail = row.get("route_type") in ("0", "1", "2")
@@ -3493,18 +3518,32 @@ def main():
                     shape_isnap[(feed, sid)] = ([ROUTE_COLORS[rid]], TOL, toks)
             elif feed == "gtfs_bus":
                 rid0 = (rid or "").split("-")[0]
-                busway = rid0 == "901"
+                # Both ribbons the sheet draws in an ink of their own, and both
+                # snapped the same way: on that ink, pinned by the station names
+                # printed beside it. The J Line used to be the one Metro bus
+                # route that snapped onto nothing at all — its drawn gray is a
+                # rounding from the freeway's in map.png, so a color mask would
+                # have taken every freeway on the sheet with it — and what stood
+                # instead was the raw warp. Out at the end of the line that is a
+                # block and a half: through San Pedro the 950 ran down Figueroa
+                # and Anaheim instead of the Harbor Freeway beside them, and its
+                # south end sat 70 px past the 22nd St loop the sheet draws,
+                # down by Shepard St. The PDF has no such collision — see
+                # JLINE_INK — so there was never anything to snap it onto except
+                # the wrong thing to read it from.
+                busway = rid0 in ("901", "910")
                 if rid0 in ("720", "754", "761"):
                     cols = [RAPID_RED]
                 elif rid0 == "910":
-                    cols = None   # J/Silver: drawn color collides with freeway gray
+                    cols = [JLINE_GRAY]
                 else:
                     cols = [BUSWAY_ORANGE] if busway else [ORANGE]
                 if cols is not None:
                     # Snap on the strokes, anchor on the pixels. The badges are
                     # chips filled with the line color, not strokes of it, so
                     # they stand on the mask and not on the ink.
-                    ink = ink_tree(BUSWAY_INK if busway else
+                    ink = ink_tree(JLINE_INK if rid0 == "910" else
+                                   BUSWAY_INK if busway else
                                    RAPID_RED_INK if cols == [RAPID_RED] else ORANGE_INK)
                     # The busway is pinned by station names printed beside the
                     # ribbon, not by badges standing on it — the sheet gives the
@@ -3574,7 +3613,15 @@ def main():
                         out_pts = resample(
                             square_ends(np.asarray(out_pts, dtype=float), snap_tree),
                             len(out_pts))
-                    shape_isnap[(feed, sid)] = (cols, 38.0, toks)
+                    # Not the J Line: the call-out redraws every Metro bus line
+                    # in orange (see runs_for), and this one is not a Metro bus
+                    # line down there — it is the gray transitway, drawn in the
+                    # panel the same as it is drawn outside it. Registering it
+                    # here would snap its downtown run onto the mask of every
+                    # other route in the panel. It stays unsnapped there,
+                    # exactly as it was.
+                    if rid0 != "910":
+                        shape_isnap[(feed, sid)] = (cols, 38.0, toks)
             elif feed == "metrolink":
                 # The railroad ink holds railroads and nothing else, which is
                 # enough to put a line on track but not to say *which* track
