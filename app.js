@@ -856,7 +856,7 @@ Promise.all([
   // draw rail last so trains sit on top of the bus swarm
   trips.sort((a, b) => (d.routes[a.r].rail ? 1 : 0) - (d.routes[b.r].rail ? 1 : 0));
   vAlpha = new Float32Array(trips.length);   // all start hidden, fade in on first frame
-  requestAnimationFrame(frame);
+  armFrame();
 });
 
 // average speed (map px / sec) of segment i -> i+1; 0 if degenerate
@@ -1123,6 +1123,11 @@ function resourceStats() {
     visibilityAgeMs: Math.round(now - visibleSince),
     visibleMs: Math.round(visibleMs()),
     rafGapMax: Math.round(rafGapMax),
+    // How many callbacks arrived for a frame already drawn, and how many
+    // requests are outstanding. Before the count replaced it, a single dupe was
+    // enough to end the animation — see frame() — so a record with dupes on it
+    // is a record from a session that used to be one bad frame from a stall.
+    rafDupes, rafLive,
     // Whether the *browser* is still producing frames, independent of whether
     // this page is getting any — see renderTick(). Read it second, right after
     // stalledVisibleMs, and it names the culprit outright.
@@ -1405,7 +1410,7 @@ function stallSample() {
            // suspension, and the browser taking the surfaces away: the two
            // explanations for a dead rendering pass that are not this page's
            drift: Math.round(Date.now() - performance.now() - CLOCK_SKEW0),
-           lost: ctxLost };
+           lost: ctxLost, dup: rafDupes, live: rafLive };
 }
 
 // Whether the stored record is this session's, so the verdict and the recovery
@@ -1463,7 +1468,7 @@ setInterval(() => {
     // comes back depends on there being a live request when it does. frame()
     // drops a duplicate callback, so the standing request and this one cannot
     // both take.
-    requestAnimationFrame(frame);
+    armFrame();
     // One tick after detection, still stalled: the browser's frame clock has
     // had a full second to move, and whether it did is the whole diagnosis.
     // Recorded once — after that there is nothing further to learn by watching.
@@ -1490,6 +1495,19 @@ setInterval(() => {
   inStall = true;
   stalls++;
   if (!firstStallAt) firstStallAt = Math.round(Date.now());
+  // The verdict below is written a tick *after* detection, and a stall that
+  // recovers inside that second never gets one: the 2026-07-29 record has seven
+  // stalls and no verdict at all, because every one of them came back the tick
+  // after it was caught. The same comparison is already available at detection —
+  // the run-up's previous sample carries the browser's frame clock from a second
+  // ago — so it is taken here too, and this one cannot be outrun.
+  const prevSample = stallRunup[stallRunup.length - 2];
+  const atStall = prevSample ? {
+    browserRendering: sample.tick > prevSample.tick,
+    tickPrev: prevSample.tick, tick: sample.tick,
+    framesPrev: prevSample.frames, frames: sample.frames,
+    rafDupes, rafLive,
+  } : null;
   // resourceStats() is called here and only here, so the run-up above stays
   // cheap and the snapshot below is the expensive one, taken once.
   const snap = resourceStats();
@@ -1507,7 +1525,7 @@ setInterval(() => {
   // recovers it within a frame and costs one call; if the browser has stopped
   // rendering, it is ignored along with the registration already outstanding.
   // frame() drops a duplicate callback, so recovering cannot leave two loops.
-  requestAnimationFrame(frame);
+  armFrame();
   try {
     const prior = JSON.parse(localStorage.getItem(STALL_KEY) || "null");
     // Keep the first stall of *this* session: it is the one with the healthy-to-
@@ -1526,6 +1544,7 @@ setInterval(() => {
         at: Date.now(), session: STALL_SESSION, stalls, ua: navigator.userAgent,
         screen: [innerWidth, innerHeight, DPR], snapshot: snap, runup: stallRunup,
         events: stallEvents.slice(), eventsDuring: stallEventsDuring.slice(),
+        atStall,
       }));
       ownsRecord = true;
     }
@@ -1824,17 +1843,42 @@ window.transitTrace = () => {
 // Either one throwing would have ended the animation while reporting
 // `frameErrors: 0`, making it indistinguishable from a freeze below the page.
 // Asking for the next frame up front costs nothing and removes the ambiguity.
-// Callbacks registered for the same frame are handed the same timestamp, so this
-// is what makes the watchdog's re-arm safe: if the original registration was
-// live all along and the browser simply wasn't ticking, both fire when it
-// resumes, and the second returns here without re-arming. One loop survives,
-// which is the point — two would double every frame's work for the rest of the
-// session, permanently, as the price of a recovery that already worked.
-let lastRafNow = -1;
-function frame(now) {
-  if (now === lastRafNow) return;      // duplicate registration; one loop is enough
-  lastRafNow = now;
+// Callbacks registered for the same frame are handed the same timestamp, so a
+// second one for a frame already drawn is dropped rather than drawn twice: that
+// is what makes the watchdog's re-arm safe, since two loops would double every
+// frame's work for the rest of the session as the price of a recovery that
+// already worked.
+//
+// Dropping the *draw* is right. Dropping the *registration* with it was not, and
+// that is what this used to do — `return` before the re-arm, on the assumption
+// that a repeated timestamp can only ever mean a surplus registration, so some
+// other one must still be live. Nothing guarantees that. A repeated timestamp
+// with only one request outstanding ends the animation on the spot: no error, no
+// slow frame, `frames` simply stops while the browser goes on rendering the
+// document perfectly well — and the watchdog four seconds later is the only
+// reason it ever comes back, which is exactly the shape of the 2026-07-29
+// session's seven stalls, every one of them recovering the tick after detection
+// with `framesSince: 59`, and its run-up showing `document.timeline` at most 18
+// ms stale at four of the five reads taken while not one frame was drawn (102 ms
+// at the fifth) — a refresh driver ticking at speed, for a page getting nothing.
+//
+// So the loop is now held by a count of outstanding requests rather than by the
+// timestamp: every path out of frame() leaves exactly one live, and a surplus
+// collapses back to one on the frame after it arrives.
+let lastRafNow = -1, rafLive = 0, rafDupes = 0;
+function armFrame() {
+  rafLive++;
   requestAnimationFrame(frame);
+}
+function frame(now) {
+  rafLive--;
+  if (now === lastRafNow) {            // this frame has already been drawn
+    rafDupes++;
+    if (rafLive === 0) armFrame();     // ...but the loop does not end here
+    return;
+  }
+  lastRafNow = now;
+  armFrame();
   const t0 = performance.now();
   frames++;
   // Liveness, so a snapshot can report real fps — and the gap since the previous
