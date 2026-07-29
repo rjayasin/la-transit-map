@@ -1349,13 +1349,24 @@ let stallRunup = [], inStall = false;   // stalls/firstStallAt live with the clo
 // can change what the page's own handlers see.
 const EVENT_KEEP = 24;
 const EVENT_JOIN = 1000;     // ms of quiet that ends a run of one kind
-const stallEvents = [];
+const EVENT_STALL_MS = 1000; // not drawn for this long: whatever arrives now is
+                             // being aimed at a picture that has already stopped
+const stallEvents = [], stallEventsDuring = [];
 function noteEvent(kind) {
+  // A frozen page gets poked, and the poking was drowning out the run-up: the
+  // whole ring of the 21:46 record is twelve pointerdown/pointerup pairs in two
+  // seconds — someone clicking at a picture that had stopped — and they had
+  // pushed out every event from before the stall, which is the half worth
+  // having. The observer tripping the thing it observes, again. So events that
+  // arrive while the page is not drawing go to their own ring: the run-up
+  // survives, and what was done to the frozen tab is still recorded.
+  const ring = frames && visibleMs() - frameAtVis > EVENT_STALL_MS
+             ? stallEventsDuring : stallEvents;
   const t = Math.round(performance.now());
-  const last = stallEvents[stallEvents.length - 1];
+  const last = ring[ring.length - 1];
   if (last && last.e === kind && t - last.t1 <= EVENT_JOIN) { last.n++; last.t1 = t; return; }
-  stallEvents.push({ e: kind, n: 1, t0: t, t1: t });
-  if (stallEvents.length > EVENT_KEEP) stallEvents.shift();
+  ring.push({ e: kind, n: 1, t0: t, t1: t });
+  if (ring.length > EVENT_KEEP) ring.shift();
 }
 for (const ev of ["pointerdown", "pointerup", "wheel", "keydown", "resize",
                   "visibilitychange", "pagehide", "pageshow", "freeze", "resume"]) {
@@ -1469,7 +1480,9 @@ setInterval(() => {
       amendRecord({ verdict: {
         browserRendering, tickAtStall: stallTick, tickAfter: sample.tick,
         framesAfter: frames - stallFrames, winH: innerHeight, cvH: cv.height,
-      } });
+      // the poking mostly arrives after the record is written, so it rides
+      // along with the verdict a tick later rather than being lost
+      }, eventsDuring: stallEventsDuring.slice() });
     }
     return;                            // already recorded this one
   }
@@ -1512,7 +1525,7 @@ setInterval(() => {
       localStorage.setItem(STALL_KEY, JSON.stringify({
         at: Date.now(), session: STALL_SESSION, stalls, ua: navigator.userAgent,
         screen: [innerWidth, innerHeight, DPR], snapshot: snap, runup: stallRunup,
-        events: stallEvents.slice(),
+        events: stallEvents.slice(), eventsDuring: stallEventsDuring.slice(),
       }));
       ownsRecord = true;
     }
@@ -1943,6 +1956,28 @@ function drawFrame(now) {
   const s = spriteScale();
   const insetDraws = [];
   const step = dt / FADE_SEC;   // opacity change this frame (real time, not sim time)
+  // What the window can actually show, in map px.
+  //
+  // The cull below this is against the drawn *map*, which at any real zoom is
+  // nearly all of it: at k=4 a 2560 px window holds 0.8% of the sheet, so ~2,200
+  // of the 2,222 draws a frame were destination rectangles entirely off the
+  // canvas. Firefox charges for those and the split says so outright — the
+  // freeze on 2026-07-28 at 21:46 reports 13.8 ms of sprites against 0.0 for the
+  // compose and 0.0 for the blit, with the cost tracking the zoom the whole way
+  // up (3.7 ms at k=1.2, 16 ms at k=5). Chrome rejects them for about nothing,
+  // flat at 2.6 ms across every zoom, which is why five rounds of headless
+  // measurement never saw this.
+  //
+  // The margin is one sprite, so a vehicle straddling the edge still draws, and
+  // it is generous — sprites are ~28 map units across at s=1 and the ring the
+  // path inspector adds is wider still.
+  const vm = 24 * s;
+  const vx0 = view.x - vm, vx1 = view.x + W / view.k + vm;
+  const vy0 = view.y - vm, vy1 = view.y + H / view.k + vm;
+  // The call-out panel is drawn in map px like everything else, so the mirrored
+  // run costs nothing to skip when the panel is off-screen too.
+  const insetVisible = !!insetRect && insetRect[0] <= vx1 && insetRect[2] >= vx0
+                                   && insetRect[1] <= vy1 && insetRect[3] >= vy0;
   for (let i = 0; i < trips.length; i++) {
     const tr = trips[i];
     const pat = data.patterns[tr.p];
@@ -1962,23 +1997,28 @@ function drawFrame(now) {
     const dist = distAt(times, d, lo, hi, tc, data.routes[tr.r].rail);
     const [x, y] = posAlong(shapes[pat.s], dist);
     if (x < -15 || x > map.width + 15 || y < 708 || y > map.height + 15) continue;  // off the drawn map (708 = under the title banner)
-    const sp = sprites[tr.r];
-    if (a < 1) ctx.globalAlpha = a;
-    const [spx, sw] = spriteSize(sp.half, s);
-    ctx.drawImage(spriteAt(tr.r, spx), x - sw / 2, y - sw / 2, sw, sw);
-    drawn++;
-    if (i === pathTrip) {   // ring the vehicle whose path is shown
-      ctx.beginPath(); ctx.arc(x, y, (sp.half + 4) * s, 0, 7);
-      ctx.lineWidth = 2 * s; ctx.strokeStyle = "#111"; ctx.stroke();
-    }
-    if (a < 1) ctx.globalAlpha = 1;
+    // Counted wherever it is — the figure beside the clock is how many vehicles
+    // are running on the network, not how many the window happens to frame — and
+    // drawn only where it can be seen.
     if (present) active++;
+    if (x >= vx0 && x <= vx1 && y >= vy0 && y <= vy1) {
+      const sp = sprites[tr.r];
+      if (a < 1) ctx.globalAlpha = a;
+      const [spx, sw] = spriteSize(sp.half, s);
+      ctx.drawImage(spriteAt(tr.r, spx), x - sw / 2, y - sw / 2, sw, sw);
+      drawn++;
+      if (i === pathTrip) {   // ring the vehicle whose path is shown
+        ctx.beginPath(); ctx.arc(x, y, (sp.half + 4) * s, 0, 7);
+        ctx.lineWidth = 2 * s; ctx.strokeStyle = "#111"; ctx.stroke();
+      }
+      if (a < 1) ctx.globalAlpha = 1;
+    }
     // mirror into the DTLA inset panel. Inset motion is computed in inset
     // space (the schematic main map collapses downtown): each stop knows its
     // run + distance along the run's inset polyline, and the vehicle's
     // progress through the current segment interpolates between them.
     const ir = pat.ir;
-    if (ir) {
+    if (ir && insetVisible) {
       const ra = ir[lo], rb = ir[hi];
       let run = -1, i0 = 0, i1 = 0;
       if (ra >= 0 && ra === rb) { run = ra; i0 = pat.id[lo]; i1 = pat.id[hi]; }
@@ -2014,9 +2054,10 @@ function drawFrame(now) {
     }
     ctx.restore();
   }
-  // How many draws the sprite phase above actually made. The cull is against
-  // the drawn *map*, not the viewport, so at deep zoom most of these land
-  // entirely outside the canvas — worth knowing beside what the phase cost.
+  // How many draws the sprite phase above actually made — on-screen ones only
+  // since the viewport cull, so this reads as a few dozen at deep zoom against
+  // `active` in the thousands. The pair is the cull working, and the number to
+  // read `costSprites` against.
   spriteDraws = drawn;
   const hhmm = `${hh}:${mm}`;
   stats.textContent = `${hhmm} · ${active} vehicles` +
