@@ -83,6 +83,11 @@ const prelude = `
   let rafArmed = 0, rafFn = null;
   function requestAnimationFrame(fn) { rafArmed++; rafFn = fn; }
   function frame() { frames++; frameAtVis = visibleMs(); }
+  // The loop is armed through armFrame() now, and the two counters it keeps ride
+  // in every sample — see app.js, where returning from frame() without one of
+  // these ended the animation outright.
+  let rafDupes = 0, rafLive = 0;
+  function armFrame() { rafLive++; requestAnimationFrame(frame); }
 `;
 
 // Evaluate the extracted blocks against the shim.
@@ -296,8 +301,43 @@ check("app.js dates the code the tab is running",
       SRC.includes("docModified: document.lastModified"), true);
 check("the watchdog reconciles a dropped resize",
       SRC.includes("if (innerWidth !== W || innerHeight !== H) resize();"), true);
-check("frame() drops a duplicate rAF callback",
-      /if \(now === lastRafNow\) return;/.test(SRC), true);
+// ---- the loop holds itself ------------------------------------------------
+// Lifted verbatim, and driven directly: a duplicate callback must not draw the
+// frame twice *and* must not leave the animation unregistered. The second half
+// is the 2026-07-29 defect — the guard used to return before the re-arm, so one
+// repeated timestamp ended the session's animation in silence, with the
+// four-second watchdog as the only way back.
+{
+  const loopBlock = slice("let lastRafNow = -1, rafLive = 0", "  const t0 = performance.now();");
+  let queued = [], draws = 0;
+  const api2 = new Function("record", `
+    function requestAnimationFrame(fn) { record.queued.push(fn); }
+    ${loopBlock}
+      record.draws++;
+    }
+    return { frame, armFrame, live: () => rafLive, dupes: () => rafDupes };
+  `)({ get queued() { return queued; }, get draws() { return draws; },
+       set draws(v) { draws = v; } });
+  const deliver = now => { const q = queued; queued = []; for (const fn of q) fn(now); };
+
+  api2.armFrame();
+  deliver(100); deliver(116); deliver(132);
+  check("loop: one draw per frame", [draws, api2.live()], [3, 1]);
+
+  deliver(132);                                  // the same frame delivered twice
+  check("loop: a repeat is not drawn twice", draws, 3);
+  check("loop: and the loop is still armed", [api2.live(), queued.length], [1, 1]);
+  check("loop: the repeat is counted", api2.dupes(), 1);
+
+  deliver(148);
+  check("loop: it goes on after a repeat", draws, 4);
+
+  api2.armFrame();                               // the watchdog's re-arm: a surplus
+  check("loop: a forced re-arm is outstanding", api2.live(), 2);
+  deliver(164);
+  check("loop: surplus draws once", draws, 5);
+  check("loop: and collapses back to one", api2.live(), 1);
+}
 
 let bad = 0;
 for (const [name, got, want, ok] of results) {
