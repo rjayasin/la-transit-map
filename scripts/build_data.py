@@ -915,6 +915,24 @@ BUSWAY_INK = [(0.957, 0.474, 0.126)]                       # G Line busway ribbo
 JLINE_INK = [(0.678, 0.723, 0.75)]
 LADOT_INK = [(0.409, 0.398, 0.173), (0.419, 0.4, 0.164)]   # DASH + Commuter Express
 
+# Where a feed's lines are read out of the PDF, the color it draws them in is
+# the ink itself — no sampling, and no rendering to recover it from. It has to
+# be, for the same reason the lines do: `drawn_color` samples along the *warp*,
+# and LADOT's is a median 20 px off its drawn line, so most of what it reads is
+# the page. Both liveries came out around (151,150,114), a pale khaki against
+# the (104,101,44) the sheet prints, and the vehicles rode visibly lighter than
+# the lines beneath them — the failure the note on DRAWN_COLORS["pasadena"]
+# describes, at twice the size.
+#
+# One ink is also one sprite color for both liveries, and that is right: the
+# dashes are a stroke style, not a second olive — both of the roundings above
+# appear under both styles. The two legend seeds are two readings of the one
+# ink, a solid line and a dashed one blending differently into the page at
+# 4096 px, and they stay as seeds for the color masks, which search that
+# rendering and want it. Only the sprites, which are a rendering of nothing,
+# take the ink.
+INK_SPRITES = {"ladot": tuple(round(v * 255) for v in LADOT_INK[0])}
+
 # The mask holds railroads and nothing else, so — as with the busway ribbon —
 # the snap can reach much further than it dares on a shared color. It needs to:
 # the warp sits a median 18-59 px off the drawn track, and 90% of it inside 60.
@@ -1316,6 +1334,35 @@ def route_anchors(tokens, tree, region="main", colors=None, margin=8.0, near=Non
     return pts
 
 
+def ladot_livery(tokens, is_dash):
+    """The olive strokes a LADOT route is drawn among, and its badges on them.
+
+    LADOT's two liveries are two stroke styles of one ink, so the dash pattern
+    is what keeps a DASH loop and a Commuter Express off each other's streets.
+    Which style a route is drawn in is not the route's *name* to say, though.
+    The dashes mark part-time service, which is what a Commuter Express usually
+    is and what a DASH never is — so the name predicts the style, and predicts
+    it wrongly for the one Commuter Express that runs all day. The sheet draws
+    the 142 solid, like a DASH, from San Pedro across the harbour to Long
+    Beach, and looking for it among the dashes finds nothing at all: the
+    nearest dash to it is a median 292 px away, no cap reaches that, and the
+    route kept the warp — a diagonal across the water, where the sheet draws
+    Ocean Blvd.
+
+    So the name only proposes a livery and the printed badges settle it. Every
+    other Commuter Express has all of its badges on the dashed strokes; the
+    142 has all four of its on the solid ones. A DASH is left with the name's
+    answer, since it is given no anchors to settle anything with — its
+    designations are single letters the sheet also gives Metro's rail lines."""
+    prefer = ink_tree(LADOT_INK, dashed=not is_dash)
+    if is_dash:
+        return prefer, []
+    anc = route_anchors(tokens, prefer, near=BADGE_NEAR_INK)
+    other = ink_tree(LADOT_INK, dashed=is_dash)
+    alt = route_anchors(tokens, other, near=BADGE_NEAR_INK)
+    return (other, alt) if len(alt) > len(anc) else (prefer, anc)
+
+
 # Points on a route's drawn line, in map px, placed by hand where the sheet
 # prints no badge the anchoring can use. They serve as badges do — and where one
 # falls near an end of the shape, trim_terminus also cuts the overshoot back to
@@ -1451,6 +1498,46 @@ OVERRIDE_PATHS = {
             (2175, 2027), (2173, 2034), (2170, 2040), (2166, 2046), (2162, 2052),
             (2159, 2058), (2157, 2064), (2157, 2071),
         ],   # Atlantic, from below the Chavez corner to the Whittier junction
+    },
+    # LADOT 142 (route_id 870) through San Pedro. The sheet draws the corridor
+    # its stop list describes and draws it plainly — Miner & Harbor, west along
+    # 7th, north up Gaffey, east along Ocean — and the westbound working lands
+    # on all of it. The eastbound one keeps a 60 px bulge across the corner,
+    # and the reason is the warp, which is what a bodily slide cannot answer
+    # for here:
+    #   - San Pedro is one of the schematic corners, and the warp is ~78 px
+    #     south of the drawn 7th and Gaffey — while out at the Long Beach end
+    #     of the same 350 px of shape it is dead on. `anchor_slide` assumes an
+    #     error that "varies slowly enough that one vector covers every leg",
+    #     and over this route it does not.
+    #   - So the slide it settles on is a compromise, 49 px, and the length
+    #     bound refuses it by 1 px. The westbound shape's compromise comes out
+    #     at 44 and is allowed, which is the whole of the difference between
+    #     the two directions.
+    #   - Widening ANCHOR_SLIDE is not the fix. It admits the 142 (and rescues
+    #     Torrance R3, 961 -> 219 on path_check), but slides in the 48-56 band
+    #     put a fresh cusp into four routes that had none — Long Beach 182 and
+    #     104, Torrance 4X, Metro 602 — for +1137 against the -742 it wins.
+    #   - Unfitted, the badges cross: the waterfront chip at the foot of Harbor
+    #     is nearest the *7th St* run of the warp rather than the shape's own
+    #     start, and the Ocean corner and Gaffey chips land on the same 1 px of
+    #     shape 33 px apart. A pin cannot help for the same reason it cannot
+    #     help Montebello 10 — it would attach to the wrong stretch too.
+    # The box brackets the warp's whole San Pedro end and stops short of where
+    # the snap picks Ocean Blvd up correctly on its own.
+    ("ladot", "870"): {
+        "box": (1560, 3380, 1700, 3500),
+        "path": [
+            (1617.5, 3404.5), (1617.5, 3390.0), (1617.5, 3378.9),
+            (1616.0, 3375.6), (1614.2, 3375.6), (1580.0, 3375.6),
+            (1555.1, 3375.6), (1551.8, 3372.4), (1551.8, 3350.0),
+            (1551.8, 3326.0), (1554.9, 3322.9), (1600.0, 3322.9),
+            (1682.0, 3322.9),
+        ],   # Miner & Harbor -> 7th -> Gaffey -> east along Ocean. The east end
+             # stops a little short of the box, since the shape resumes at the
+             # snapper's own first point past it and that one sits at x=1691:
+             # running the corridor out to the box edge puts a 7 px backtrack in
+             # the seam, which is a 179 deg cusp however short it is.
     },
 }
 
@@ -3467,19 +3554,13 @@ def main():
             good = [c for c in refined if c]
             if good:
                 agency_tree = mask_tree(good, 30.0)
-            # Sprites take the color the sheet actually prints, off the tiles,
+            # Sprites take the color the sheet actually prints: the PDF's ink
+            # where the feed's lines are read from it, and otherwise the tiles,
             # falling back to map.png's washed-out reading then the legend
-            # swatch. Where an agency has two seeds they are two liveries, not
-            # two guesses at one, so each is sampled over only the routes drawn
-            # in it — sampling both over everything collapses them onto
-            # whichever is more common, and LADOT lost DASH vs Commuter Express.
-            groups = [list(warped.values())] * len(seeds)
-            if len(seeds) > 1:
-                groups = [[p for sid, p in warped.items()
-                           if is_dash.get(route_by_shape.get(sid, "")) == (i == 0)]
-                          for i in range(len(seeds))]
-            sprite_cols = [drawn_color(g, s) or c or tuple(s)
-                           for g, c, s in zip(groups, refined, seeds)]
+            # swatch.
+            sprite_cols = ([INK_SPRITES[feed]] if feed in INK_SPRITES else
+                           [drawn_color(list(warped.values()), s) or c or tuple(s)
+                            for c, s in zip(refined, seeds)])
             print(f"  {feed} drawn color(s): {good}")
         elif feed in DRAWN_COLORS:
             sprite_cols = [DRAWN_COLORS[feed]]
@@ -3490,10 +3571,7 @@ def main():
             for (f, rid), ridx in route_idx.items():
                 if f != feed:
                     continue
-                c = sprite_cols[0]
-                if len(sprite_cols) > 1 and not is_dash.get(rid):
-                    c = sprite_cols[1]        # ladot: [DASH, Commuter Express]
-                routes[ridx]["c"] = "#%02X%02X%02X" % tuple(c)
+                routes[ridx]["c"] = "#%02X%02X%02X" % tuple(sprite_cols[0])
                 routes[ridx]["t"] = "#FFFFFF"
 
         snapped = anchored = 0
@@ -3638,8 +3716,9 @@ def main():
                 # LADOT's two liveries are two stroke styles of one olive ink —
                 # DASH solid, Commuter Express dashed — so each snaps to its own
                 # network and neither can be dragged onto the other's streets.
-                dash = bool(is_dash.get(rid))
-                tree = line_ink = ink_tree(LADOT_INK, dashed=not dash)
+                # Which style a route is drawn in is settled by its badges
+                # rather than by its name; see ladot_livery.
+                #
                 # Commuter Express needs pinning where the warp is worst: at
                 # Marina del Rey it is 130 px out, further than the run down
                 # Via Marina is long, and the leg had no way to tell which end
@@ -3647,9 +3726,9 @@ def main():
                 # loops are drawn continuously and the ink alone puts them on
                 # the street, and its designations are single letters the sheet
                 # also gives Metro's rail lines.
-                anc = ([] if dash else
-                       branch_anchors(route_anchors(toks, tree, near=BADGE_NEAR_INK),
-                                      sid, route_sids[rid], kd_for))
+                tree, anc = ladot_livery(toks, bool(is_dash.get(rid)))
+                line_ink = tree
+                anc = branch_anchors(anc, sid, route_sids[rid], kd_for)
                 anchored += bool(anc)
                 if tree is not None:
                     can_refit = True

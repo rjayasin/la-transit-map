@@ -150,7 +150,15 @@ python3 -m http.server 8741
     dash pattern tells them apart: the railroad's centreline under its dashed
     ticks (the ticks stick out sideways and would only pull a shape off the
     line), and LADOT's solid DASH against its dashed Commuter Express, which
-    keeps either from being dragged onto the other's streets.
+    keeps either from being dragged onto the other's streets. Which style a
+    route is drawn in is not its *name* to say, though. Dashes mark part-time
+    service, which is what a Commuter Express usually is and a DASH never is,
+    so the name predicts the style — and predicts it wrongly for the one
+    Commuter Express that runs all day: the 142 is drawn solid, like a DASH,
+    and looking for it among the dashes found nothing at all, the nearest one
+    being a median 292 px away. So the name proposes a livery and the printed
+    badges settle it. Every other Commuter Express has all of its badges on the
+    dashed strokes; the 142 has all four of its on the solid ones.
   - A mask smears a line across its casing, its badges and the fringe of
     whatever is drawn beside it, so a shape can sit on the mask while its own
     line is a good way off — 233 was resting against the 761 ribbon 25 px west
@@ -249,8 +257,9 @@ python3 -m http.server 8741
     snapped onto the railroad crosshatch down the 405.
   - Where not even a pin can be placed, the corridor itself is drawn by hand
     (`OVERRIDE_PATHS`) and spliced into the snapped shape. It takes several
-    failures at once to come to that, and both cases have them: Metro 761's
-    corner from Sunset into UCLA, and Montebello 10 down Atlantic, where the
+    failures at once to come to that, and three cases have them: Metro 761's
+    corner from Sunset into UCLA; LADOT 142 through San Pedro, below; and
+    Montebello 10 down Atlantic, where the
     sheet draws a street vertical that really slants southwest. That lands the
     warp's Whittier junction 68 px west of the drawn one and turns a corner
     into a dog-leg; the dog-leg inflates the arc between the two "10" badges
@@ -262,6 +271,18 @@ python3 -m http.server 8741
     one, so it speaks for the wrong stretch of the shape. What was left was the
     chord between the badges, 65 px off the line at its worst, down to 6th and
     Fraser and back up a piece of Whittier the route never runs.
+  - The 142's San Pedro end is the failure a *bodily* slide cannot answer for.
+    The slide assumes the warp's error "varies slowly enough that one vector
+    covers every leg"; over this route it does not — 78 px south of the drawn
+    7th and Gaffey at one end of 350 px of shape, and dead on at the Long Beach
+    end of it. The slide it settles for is a compromise, and the two directions
+    of the one route land either side of the length bound: 44 px westbound and
+    allowed, 49 px eastbound and refused by one. Unfitted, the badges cross —
+    the waterfront chip at the foot of Harbor is nearest the *7th St* run of
+    the warp rather than the shape's own start — and the eastbound working kept
+    a 60 px bulge across the corner. Widening the bound is not the answer: it
+    admits the 142 and rescues Torrance R3 (961 to 219 on `path_check`), and it
+    puts a fresh cusp into four routes that had none.
   - Nothing is taken on faith. Every candidate is scored on the stored,
     rounded geometry the animation actually plays — by the very measure
     `scripts/path_check.py` ranks on, plus what its excursions cost — and the
@@ -288,7 +309,11 @@ python3 -m http.server 8741
   outside its own run and drop every Metrolink line out of the panel.
 - **Rendering** (`index.html`, vanilla canvas) — each vehicle is a labeled
   circle in the color the map draws its line in, so every sprite matches the
-  artwork it rides on. Trains pull away, run, and brake to a stand at each
+  artwork it rides on. Where a feed's lines are read out of the PDF that color
+  is the ink itself rather than a reading of the artwork, because the reading
+  is taken along the *warp*: LADOT's is a median 20 px off its drawn line, so
+  most of what it sampled was the page, and both liveries came out a pale khaki
+  against the dark olive the sheet prints. Trains pull away, run, and brake to a stand at each
   station, inside the scheduled time; buses keep their speed through the
   kerbside stops the map doesn't mark. Rail draws above buses, vehicles off the drawn map are hidden, and the day loops
   midnight→midnight.
@@ -567,10 +592,9 @@ returns the tail of them anyway.
   Culver City / Montebello / GTrans calendars end just before the target date.
   Those systems animate their busiest covered Wednesday instead.
 - **Metrolink, Metro bus and LADOT** snap to lines read out of the PDF vectors,
-  so they sit on the drawn line: a median 1.0, 0.9 and 1.1 px off it. Two
-  exceptions keep the warp — Metrolink's Inland Empire-Orange County line, most
-  of whose length has no railroad drawn near it, and LADOT's Commuter Express
-  142, which the sheet doesn't draw where the warp puts it.
+  so they sit on the drawn line: a median 1.0, 0.9 and 1.1 px off it. One
+  exception keeps the warp — Metrolink's Inland Empire-Orange County line, most
+  of whose length has no railroad drawn near it.
 - **Schematic corners** — the map distorts the far San Fernando Valley and the
   far east, where buses can drift off their drawn streets.
 - **Downtown** is a ghosted call-out box on the source map; vehicles pass over
