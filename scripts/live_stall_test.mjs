@@ -92,6 +92,11 @@ await send("Page.enable");
 await send("Runtime.enable");
 await send("Page.navigate", { url: URL });
 await sleep(9000);   // map.png + schedule.json are large
+// The profile is reused between runs, so the record this run is about to write
+// would be waiting for the next one — and "healthy: nothing recorded" below
+// asserts a precondition it has to establish rather than inherit. Cleared after
+// load, since the page reads the record at startup to announce it.
+await evaluate("localStorage.clear(); true");
 
 // ---- healthy -------------------------------------------------------------
 const a = await evaluate("JSON.stringify(transitDebug())").then(JSON.parse);

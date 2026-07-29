@@ -96,7 +96,7 @@ const body = `
            setWin: (w, h) => { innerWidth = w; innerHeight = h; },
            win: () => ({ W, H, cvW: cv.width, cvH: cv.height, resizes }),
            rafArmed: () => rafArmed,
-           events: () => stallEvents, noteEvent,
+           events: () => stallEvents, during: () => stallEventsDuring, noteEvent,
            runRaf: () => { const f = rafFn; rafFn = null; if (f) f(); } };
 `;
 const names = Object.keys(env);
@@ -243,15 +243,27 @@ check("same session: nothing pushed to the previous slot",
 //    speed the page offers, and breaks silently if either is changed.
 // A pinch is hundreds of wheel events a second and the ring holds 24 entries,
 // so without coalescing the run-up would be one gesture and nothing before it.
-const evBefore = api.events().length;
+advance(16, 16); drawFrame();               // drawing, so events are run-up
+const evBefore = api.events().length, duringBefore = api.during().length;
 for (let i = 0; i < 300; i++) api.noteEvent("wheel");
-advance(2000, 1000);
+for (let i = 0; i < 125; i++) { advance(16, 16); drawFrame(); }   // 2 s of quiet
 api.noteEvent("wheel");
 const evs = api.events().slice(evBefore);
 check("events: a burst of one kind is one entry", evs.length, 2);
 check("events: and it counts them", evs[0].n, 300);
 check("events: quiet ends the run", evs[1].n, 1);
 check("events: the ring is bounded", api.events().length <= 24, true);
+
+// And the poking that arrives once the picture has stopped goes to its own
+// ring: a user clicking at a frozen tab was evicting the whole run-up.
+advance(6000);                              // stalled again
+const evAtStall = JSON.stringify(api.events());
+for (let i = 0; i < 12; i++) { api.noteEvent("pointerdown"); api.noteEvent("pointerup"); }
+check("events: poking a frozen tab leaves the run-up alone", JSON.stringify(api.events()), evAtStall);
+check("events: and is recorded on its own", api.during().length > duringBefore, true);
+check("events: the stall's own record carries both",
+      (() => { const r = JSON.parse(store.get("transit.freeze"));
+               return Array.isArray(r.events) && Array.isArray(r.eventsDuring); })(), true);
 
 const maxStep = +SRC.match(/const MAX_STEP_SEC = ([\d.]+)/)[1];
 const maxSpeed = Math.max(...[...SRC.matchAll(/<option value="(\d+)"/g)].map(m => +m[1]));
@@ -275,7 +287,9 @@ check("app.js notices the browser taking the canvas away",
 check("app.js separates suspension from a wedged pass",
       SRC.includes("CLOCK_SKEW0 = Date.now() - performance.now()"), true);
 check("the freeze record keeps what the user was doing",
-      SRC.includes("events: stallEvents.slice()"), true);
+      SRC.includes("events: stallEvents.slice(), eventsDuring: stallEventsDuring.slice()"), true);
+check("app.js keeps the poking out of the run-up",
+      SRC.includes("? stallEventsDuring : stallEvents"), true);
 check("app.js holds tile loading while the view moves",
       SRC.includes("if (!tilesMayLoad) return COLD;"), true);
 check("app.js dates the code the tab is running",
