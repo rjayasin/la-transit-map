@@ -1368,6 +1368,39 @@ OVERRIDE_PATHS = {
             (1001, 1830), (1001, 1845), (1001, 1858),
         ],   # Sunset -> Hilgard corner -> down into the UCLA gateway
     },
+    # Montebello 10 runs Atlantic from Cesar Chavez south to Whittier — the
+    # stops say so for the whole stretch (Atlantic/Pomona, /4th, /Eagle, /6th,
+    # /Hubbard) — and the sheet draws it that way, straight down the corridor it
+    # labels ATLANTIC. The stored path instead cut a chord from the Chavez
+    # corner southwest to 6th and Fraser, 65 px off the drawn line at its worst,
+    # and rejoined Whittier by running back east up a stretch of it the route
+    # never touches. The same three failures as the 761, and here they compound:
+    #   - The warp puts Atlantic on its true southwest slant while the sheet
+    #     draws it vertical, so it lands the Whittier junction ~68 px west of the
+    #     drawn one and turns one straight corner into a dog-leg.
+    #   - That dog-leg inflates the arc between the two "10" badges bracketing
+    #     the stretch to 211 px against the drawn corridor's 145, so the
+    #     badge-to-badge walk reads 0.69 and TRACE_DETOUR throws it out as a
+    #     shortcut. Re-fitting cannot rescue it the way it does Metro 240's
+    #     corner: the badges pin the two ends and the interpolation between them
+    #     keeps the arc, so the ratio is the same on every pass.
+    #   - Anchor order is scrambled too, which is why a pin is no use here: a
+    #     point on the drawn Atlantic is *nearer the warp's Whittier leg* than
+    #     its Atlantic one, so it attaches to the wrong stretch of the shape.
+    # Widening the walk's band is no answer either — at 0.60 the walk is
+    # believed and comes back cutting the junction, down Atlantic to the 40's
+    # corridor and diagonally across to the badge, which sits on the mask like
+    # every chip does. The corridor is two streets and a corner, so it is drawn
+    # by hand; the box sits west of it, where the warp lands the shape, and the
+    # short Whittier workings that never reach Atlantic don't enter it.
+    ("montebello", "10"): {
+        "box": (2085, 1966, 2158, 2078),
+        "path": [
+            (2177, 1961), (2177, 1976), (2177, 1992), (2177, 2007), (2176, 2019),
+            (2175, 2027), (2173, 2034), (2170, 2040), (2166, 2046), (2162, 2052),
+            (2159, 2058), (2157, 2064), (2157, 2071),
+        ],   # Atlantic, from below the Chavez corner to the Whittier junction
+    },
 }
 
 

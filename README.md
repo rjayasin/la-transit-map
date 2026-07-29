@@ -247,6 +247,21 @@ python3 -m http.server 8741
     for the schematic that ends a route at its hub while the GTFS runs on to a
     layover the map omits — BBB 14 carried on past the transit centre and
     snapped onto the railroad crosshatch down the 405.
+  - Where not even a pin can be placed, the corridor itself is drawn by hand
+    (`OVERRIDE_PATHS`) and spliced into the snapped shape. It takes several
+    failures at once to come to that, and both cases have them: Metro 761's
+    corner from Sunset into UCLA, and Montebello 10 down Atlantic, where the
+    sheet draws a street vertical that really slants southwest. That lands the
+    warp's Whittier junction 68 px west of the drawn one and turns a corner
+    into a dog-leg; the dog-leg inflates the arc between the two "10" badges
+    bracketing the stretch to 211 px against the drawn corridor's 145, so the
+    walk between them is thrown out as a shortcut and the re-fit can't rescue
+    it — the badges pin the ends and the interpolation between them keeps the
+    arc, so the ratio reads the same on every pass. Nor can a pin: a point on
+    the drawn Atlantic is *nearer the warp's Whittier leg* than its Atlantic
+    one, so it speaks for the wrong stretch of the shape. What was left was the
+    chord between the badges, 65 px off the line at its worst, down to 6th and
+    Fraser and back up a piece of Whittier the route never runs.
   - Nothing is taken on faith. Every candidate is scored on the stored,
     rounded geometry the animation actually plays — by the very measure
     `scripts/path_check.py` ranks on, plus what its excursions cost — and the
