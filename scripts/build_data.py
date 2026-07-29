@@ -2023,6 +2023,9 @@ TRACE_DETOUR = (float(os.environ.get("TRACE_LO", 0.75)),
                           # walked length / shape length; sweepable, since what it
                           # costs is measured in routes rather than argued
 TRACE_SAMPLE = 30.0       # px of walked line per intermediate anchor
+TRACE_LIMIT = float(os.environ.get("TRACE_LIMIT", 4.0))   # times the shape's arc a
+                          # walk may run to be worth aligning at all; past this it
+                          # is not a rate difference, it is a different journey
 BRIDGE_MAX = 40.0         # px of interruption a walk may step across
 BRIDGE_HOOD = 7.0         # px of drawing read to say which way a line runs there
 BRIDGE_INTO = 0.5         # cos 60 deg: how squarely each side must run into
@@ -2198,6 +2201,125 @@ def mask_path(a, b, tree, step=TRACE_STEP, pad=TRACE_PAD, reach=TRACE_REACH):
     return _PATHS[key]
 
 
+ALIGN_SAMPLES = 24     # points each curve is read at when the two are aligned
+_ALIGN_OFF = False     # set while the same shape is fitted without aligned walks
+_ALIGN_USED = 0        # aligned walks taken since the count was last read
+
+
+def align_used():
+    """How many aligned walks the last fit took, and reset. The caller fits the
+    shape a second time without them when this is non-zero, and keeps whichever
+    result is better — nothing here is trusted, only measured."""
+    global _ALIGN_USED
+    n, _ALIGN_USED = _ALIGN_USED, 0
+    return n
+
+
+_LAST_SNAP = None      # the arguments of the last snap, so it can be repeated
+
+
+def snap_recording(*args, **kw):
+    """snap_coherent, remembering how it was called so the same fit can be run
+    again with the aligned walks refused."""
+    global _LAST_SNAP
+    _LAST_SNAP = (args, kw)
+    return snap_coherent(*args, **kw)
+
+
+def resnap_without_alignment():
+    """The last snap, fitted again with out-of-band walks left out."""
+    global _ALIGN_OFF
+    if _LAST_SNAP is None:
+        return None
+    _ALIGN_OFF = True
+    try:
+        return snap_coherent(*_LAST_SNAP[0], **_LAST_SNAP[1])
+    finally:
+        _ALIGN_OFF = False
+        align_used()
+
+
+def ink_offset(P, tree, q=0.85):
+    """How far a path sits from the drawing it should be on, read high enough
+    up the distribution that a hole in a mask cannot answer for the whole of
+    it — the same reading `_ink_vouches` takes, and for the same reason."""
+    if tree is None or P is None or not len(P):
+        return 0.0
+    return float(np.quantile(tree.query(np.asarray(P, float))[0], q))
+ALIGN_SPACING = float(os.environ.get("ALIGN_SPACING", 10.0))   # px of shape
+                       # between two aligned anchors, so the field stays smooth
+ALIGN_DEG = float(os.environ.get("ALIGN_DEG", 70.0))   # mean heading
+                       # disagreement, deg, an alignment may leave. Loose on
+                       # purpose: what decides an alignment is the measurement
+                       # afterwards, not this, and swept from 20 to 999 the
+                       # results stop changing at 70 — so it bounds the absurd
+                       # and nothing else. Tightening it to 20 costs 6 % of
+                       # the drift and 19 % of the hairpin score
+
+
+def _headings(P, k):
+    """Unit-tangent angles at k evenly spaced steps along a polyline."""
+    P = np.asarray(P, float)
+    cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(P, axis=0).T))])
+    if cum[-1] <= 0:
+        return None, None
+    t = np.linspace(0, cum[-1], k + 1)
+    Q = np.c_[np.interp(t, cum, P[:, 0]), np.interp(t, cum, P[:, 1])]
+    d = np.diff(Q, axis=0)
+    if (np.hypot(*d.T) > 1e-9).sum() < 3:
+        return None, None
+    return np.arctan2(d[:, 1], d[:, 0]), t
+
+
+def align_walk(walk, seg):
+    """Where each point of `walk` sits along `seg`, as a fraction of `seg`.
+
+    The walk and the shape's own stretch run over the same ground at different
+    rates — that is the whole difficulty. The rate is not constant either: the
+    sheet compresses one street and stretches the next, so no single scale
+    relates them. What survives is the *order* of the turns, because the warp is
+    smooth: it can put a corner in the wrong place but not in the wrong order.
+
+    So align the two by their headings, letting either run slow or fast
+    (Dynamic Time Warping over the wrapped angle difference), and read each
+    walk sample's place along the shape off the alignment. Returns None when the
+    two courses cannot be aligned at all, which is the honest reading of "this
+    walk is not this stretch of route"."""
+    ka, kb = ALIGN_SAMPLES, ALIGN_SAMPLES
+    wa, wt = _headings(walk, ka)
+    sa, st = _headings(seg, kb)
+    if wa is None or sa is None:
+        return None, None
+    d = wa[:, None] - sa[None, :]
+    cost = np.abs(np.arctan2(np.sin(d), np.cos(d)))
+    D = np.full((ka + 1, kb + 1), np.inf)
+    D[0, 0] = 0.0
+    for i in range(1, ka + 1):
+        prev, cur = D[i - 1], D[i]
+        for j in range(1, kb + 1):
+            cur[j] = cost[i - 1, j - 1] + min(prev[j], cur[j - 1], prev[j - 1])
+    i, j, pairs = ka, kb, []
+    while i > 0 and j > 0:
+        pairs.append((i - 1, j - 1))
+        k = int(np.argmin([D[i - 1, j - 1], D[i - 1, j], D[i, j - 1]]))
+        i, j = (i - 1, j - 1) if k == 0 else (i - 1, j) if k == 1 else (i, j - 1)
+    pairs.reverse()
+    if not pairs:
+        return None, None
+    mean_deg = math.degrees(sum(cost[p] for p in pairs) / len(pairs))
+    # each walk sample's place along the shape, in [0,1], made non-decreasing
+    frac = np.zeros(ka)
+    seen = np.zeros(ka, bool)
+    for a, b in pairs:
+        frac[a] = max(frac[a], (b + 0.5) / kb)
+        seen[a] = True
+    for a in range(1, ka):
+        if not seen[a]:
+            frac[a] = frac[a - 1]
+        frac[a] = max(frac[a], frac[a - 1])
+    return frac, mean_deg
+
+
 def trace_anchors(s, D, A, P, cum, tree):
     """Add intermediate anchors by walking the drawn line between badges.
 
@@ -2227,7 +2349,10 @@ def trace_anchors(s, D, A, P, cum, tree):
         ds = s[i + 1] - s[i]
         if ds > 0 and TRACE_SPAN[0] < math.dist(A[i], A[i + 1]) < TRACE_SPAN[1]:
             walk, length = mask_path(A[i], A[i + 1], tree)
-            if walk is not None and TRACE_DETOUR[0] * ds < length < TRACE_DETOUR[1] * ds:
+            if walk is None:
+                pass
+            elif TRACE_DETOUR[0] * ds < length < TRACE_DETOUR[1] * ds:
+                # Comparable lengths: run at the same rate, as before.
                 wcum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(walk, axis=0).T))])
                 k = max(1, round(length / TRACE_SAMPLE))
                 t = np.arange(1, k) / k
@@ -2238,6 +2363,46 @@ def trace_anchors(s, D, A, P, cum, tree):
                 out_D.append(q - np.c_[np.interp(sv, cum, P[:, 0]),
                                        np.interp(sv, cum, P[:, 1])])
                 walked += 1
+            elif not _ALIGN_OFF and length < TRACE_LIMIT * ds:
+                # Out of band, which until now threw the walk away. But the band
+                # is not a test of whether the corridor is the route's — it is
+                # the range over which "same rate" holds, and outside it the
+                # anchors land at the wrong points and saw the line into
+                # hairpins. Align the two courses instead and place the anchors
+                # where they actually correspond; if they cannot be aligned,
+                # then it really is the wrong corridor and it goes.
+                seg = P[max(0, int(np.searchsorted(cum, s[i]))):
+                        int(np.searchsorted(cum, s[i + 1])) + 1]
+                frac, deg = align_walk(walk, seg)
+                if frac is None or deg > ALIGN_DEG:
+                    out_s.append(s[i + 1:i + 2]); out_D.append(D[i + 1:i + 2])
+                    continue
+                wcum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(walk, axis=0).T))])
+                k = max(1, round(length / TRACE_SAMPLE))
+                t = np.arange(1, k) / k
+                q = np.c_[np.interp(t * wcum[-1], wcum, walk[:, 0]),
+                          np.interp(t * wcum[-1], wcum, walk[:, 1])]
+                # each sampled walk point's place along the shape, off the alignment
+                ft = np.interp(t, (np.arange(len(frac)) + 0.5) / len(frac), frac)
+                ft = np.maximum.accumulate(np.clip(ft, 0.0, 1.0))
+                sv = s[i] + ft * ds
+                # Spaced along the *shape*, not along the walk. A walk three
+                # times the arc packs three anchors into every px of shape it
+                # corresponds to, and neighbouring anchors a px apart carrying
+                # displacements tens of px apart is a cliff in the field the fit
+                # interpolates — which comes out as the hairpins that made the
+                # widened band look like a bad idea in the first place.
+                keep = np.diff(sv, prepend=s[i] - ALIGN_SPACING) >= ALIGN_SPACING
+                if keep.sum() < 1:
+                    out_s.append(s[i + 1:i + 2]); out_D.append(D[i + 1:i + 2])
+                    continue
+                sv, q = sv[keep], q[keep]
+                out_s.append(sv)
+                out_D.append(q - np.c_[np.interp(sv, cum, P[:, 0]),
+                                       np.interp(sv, cum, P[:, 1])])
+                walked += 1
+                global _ALIGN_USED
+                _ALIGN_USED += 1
         out_s.append(s[i + 1:i + 2])
         out_D.append(D[i + 1:i + 2])
     return np.concatenate(out_s), np.concatenate(out_D), walked
@@ -3067,6 +3232,49 @@ def inset_stop_map(runs, stop_d, stop_ipx):
     return ir, idist
 
 
+def settle(full, base, anc, line_ink):
+    """The best of the cleanup candidates for a snapped shape.
+
+    Straightening one spike can leave a sharper residual where it met a bend,
+    and simplify() can turn a helped dense path into a worse stored one, so
+    neither cleanup is taken on faith. Every candidate is scored on the *stored*
+    geometry the animation actually plays — by the very measure path_check ranks
+    on — and the best of them wins, the snapper's own shape taking ties, so no
+    shape comes out worse than it went in. Taking a fold out is what leaves the
+    residual despike files off, so the two together usually win; but not always,
+    and a pass run unconditionally ahead of the other can rob it of a better
+    answer, so each stands on the ballot alone as well.
+
+    The ballot is scored on two measures, not one. `spike_penalty` charges only
+    turning that doubles back inside 12 px, and the snapper's 61-point smoothing
+    turns an occluded stretch into a smooth bulge with no sharp turn anywhere in
+    it: Foothill 493 scores a flat 0 while visibly off its line. Scored on that
+    alone, `undetour` can never win a shape it is the only fix for — it ties,
+    and the tie goes to the snapper. So the excursion is priced too, and the
+    winner minimises both.
+
+    The old promise still holds, and is explicit: a candidate that would rank
+    worse on `spike_penalty` than the snapper's own shape is thrown out before
+    it can be scored, so nothing buys a straighter line at the cost of a
+    hairpin."""
+    as_snapped = full
+    spike0 = stored_penalty(as_snapped)
+    best = spike0 + DETOUR_WEIGHT * detour_penalty(as_snapped, base, anc, line_ink)
+    unfolded = unfold(as_snapped, base, anc)
+    undet = undetour(as_snapped, base, anc, line_ink)
+    for cand in (despike(as_snapped), unfolded, despike(unfolded),
+                 undet, despike(undet), unfold(undet, base, anc)):
+        if np.array_equal(cand, as_snapped):
+            continue
+        spike = stored_penalty(cand)
+        if spike > spike0:
+            continue
+        penalty = spike + DETOUR_WEIGHT * detour_penalty(cand, base, anc, line_ink)
+        if penalty < best:
+            full, best = cand, penalty
+    return full
+
+
 def main():
     rail_trees = load_masks()
 
@@ -3265,7 +3473,7 @@ def main():
 
         snapped = anchored = 0
         for sid, pts in warped.items():
-            out_pts, anc = None, []
+            out_pts, anc, can_refit = None, [], False
             # The drawing this shape was snapped on: the PDF's strokes where it
             # has them, its agency's colour mask where it does not. It is the
             # arbiter of whether a detour is really the drawn line — see
@@ -3331,7 +3539,8 @@ def main():
                                route_anchors(toks, tree) + pins,
                                sid, route_sids[rid], kd_for))
                     anchored += bool(anc)
-                    out_pts = snap_coherent(pts, snap_tree, anchors=anc,
+                    can_refit = not busway
+                    out_pts = snap_recording(pts, snap_tree, anchors=anc,
                                             caps=(BUSWAY_CAPS if busway else
                                                   INK_CAPS if ink else None),
                                             win=BUSWAY_WIN if busway else 61,
@@ -3375,7 +3584,8 @@ def main():
                 if tree is not None:
                     anc = line_name_anchors(rid or "", tree)
                     anchored += bool(anc)
-                    out_pts = snap_coherent(pts, tree, anchors=anc, caps=RAIL_CAPS,
+                    can_refit = True
+                    out_pts = snap_recording(pts, tree, anchors=anc, caps=RAIL_CAPS,
                                             win=RAIL_WIN, speckled=False)
             elif feed == "ladot":
                 # LADOT's two liveries are two stroke styles of one olive ink —
@@ -3395,7 +3605,8 @@ def main():
                                       sid, route_sids[rid], kd_for))
                 anchored += bool(anc)
                 if tree is not None:
-                    out_pts = snap_coherent(pts, tree, anchors=anc, caps=LADOT_CAPS,
+                    can_refit = True
+                    out_pts = snap_recording(pts, tree, anchors=anc, caps=LADOT_CAPS,
                                             win=LADOT_WIN, speckled=False)
                 shape_isnap[(feed, sid)] = (good, 30.0, toks)
             elif agency_tree is not None:
@@ -3422,7 +3633,8 @@ def main():
                     route_anchors(toks, anchor_tree, colors=gate_cols) + pins,
                     sid, route_sids[rid], kd_for)
                 anchored += bool(anc)
-                out_pts = snap_coherent(pts, agency_tree, anchors=anc)
+                can_refit = True
+                out_pts = snap_recording(pts, agency_tree, anchors=anc)
                 line_ink = agency_tree
                 shape_isnap[(feed, sid)] = (good, 30.0, toks)
             elif feed in STREET_SNAP:
@@ -3433,6 +3645,15 @@ def main():
                 # already chose rather than choosing one.
                 out_pts = snap_coherent(pts, street_tree(), caps=STREET_CAPS,
                                         speckled=False)
+            # An aligned walk is a corridor the length band would have thrown
+            # away, taken because the two courses could be aligned. That is a
+            # judgement, so it is checked rather than trusted: fit the shape
+            # again with those walks refused, and keep them only if what they
+            # produce is no worse on the hairpin measure and no further from the
+            # drawing. The corridors are usually right — this is where the drift
+            # win comes from — but a handful of routes came out kinked when
+            # every alignment was believed, and this is what stops them.
+            aligned_fit = bool(align_used()) and can_refit and out_pts is not None
             if out_pts is not None:
                 snapped += 1
             # Keep the pre-snap polyline alongside the stored one. Stops are
@@ -3473,23 +3694,28 @@ def main():
                 # that would rank worse on `spike_penalty` than the snapper's
                 # own shape is thrown out before it can be scored, so nothing
                 # buys a straighter line at the cost of a hairpin.
-                as_snapped = full
-                spike0 = stored_penalty(as_snapped)
-                best = spike0 + DETOUR_WEIGHT * detour_penalty(as_snapped, base,
-                                                               anc, line_ink)
-                unfolded = unfold(as_snapped, base, anc)
-                undet = undetour(as_snapped, base, anc, line_ink)
-                for cand in (despike(as_snapped), unfolded, despike(unfolded),
-                             undet, despike(undet), unfold(undet, base, anc)):
-                    if np.array_equal(cand, as_snapped):
-                        continue
-                    spike = stored_penalty(cand)
-                    if spike > spike0:
-                        continue
-                    penalty = spike + DETOUR_WEIGHT * detour_penalty(cand, base,
-                                                                     anc, line_ink)
-                    if penalty < best:
-                        full, best = cand, penalty
+                full = settle(full, base, anc, line_ink)
+                # An aligned walk is a corridor the length band would have
+                # thrown away, taken because the two courses could be aligned
+                # instead. That is a judgement, so it is checked rather than
+                # trusted: fit the shape again with those walks refused, put
+                # that through the same ballot, and keep the alignment only if
+                # what ships is no worse on the hairpin measure and no further
+                # from the drawing. The corridors are usually right — this is
+                # where the drift comes from — but a handful of routes came out
+                # kinked when every alignment was believed, and this is what
+                # stops them, on the geometry that ships rather than on the one
+                # the ballot was handed.
+                if aligned_fit:
+                    plain = resnap_without_alignment()
+                    if plain is not None and len(plain) == len(base):
+                        pf = settle(np.asarray(plain, float), base, anc, line_ink)
+                        if (stored_penalty(full) > stored_penalty(pf)
+                                or ink_offset(full, line_ink) > ink_offset(pf, line_ink) + 0.5):
+                            full = pf
+                            stats["align_refused"] += 1
+                        else:
+                            stats["align_kept"] += 1
             if len(full) == len(base) and os.environ.get("DETOUR_TRACE") == f"{feed}:{rid}":
                 _o = np.hypot(*(full - base).T)
                 _c = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(base, axis=0).T))])
