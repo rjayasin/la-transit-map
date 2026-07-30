@@ -16,6 +16,9 @@ python3 -m http.server 8741
 - **Controls** — play/pause, scrubber, speed (30–400×).
 - **Navigation** — drag to pan. On a Mac trackpad, gestures follow Maps.app:
   two-finger swipe pans, pinch zooms. A mouse wheel zooms.
+- **Tap a vehicle** to trace the line it runs, anywhere it is drawn — on the
+  map or inside the Downtown call-out. Tap another to switch, empty space to
+  clear.
 - **URL params** — `?t=8:30&speed=150&paused=1`.
 
 ## How it works
@@ -330,6 +333,14 @@ python3 -m http.server 8741
   Metrolink shape shifting 28 px inside the call-out — where nothing is drawn
   and the geometry is the warp's own noise — was enough to put Union Station
   outside its own run and drop every Metrolink line out of the panel.
+  The panel's vehicles are as tappable as the map's: the mirrored placement is
+  one function the renderer and the path inspector both go through, so a tap
+  tests the pixel a vehicle was actually drawn at. It used to test only the
+  main-map position, which for a vehicle inside the panel is somewhere else
+  entirely, so every tap in the call-out landed on nothing. Inside the frame
+  the panel's own sprites are offered first, since they are drawn last and
+  clipped to it — a tap on blank panel clears the selection rather than picking
+  something hidden underneath.
 - **Rendering** (`index.html`, vanilla canvas) — each vehicle is a labeled
   circle in the color the map draws its line in, so every sprite matches the
   artwork it rides on. Where a feed's lines are read out of the PDF that color
@@ -395,6 +406,13 @@ pipeline order is `georef.py` → `georef_inset.py` → `build_data.py`;
   page visible and checks the stall is caught, the verdict names the page rather
   than the browser, the tab strip warns, and the re-arm brings the loop back
   without a reload.
+- `scripts/inset_tap_test.mjs` — `node scripts/inset_tap_test.mjs`, same setup.
+  Taps a vehicle mirrored into the Downtown call-out and checks the path
+  inspector answers with one drawn *there*, that the main map still answers a
+  tap the way it did, and that blank panel clears the selection instead of
+  picking whatever sits under the frame. The renderer and the picker place a
+  mirrored vehicle with one function, and this is what says they agree at the
+  pixel the tap lands on.
 
 ## Rebuild data
 
