@@ -1617,6 +1617,21 @@ PINNED_ANCHORS = {
         (1138, 2215),                     #   south end at Culver City TC
         (1090, 2271),                     #   Bluff Creek, east of the corner
     ],
+    # Long Beach Transit 2's west end, on the drawn Sepulveda a little east of
+    # the Figueroa corner the sheet finishes the route at. The warp puts that
+    # corner 69 px south of where the sheet draws it and then runs on down
+    # Figueroa to the layover, so the shape came out with a 60 px spur hanging
+    # off the end of the drawn line into blank page — the tail the eye reads as
+    # the line starting nowhere. There is a "2" printed at the corner itself,
+    # and once the agency's chips are believed the fit does use it; what it
+    # cannot do is shorten the shape, and the spur is past the last badge.
+    #
+    # East of the corner rather than on it because one pin has to serve both
+    # directions and they run a street apart down here: the corner is 36 px
+    # from the westbound working, a pixel outside the reach, and the 119 px it
+    # overshoots by is past the trim limit besides. This sits on the drawn ink,
+    # 16 and 24 px from the two of them, and trims both.
+    ("longbeach", "2"): [(1610, 3044)],
 }
 
 TERMINUS_REACH = 35.0   # px a shape must pass within of a pin to be cut to it
