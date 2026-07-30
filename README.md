@@ -185,6 +185,28 @@ python3 -m http.server 8741
     being a median 292 px away. So the name proposes a livery and the printed
     badges settle it. Every other Commuter Express has all of its badges on the
     dashed strokes; the 142 has all four of its on the solid ones.
+  - A DASH is named rather than numbered, so nothing in the feed says what the
+    sheet badges it. Its designation is compressed out of the name — LADOT's
+    "Wilmington Clockwise" comes out "WC" — and the sheet prints no such thing:
+    it badges that loop "WM" and, four characters being four characters, the
+    Watts loop came out "WC" as well. So two DASHes ran under one designation
+    the sheet prints for neither, and with no badge to their name neither had
+    an anchor. Both wandered off the loop the sheet draws them as: Wilmington
+    stood over 12 px off its own ink for 37% of its length, cutting the chord
+    across the Anaheim/Figueroa corner and sewing between neighbouring blocks,
+    and Watts crossed three blocks of the grid diagonally between Manchester
+    and 103rd. Reading the two codes off the artwork (`MAP_LABELS`, as for the
+    operators the sheet symbolises by agency) both names the vehicles something
+    a rider can find and pins the loops: 37% off its ink to 2%, and Watts to
+    a median 0.9 px. Only a designation read off the sheet that way anchors a
+    DASH — a compressed one is a guess, and a guess that lands on a code the
+    sheet does print is worse than one that lands on nothing: "Southeast
+    Clockwise" comes out "SC", which the sheet prints twenty-nine times, the
+    nearest of them 326 px from the Southeast loop. Where the sheet ends a loop
+    short of where the feed runs it — Wilmington's carries on four blocks south
+    of the "C St" the schematic stops at, over page the sheet draws no line on
+    — those blocks now fold onto the end of the drawn loop instead of trailing
+    off it.
   - A mask smears a line across its casing, its badges and the fringe of
     whatever is drawn beside it, so a shape can sit on the mask while its own
     line is a good way off — 233 was resting against the 761 ribbon 25 px west
@@ -535,6 +557,13 @@ badge matching the route's own designation, and there isn't one to find —
 Beach Cities' 109 and 102 are both "BC" on the sheet, BurbankBus's two routes
 are both "BU", and neither number is printed anywhere. Both now carry the
 symbol the sheet prints (`MAP_LABELS`), which is also what gives them anchors.
+
+A named route is the same blind spot for a different reason: it searches
+`route_short_name`, and a DASH's is prose, so "Wilmington Clockwise" offers no
+token the sheet could be printing. Its badge is there all the same — "WM", four
+times along the loop — and it took looking at the artwork to find it. The
+report will call a DASH honestly unnamed either way; a lone LADOT orphan with
+lines drawn under it is worth a crop of the tiles before believing it.
 
 ## Catching a freeze
 
