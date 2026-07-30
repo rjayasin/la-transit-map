@@ -86,6 +86,19 @@ python3 -m http.server 8741
     put the shape on them the same arc reads 234 px and the corner comes back —
     as does Metro 246's turn off Pacific onto Paseo del Mar in San Pedro, and 47
     other routes'.
+  - "Something the last pass didn't have" has to count the *kind* of walk, not
+    just how many. A corridor whose length the shape can't yet vouch for isn't
+    thrown away: it goes in through the aligned-walk fallback below, one node
+    where a believed walk would lay several. Both bumped the same counter, so a
+    pass that turned a fallback into a believed walk looked like standing
+    still, the loop stopped, and the better fit it had just computed was
+    discarded. Metro 246's turn off Pacific Coast Hwy onto Figueroa is that
+    case exactly: the first pass reads 26 px of shape between the two badges
+    against the drawn corridor's 87 — three times out of band — and puts the
+    corner in as one aligned node; the second reads 71 px, believes the walk
+    and lays three nodes round the turn. Nine walks both times, so the corner
+    stayed a smooth 23 px arc cut across a square turn. Counting believed walks
+    apart is the whole fix, and it is what lets the corner through.
   - Route numbers collide across agencies, so a candidate badge is kept only
     when its own chip color is best explained by this agency's — measured
     against every *other* agency's drawn colors, but never against this
@@ -96,6 +109,29 @@ python3 -m http.server 8741
     the refined color does and rejects it as foreign. Foothill's Silver Streak
     lost 16 of its 18 "SS" badges that way and, unpinned, its busway warp sat
     up on Valley Blvd; folding the seeds into the own-color set fixes it.
+  - The same gate cost Long Beach Transit every badge it has. Its chips are
+    easy enough to *find* — the same maroon as its lines, sitting inside its
+    own mask — but they are that maroon saturated, the legend's ink, read off
+    466 badges as (126,33,58) with a couple of px of spread, while its lines
+    are the same ink laid thin over a cream page and refine to a washed
+    (134,98,101). Those are 66 apart, further than the chip stands from Metro's
+    Rapid red, so the gate answered "Metro" every time and the whole network
+    snapped unanchored. Naming the chip color (`BADGE_FILLS`) puts it in the
+    agency's own set. Route 8 is what it cost: the sheet badges it "8" four
+    times along the 223rd St line the feed names it after, the warp puts it a
+    block south — near enough to Sepulveda for the mask to take it there, and
+    out across Carson, where nothing is drawn between the two, near enough to
+    nothing at all — and the path left the drawn line at Main St and ran a
+    diagonal over blank page under the word CARSON, ending 54 px from the
+    westernmost "8". It now runs 223rd through all four badges and ends 4 px
+    from that one. Across the agency, measured against one fixed mask, twelve
+    routes improve and one (the 51) loses two px on a short stretch.
+  - Which is a measurement worth a warning of its own: `drift_check` refines
+    the mask color off the *stored* shapes, so a change that moves shapes onto
+    their lines also moves the yardstick — Long Beach refines to (136,96,96)
+    from the old shapes and (132,86,89) from the new, and its before/after
+    totals are not comparable. Compare two shapes against one tree, refined the
+    way the build refines it: off the warps.
   - A badge belongs to the point of the shape nearest it, which asks the warp
     to be closer to the truth than the streets are to each other. On a route
     that runs out and back on parallel streets it isn't: GTrans 2 loops north
@@ -202,7 +238,21 @@ python3 -m http.server 8741
     DASH — a compressed one is a guess, and a guess that lands on a code the
     sheet does print is worse than one that lands on nothing: "Southeast
     Clockwise" comes out "SC", which the sheet prints twenty-nine times, the
-    nearest of them 326 px from the Southeast loop. Where the sheet ends a loop
+    nearest of them 326 px from the Southeast loop. Four more read off the sheet
+    the same way: Boyle Heights is badged "BE" and not the "BH" that name
+    compresses to, El Sereno/City Terrace is "SC" (the first token being short
+    enough to keep, those buses carried an "El" the sheet prints only in EL
+    SEGUNDO and EL MONTE), and Southeast is "SE" — which has to come with El
+    Sereno's, or the two of them would share one designation.
+  - Two capitals is also the shape of half the words on the sheet, so a DASH
+    designation is taken on its *chip* rather than merely near the ink. Where a
+    Commuter Express number is set as plain text beside its line and distance is
+    all there is to go on, a DASH is printed on a flat olive chip — and the
+    sheet writes "SC AV" as a street label 97 px from the El Sereno loop, inside
+    the anchor gate and 4 px from the olive the Lincoln Heights DASH passes on.
+    It dragged the shape 200 px west. The chip colour and the teal the sheet
+    letters streets in are 172 apart, so reading the colour under the word
+    settles it. Where the sheet ends a loop
     short of where the feed runs it — Wilmington's carries on four blocks south
     of the "C St" the schematic stops at, over page the sheet draws no line on
     — those blocks now fold onto the end of the drawn loop instead of trailing

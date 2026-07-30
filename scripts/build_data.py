@@ -193,6 +193,26 @@ MAP_LABELS = {
     ("ladot", "710"): "WM",         # DASH Wilmington, counterclockwise
     ("ladot", "713"): "WT",         # DASH Watts, clockwise
     ("ladot", "714"): "WT",         # DASH Watts, counterclockwise
+    # Two more of the same, and neither designation is one a reader could guess
+    # from the feed's name. route_label takes the first token of "Boyle
+    # Heights" and, at five characters, initialises it to "BH" — which the
+    # sheet prints nowhere at all; it badges that loop "BE", three times. And
+    # "El Sereno/City Terrace" it doesn't compress at all, because the first
+    # token is already short enough to keep: every one of those buses carried
+    # an "El", which the sheet does print seven times and never once for this
+    # route — EL SEGUNDO, EL MONTE, place names. The loop is badged "SC",
+    # Sereno/City Terrace, five times from Rose Hill round to City Terrace.
+    ("ladot", "4867"): "BE",        # DASH Boyle Heights
+    ("ladot", "4868"): "SC",        # DASH El Sereno/City Terrace
+    # And Southeast, which has to come with them: route_label initialises
+    # "Southeast Clockwise" to "SC" as well, so badging El Sereno the way the
+    # sheet does would have put two unrelated loops, one in El Sereno and one
+    # in Central-Alameda, under one designation — the very thing this table
+    # exists to undo. "SC" was never Southeast's anyway; the sheet badges it
+    # "SE", twice, 9 and 14 px from both directions' warps, and prints "SC"
+    # only for Studio City up in the Valley and inside the words "SC AV".
+    ("ladot", "1757"): "SE",        # DASH Southeast, clockwise
+    ("ladot", "1758"): "SE",        # DASH Southeast, counterclockwise
 }
 
 
@@ -844,8 +864,35 @@ STREET_SNAP = {"pasadena"}
 # plain gray (identical to street art), so it keeps the polynomial warp.
 # Badge fill colors that differ from the drawn line color: used only for
 # anchor detection (the words sit on light chips), never for line snapping.
+#
+# Long Beach Transit wants one for the other half of the job. Its chips are not
+# hard to *find* — they are the same maroon as its lines and sit inside its own
+# mask, so the presence test has always passed them — but they are that maroon
+# saturated, the legend's ink, read off 466 badges as (126,33,58) with a couple
+# of px of spread. Its lines are the same ink laid thin over a cream page, and
+# come back a washed (134,98,101) once refine_color has been over them. Those
+# are 66 apart, further than the chip stands from Metro's Rapid red (180,51,61)
+# — so the gate asking whether a chip is better explained by some *other*
+# agency's colour than by this one's answered "Metro", every time, and threw out
+# every badge Long Beach Transit has. The whole network snapped unanchored.
+# Naming the chip colour is what puts it back in the agency's own set.
+#
+# Route 8 is what that cost. The sheet badges it "8" four times along the 223rd
+# St line the feed names it after ("223rd St / Wardlow Rd"), and the warp puts
+# it a block south — near enough to Sepulveda for the mask to take it there,
+# and out across Carson, where the sheet draws nothing between the two, near
+# enough to nothing at all: the path left the drawn line at Main St and ran a
+# diagonal over blank page under the word CARSON. With the chip in the own-set
+# the four badges are the 8's again, and they are on 223rd.
 BADGE_FILLS = {
     "foothill": (118, 140, 120),
+    "longbeach": (126, 33, 58),
+    # LADOT's DASH chips, read off every one of them within a couple of px:
+    # a flat olive, darker and far less washed than either livery's drawn
+    # stroke. Wanted because a DASH designation is two capitals and the sheet
+    # is covered in two-capital words — see ladot_livery, where this is the
+    # test that tells a chip from a street label.
+    "ladot": (105, 103, 55),
 }
 
 LEGEND_SEEDS = {
@@ -1549,8 +1596,20 @@ def ladot_livery(tokens, is_dash, sheet_tokens=()):
     corner and sewed the rest between neighbouring blocks."""
     prefer = ink_tree(LADOT_INK, dashed=not is_dash)
     if is_dash:
+        # On the chip, not merely near the ink. A Commuter Express number is
+        # set as plain text beside its line, so distance to the ink is all
+        # there is to go on; a DASH designation is printed on a chip, and it
+        # needs to be, because two capitals is also the shape of half the
+        # words on the sheet. "El Sereno/City Terrace" is badged SC, and the
+        # sheet also writes "SC AV" as a street label 97 px from the loop —
+        # inside the anchor gate, 4 px from LADOT's olive where the Lincoln
+        # Heights DASH passes, and it dragged the shape 200 px west to reach
+        # it. The chip is a flat olive (BADGE_FILLS) and the street label is
+        # the teal the sheet letters streets in, so the colour under the word
+        # separates them outright.
         return prefer, route_anchors(set(sheet_tokens), prefer,
-                                     near=BADGE_NEAR_INK)
+                                     near=BADGE_NEAR_INK,
+                                     colors=[BADGE_FILLS["ladot"]])
     anc = route_anchors(tokens, prefer, near=BADGE_NEAR_INK)
     other = ink_tree(LADOT_INK, dashed=is_dash)
     alt = route_anchors(tokens, other, near=BADGE_NEAR_INK)
@@ -1596,6 +1655,21 @@ PINNED_ANCHORS = {
         (1138, 2215),                     #   south end at Culver City TC
         (1090, 2271),                     #   Bluff Creek, east of the corner
     ],
+    # Long Beach Transit 2's west end, on the drawn Sepulveda a little east of
+    # the Figueroa corner the sheet finishes the route at. The warp puts that
+    # corner 69 px south of where the sheet draws it and then runs on down
+    # Figueroa to the layover, so the shape came out with a 60 px spur hanging
+    # off the end of the drawn line into blank page — the tail the eye reads as
+    # the line starting nowhere. There is a "2" printed at the corner itself,
+    # and once the agency's chips are believed the fit does use it; what it
+    # cannot do is shorten the shape, and the spur is past the last badge.
+    #
+    # East of the corner rather than on it because one pin has to serve both
+    # directions and they run a street apart down here: the corner is 36 px
+    # from the westbound working, a pixel outside the reach, and the 119 px it
+    # overshoots by is past the trim limit besides. This sits on the drawn ink,
+    # 16 and 24 px from the two of them, and trims both.
+    ("longbeach", "2"): [(1610, 3044)],
 }
 
 TERMINUS_REACH = 35.0   # px a shape must pass within of a pin to be cut to it
@@ -2632,7 +2706,7 @@ def trace_anchors(s, D, A, P, cum, tree):
     the caller re-fits while it keeps rising, and a stretch the warp talked it
     out of is walked on a later pass, once the badges have brought the arc
     length to something like the truth."""
-    out_s, out_D, walked = [s[:1]], [D[:1]], 0
+    out_s, out_D, walked, believed = [s[:1]], [D[:1]], 0, 0
     for i in range(len(s) - 1):
         ds = s[i + 1] - s[i]
         if ds > 0 and TRACE_SPAN[0] < math.dist(A[i], A[i + 1]) < TRACE_SPAN[1]:
@@ -2651,6 +2725,7 @@ def trace_anchors(s, D, A, P, cum, tree):
                 out_D.append(q - np.c_[np.interp(sv, cum, P[:, 0]),
                                        np.interp(sv, cum, P[:, 1])])
                 walked += 1
+                believed += 1
             elif not _ALIGN_OFF and length < TRACE_LIMIT * ds:
                 # Out of band, which until now threw the walk away. But the band
                 # is not a test of whether the corridor is the route's — it is
@@ -2693,7 +2768,7 @@ def trace_anchors(s, D, A, P, cum, tree):
                 _ALIGN_USED += 1
         out_s.append(s[i + 1:i + 2])
         out_D.append(D[i + 1:i + 2])
-    return np.concatenate(out_s), np.concatenate(out_D), walked
+    return np.concatenate(out_s), np.concatenate(out_D), walked, believed
 
 
 ANCHOR_PASSES = 3     # times the anchor fit may be re-run to pick up more badges
@@ -2919,7 +2994,7 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
         caps = (40.0, 26.0, 14.0)
     if anchors:
         A = np.asarray(anchors, dtype=float)
-        used = walked = 0
+        used = walked = believed = 0
         for _ in range(ANCHOR_PASSES):
             cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(P, axis=0).T))])
             d2 = ((P[None, :, :] - A[:, None, :]) ** 2).sum(2)
@@ -2935,12 +3010,25 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
             order = np.argsort(cum[j[near]], kind="stable")
             s = cum[j[near]][order]
             D = (A[near] - P[j[near]])[order]
-            s, D, w = trace_anchors(s, D, A[near][order], P, cum, tree)
+            s, D, w, b = trace_anchors(s, D, A[near][order], P, cum, tree)
             # nothing the last fit didn't already have: no badge it couldn't
-            # reach, and no corridor it couldn't walk
-            if near.sum() <= used and w <= walked:
+            # reach, and no corridor it couldn't walk — nor one it could only
+            # walk by *aligning*, which is the fallback for a corridor whose
+            # length the shape cannot yet vouch for, and which the next pass
+            # may well be able to believe outright. Counting the two together
+            # made converting one into the other look like standing still.
+            # Metro 246's turn off Pacific Coast Hwy onto Figueroa is that
+            # case: on the first pass the shape reads 26 px between the two
+            # badges against the drawn corridor's 87, three times out of band,
+            # so the corner went in as a single aligned node. On the second the
+            # same span reads 71 px, the walk is believed and lays three nodes
+            # round the corner — but the walk *count* was nine both times, the
+            # loop called it no progress, and the better fit was computed and
+            # thrown away. The corner stayed 23 px inside the drawn turn.
+            if near.sum() <= used and w <= walked and b <= believed:
                 break
             used, walked = max(used, int(near.sum())), max(walked, w)
+            believed = max(believed, b)
             P = P + np.c_[np.interp(cum, s, D[:, 0]), np.interp(cum, s, D[:, 1])]
         if used and default_caps:
             caps = (26.0, 14.0)            # anchors pin the street; stay tight
