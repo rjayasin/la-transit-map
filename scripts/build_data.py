@@ -844,8 +844,29 @@ STREET_SNAP = {"pasadena"}
 # plain gray (identical to street art), so it keeps the polynomial warp.
 # Badge fill colors that differ from the drawn line color: used only for
 # anchor detection (the words sit on light chips), never for line snapping.
+#
+# Long Beach Transit wants one for the other half of the job. Its chips are not
+# hard to *find* — they are the same maroon as its lines and sit inside its own
+# mask, so the presence test has always passed them — but they are that maroon
+# saturated, the legend's ink, read off 466 badges as (126,33,58) with a couple
+# of px of spread. Its lines are the same ink laid thin over a cream page, and
+# come back a washed (134,98,101) once refine_color has been over them. Those
+# are 66 apart, further than the chip stands from Metro's Rapid red (180,51,61)
+# — so the gate asking whether a chip is better explained by some *other*
+# agency's colour than by this one's answered "Metro", every time, and threw out
+# every badge Long Beach Transit has. The whole network snapped unanchored.
+# Naming the chip colour is what puts it back in the agency's own set.
+#
+# Route 8 is what that cost. The sheet badges it "8" four times along the 223rd
+# St line the feed names it after ("223rd St / Wardlow Rd"), and the warp puts
+# it a block south — near enough to Sepulveda for the mask to take it there,
+# and out across Carson, where the sheet draws nothing between the two, near
+# enough to nothing at all: the path left the drawn line at Main St and ran a
+# diagonal over blank page under the word CARSON. With the chip in the own-set
+# the four badges are the 8's again, and they are on 223rd.
 BADGE_FILLS = {
     "foothill": (118, 140, 120),
+    "longbeach": (126, 33, 58),
 }
 
 LEGEND_SEEDS = {

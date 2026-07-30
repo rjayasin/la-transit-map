@@ -96,6 +96,29 @@ python3 -m http.server 8741
     the refined color does and rejects it as foreign. Foothill's Silver Streak
     lost 16 of its 18 "SS" badges that way and, unpinned, its busway warp sat
     up on Valley Blvd; folding the seeds into the own-color set fixes it.
+  - The same gate cost Long Beach Transit every badge it has. Its chips are
+    easy enough to *find* — the same maroon as its lines, sitting inside its
+    own mask — but they are that maroon saturated, the legend's ink, read off
+    466 badges as (126,33,58) with a couple of px of spread, while its lines
+    are the same ink laid thin over a cream page and refine to a washed
+    (134,98,101). Those are 66 apart, further than the chip stands from Metro's
+    Rapid red, so the gate answered "Metro" every time and the whole network
+    snapped unanchored. Naming the chip color (`BADGE_FILLS`) puts it in the
+    agency's own set. Route 8 is what it cost: the sheet badges it "8" four
+    times along the 223rd St line the feed names it after, the warp puts it a
+    block south — near enough to Sepulveda for the mask to take it there, and
+    out across Carson, where nothing is drawn between the two, near enough to
+    nothing at all — and the path left the drawn line at Main St and ran a
+    diagonal over blank page under the word CARSON, ending 54 px from the
+    westernmost "8". It now runs 223rd through all four badges and ends 4 px
+    from that one. Across the agency, measured against one fixed mask, twelve
+    routes improve and one (the 51) loses two px on a short stretch.
+  - Which is a measurement worth a warning of its own: `drift_check` refines
+    the mask color off the *stored* shapes, so a change that moves shapes onto
+    their lines also moves the yardstick — Long Beach refines to (136,96,96)
+    from the old shapes and (132,86,89) from the new, and its before/after
+    totals are not comparable. Compare two shapes against one tree, refined the
+    way the build refines it: off the warps.
   - A badge belongs to the point of the shape nearest it, which asks the warp
     to be closer to the truth than the streets are to each other. On a route
     that runs out and back on parallel streets it isn't: GTrans 2 loops north
