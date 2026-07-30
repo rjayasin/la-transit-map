@@ -193,6 +193,26 @@ MAP_LABELS = {
     ("ladot", "710"): "WM",         # DASH Wilmington, counterclockwise
     ("ladot", "713"): "WT",         # DASH Watts, clockwise
     ("ladot", "714"): "WT",         # DASH Watts, counterclockwise
+    # Two more of the same, and neither designation is one a reader could guess
+    # from the feed's name. route_label takes the first token of "Boyle
+    # Heights" and, at five characters, initialises it to "BH" — which the
+    # sheet prints nowhere at all; it badges that loop "BE", three times. And
+    # "El Sereno/City Terrace" it doesn't compress at all, because the first
+    # token is already short enough to keep: every one of those buses carried
+    # an "El", which the sheet does print seven times and never once for this
+    # route — EL SEGUNDO, EL MONTE, place names. The loop is badged "SC",
+    # Sereno/City Terrace, five times from Rose Hill round to City Terrace.
+    ("ladot", "4867"): "BE",        # DASH Boyle Heights
+    ("ladot", "4868"): "SC",        # DASH El Sereno/City Terrace
+    # And Southeast, which has to come with them: route_label initialises
+    # "Southeast Clockwise" to "SC" as well, so badging El Sereno the way the
+    # sheet does would have put two unrelated loops, one in El Sereno and one
+    # in Central-Alameda, under one designation — the very thing this table
+    # exists to undo. "SC" was never Southeast's anyway; the sheet badges it
+    # "SE", twice, 9 and 14 px from both directions' warps, and prints "SC"
+    # only for Studio City up in the Valley and inside the words "SC AV".
+    ("ladot", "1757"): "SE",        # DASH Southeast, clockwise
+    ("ladot", "1758"): "SE",        # DASH Southeast, counterclockwise
 }
 
 
@@ -846,6 +866,12 @@ STREET_SNAP = {"pasadena"}
 # anchor detection (the words sit on light chips), never for line snapping.
 BADGE_FILLS = {
     "foothill": (118, 140, 120),
+    # LADOT's DASH chips, read off every one of them within a couple of px:
+    # a flat olive, darker and far less washed than either livery's drawn
+    # stroke. Wanted because a DASH designation is two capitals and the sheet
+    # is covered in two-capital words — see ladot_livery, where this is the
+    # test that tells a chip from a street label.
+    "ladot": (105, 103, 55),
 }
 
 LEGEND_SEEDS = {
@@ -1549,8 +1575,20 @@ def ladot_livery(tokens, is_dash, sheet_tokens=()):
     corner and sewed the rest between neighbouring blocks."""
     prefer = ink_tree(LADOT_INK, dashed=not is_dash)
     if is_dash:
+        # On the chip, not merely near the ink. A Commuter Express number is
+        # set as plain text beside its line, so distance to the ink is all
+        # there is to go on; a DASH designation is printed on a chip, and it
+        # needs to be, because two capitals is also the shape of half the
+        # words on the sheet. "El Sereno/City Terrace" is badged SC, and the
+        # sheet also writes "SC AV" as a street label 97 px from the loop —
+        # inside the anchor gate, 4 px from LADOT's olive where the Lincoln
+        # Heights DASH passes, and it dragged the shape 200 px west to reach
+        # it. The chip is a flat olive (BADGE_FILLS) and the street label is
+        # the teal the sheet letters streets in, so the colour under the word
+        # separates them outright.
         return prefer, route_anchors(set(sheet_tokens), prefer,
-                                     near=BADGE_NEAR_INK)
+                                     near=BADGE_NEAR_INK,
+                                     colors=[BADGE_FILLS["ladot"]])
     anc = route_anchors(tokens, prefer, near=BADGE_NEAR_INK)
     other = ink_tree(LADOT_INK, dashed=is_dash)
     alt = route_anchors(tokens, other, near=BADGE_NEAR_INK)

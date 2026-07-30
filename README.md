@@ -202,7 +202,21 @@ python3 -m http.server 8741
     DASH — a compressed one is a guess, and a guess that lands on a code the
     sheet does print is worse than one that lands on nothing: "Southeast
     Clockwise" comes out "SC", which the sheet prints twenty-nine times, the
-    nearest of them 326 px from the Southeast loop. Where the sheet ends a loop
+    nearest of them 326 px from the Southeast loop. Four more read off the sheet
+    the same way: Boyle Heights is badged "BE" and not the "BH" that name
+    compresses to, El Sereno/City Terrace is "SC" (the first token being short
+    enough to keep, those buses carried an "El" the sheet prints only in EL
+    SEGUNDO and EL MONTE), and Southeast is "SE" — which has to come with El
+    Sereno's, or the two of them would share one designation.
+  - Two capitals is also the shape of half the words on the sheet, so a DASH
+    designation is taken on its *chip* rather than merely near the ink. Where a
+    Commuter Express number is set as plain text beside its line and distance is
+    all there is to go on, a DASH is printed on a flat olive chip — and the
+    sheet writes "SC AV" as a street label 97 px from the El Sereno loop, inside
+    the anchor gate and 4 px from the olive the Lincoln Heights DASH passes on.
+    It dragged the shape 200 px west. The chip colour and the teal the sheet
+    letters streets in are 172 apart, so reading the colour under the word
+    settles it. Where the sheet ends a loop
     short of where the feed runs it — Wilmington's carries on four blocks south
     of the "C St" the schematic stops at, over page the sheet draws no line on
     — those blocks now fold onto the end of the drawn loop instead of trailing
