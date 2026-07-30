@@ -373,10 +373,23 @@ python3 -m http.server 8741
     for the schematic that ends a route at its hub while the GTFS runs on to a
     layover the map omits — BBB 14 carried on past the transit centre and
     snapped onto the railroad crosshatch down the 405.
+  - One pin cannot always do both jobs, and where it can't the terminus is
+    named in *warp* px for the trim alone (`TRIM_TERMINI`). Torrance 5 is the
+    case: the sheet ends it at Pacific Coast Hwy & Crenshaw, the GTFS runs 1.2
+    km further up Crenshaw Bl to a layover, and the warp holds that junction 58
+    px south of where the sheet draws it. Distance is not what defeats a pin on
+    the drawing there — the trim cuts to the *nearest* point of the shape, and
+    the layover's own start point lands 26 px from the drawn corner, nearer to
+    it than the terminus is. Every point of the drawn corridor answers the same
+    way, so the terminus is given where the warp puts it.
   - Where not even a pin can be placed, the corridor itself is drawn by hand
     (`OVERRIDE_PATHS`) and spliced into the snapped shape. It takes several
-    failures at once to come to that, and three cases have them: Metro 761's
-    corner from Sunset into UCLA; LADOT 142 through San Pedro, below; and
+    failures at once to come to that, and four cases have them: Metro 761's
+    corner from Sunset into UCLA; LADOT 142 through San Pedro, below; Torrance
+    5's south end, where the "5" printed on the drawn PCH is 43 px from the
+    warp's *Arlington* leg and 65 from the PCH leg it is printed on, so the fit
+    pulls a point 130 px into the route down onto it and leaves the terminus to
+    snap onto the grey the sheet draws the streets themselves in; and
     Montebello 10 down Atlantic, where the
     sheet draws a street vertical that really slants southwest. That lands the
     warp's Whittier junction 68 px west of the drawn one and turns a corner
