@@ -333,6 +333,37 @@ python3 -m http.server 8741
   Metrolink shape shifting 28 px inside the call-out — where nothing is drawn
   and the geometry is the warp's own noise — was enough to put Union Station
   outside its own run and drop every Metrolink line out of the panel.
+  The panel is also where a rail line's snap matters most, since it is the one
+  place the sheet redraws downtown at a legible size, and three things had all
+  five downtown lines wandering off the ribbons drawn for them:
+  - It was masked on `map.png` while rail everywhere else is masked on the tile
+    pyramid, and the panel is drawn small enough on the 4096 px reduction for
+    that to matter. map.png renders the E Line's printed (254,186,18) as
+    (233,181,74), which is 60.0 away — exactly the rail tolerance, so `< 60`
+    matched not one pixel of it and the E kept its raw warp from 7th/Metro
+    Center to Little Tokyo, cutting across the blocks it is drawn along. On the
+    pyramid the same gold sits 0.0 from its own color.
+  - A station's label plate carries a chip per line, filled with that line's
+    own color, and in the magnified panel it is a solid disc of it a few tens
+    of px off the ribbon. Both the B and the D dived into their own chips on
+    the "7th St/Metro Center" plate and came back out. A drawn line is longer
+    than a chip is wide whichever way it runs, so a mask component that fits
+    inside a chip's footprint in both axes is not a line.
+  - The panel's own legend box was declared 26 px taller and 35 px wider than
+    it is, and what that swallowed was live artwork: the A Line's run east
+    along Washington Blvd, and the San Pedro platform it ends at. With them cut
+    out of the mask the whole south-east end of the A piled up on the last blue
+    pixel west of the box, and what the panel drew was a line running
+    diagonally across the legend.
+
+  A mask of one route's color also gets to reach further and to ignore where
+  the mask is *allowed* to be blank — see `sole` in `snap_coherent`: a point
+  the sheet drew nothing under has no line of its own to find, but on a
+  one-line mask there is no neighbour to be dragged onto either. Together
+  these take all four downtown rail lines from a median 0.2-10.5 px off their
+  drawn ribbons, with a fifth to a half of each standing more than 12 px off,
+  to a median 0.2 and under a tenth. The K Line is not in the panel at all;
+  the sheet stops it well short of downtown.
   The panel's vehicles are as tappable as the map's: the mirrored placement is
   one function the renderer and the path inspector both go through, so a tap
   tests the pixel a vehicle was actually drawn at. It used to test only the

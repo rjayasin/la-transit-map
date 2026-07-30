@@ -18,8 +18,18 @@ from georef import MAP, ROUTE_COLORS, TOL, load_shapes
 # inset frame content area on the map, px (inside black border/banner)
 RECT = (3292, 2506, 3850, 3706)
 # station-platform legend box inside the frame: contains sample rail-line
-# artwork in the real line colors — must not attract the fit
-LEGEND = (3655, 3465, 3850, 3675)
+# artwork in the real line colors — must not attract the fit.
+#
+# Measured off the tile pyramid rather than eyeballed: the box's white interior
+# is x 3663.5-3808.6, y 3471.4-3649.4, and this is that plus its black border
+# and two px of slack. It used to run to (3850, 3675), the frame's own right
+# edge and 26 px below the box, and what that swallowed was live artwork — the
+# A Line's run east along Washington Blvd sits at y 3663, and the "San Pedro"
+# platform east of the box at x 3820. With them cut out of the mask the A had
+# nothing to snap its south-east end onto, and every point of it piled up on
+# the last blue pixel west of the box. Widening the exclusion is only ever
+# conservative for the *fit* in this file, so the stored transform stands.
+LEGEND = (3657, 3465, 3815, 3656)
 # geographic bounds of what the inset depicts, from its edge streets:
 # Beaudry/110 west, Washington south, Vignes east, Stadium Way north.
 # Keep tight: the poly2 extrapolates unpredictably outside the frame (it can
