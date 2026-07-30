@@ -922,15 +922,59 @@ function spriteScale() {
   return 1 / view.k * Math.min(1, view.k * 2.3) * Math.min(2.2, Math.max(1, Math.sqrt(view.k)));
 }
 
-// map-px position of a trip's vehicle at time t, or null if it isn't running
-function vehiclePos(tr, t) {
+// Where a trip is on the clock: the stop pair it is between and how far along
+// its shape that puts it, or null if it isn't running. Both the way a vehicle
+// is drawn on the main map and the way it is mirrored into the call-out start
+// here, and so does the picker — a tap testing a position the renderer didn't
+// compute the same way is a tap that lands on nothing.
+function tripAt(tr, t) {
   if (t < tr.t0 || t > tr.t1) return null;
   const pat = data.patterns[tr.p];
   if (!pat) return null;
   const times = tr.times, d = pat.d;
   let lo = 0, hi = times.length - 1;
   while (hi - lo > 1) { const m = (lo + hi) >> 1; (times[m] <= t ? lo = m : hi = m); }
-  return posAlong(shapes[pat.s], distAt(times, d, lo, hi, t, data.routes[tr.r].rail));
+  return { pat, lo, hi, dist: distAt(times, d, lo, hi, t, data.routes[tr.r].rail) };
+}
+
+// map-px position of a trip's vehicle at time t, or null if it isn't running
+function vehiclePos(tr, t) {
+  const a = tripAt(tr, t);
+  return a && posAlong(shapes[a.pat.s], a.dist);
+}
+
+// Mirror a vehicle the main map has already placed into the DTLA call-out, or
+// null where the trip isn't inside the panel then. Inset motion is computed in
+// inset space, since the schematic main map collapses downtown: each stop knows
+// its run and its distance along that run's inset polyline, and the vehicle's
+// progress through the current segment interpolates between them. Takes the
+// clock position the caller already worked out rather than finding it again —
+// the draw loop runs this for every trip, every frame.
+function insetPosAt(pat, lo, hi, dist, tc, times) {
+  const ir = pat.ir;
+  if (!ir) return null;
+  const ra = ir[lo], rb = ir[hi];
+  let run = -1, i0 = 0, i1 = 0;
+  if (ra >= 0 && ra === rb) { run = ra; i0 = pat.id[lo]; i1 = pat.id[hi]; }
+  else if (ra < 0 && rb >= 0) { run = rb; i0 = 0; i1 = pat.id[hi]; }               // entering
+  else if (ra >= 0 && rb < 0) {                                                    // leaving
+    run = ra; i0 = pat.id[lo];
+    const g = insetRuns[pat.s][ra]; i1 = g.cum[g.cum.length - 1];
+  }
+  if (run < 0) return null;
+  // progress through the segment: from the main-map Hermite when the segment
+  // has extent there, else by time (downtown is so compressed on the main map
+  // that adjacent stops can share a rounded distance)
+  const d = pat.d, span = d[hi] - d[lo], tspan = times[hi] - times[lo];
+  const fp = span > 0 ? Math.min(1, Math.max(0, (dist - d[lo]) / span))
+           : tspan > 0 ? (tc - times[lo]) / tspan : 0;
+  return posAlong(insetRuns[pat.s][run], i0 + (i1 - i0) * fp);
+}
+
+// map-px position of a trip's mirrored vehicle inside the call-out, or null
+function insetVehiclePos(tr, t) {
+  const a = tripAt(tr, t);
+  return a && insetPosAt(a.pat, a.lo, a.hi, a.dist, t, tr.times);
 }
 
 // index of the running vehicle under a screen point, or -1 if none is close enough
@@ -938,17 +982,27 @@ function pickVehicle(cx, cy) {
   if (!data) return -1;
   const mx = view.x + cx / view.k, my = view.y + cy / view.k;
   const s = spriteScale(), tol = 6 / view.k;   // a few screen px of slack for touch
-  let best = -1, bestD = Infinity;
-  for (let i = 0; i < trips.length; i++) {
-    const tr = trips[i];
-    if (!sysOn[data.routes[tr.r].sy]) continue;
-    const p = vehiclePos(tr, simT);
-    if (!p) continue;
-    const rad = (sprites[tr.r].half + 2) * s + tol;
-    const dx = p[0] - mx, dy = p[1] - my, dd = dx*dx + dy*dy;
-    if (dd <= rad*rad && dd < bestD) { bestD = dd; best = i; }
+  // Inside the call-out the panel's own sprites are what the eye sees: they are
+  // drawn last and clipped to the frame, over whatever the main map put there.
+  // So a tap in the panel is offered them first, and only falls through to the
+  // main map when it hits none — which keeps a tap on blank panel from picking
+  // a vehicle hidden underneath it.
+  const inPanel = insetRect && mx >= insetRect[0] && mx <= insetRect[2]
+                            && my >= insetRect[1] && my <= insetRect[3];
+  for (const where of inPanel ? [insetVehiclePos, vehiclePos] : [vehiclePos]) {
+    let best = -1, bestD = Infinity;
+    for (let i = 0; i < trips.length; i++) {
+      const tr = trips[i];
+      if (!sysOn[data.routes[tr.r].sy]) continue;
+      const p = where(tr, simT);
+      if (!p) continue;
+      const rad = (sprites[tr.r].half + 2) * s + tol;
+      const dx = p[0] - mx, dy = p[1] - my, dd = dx*dx + dy*dy;
+      if (dd <= rad*rad && dd < bestD) { bestD = dd; best = i; }
+    }
+    if (best >= 0) return best;
   }
-  return best;
+  return -1;
 }
 
 // path inspector: tapping a vehicle shows the line it runs; tapping another
@@ -2057,30 +2111,11 @@ function drawFrame(now) {
       }
       if (a < 1) ctx.globalAlpha = 1;
     }
-    // mirror into the DTLA inset panel. Inset motion is computed in inset
-    // space (the schematic main map collapses downtown): each stop knows its
-    // run + distance along the run's inset polyline, and the vehicle's
-    // progress through the current segment interpolates between them.
-    const ir = pat.ir;
-    if (ir && insetVisible) {
-      const ra = ir[lo], rb = ir[hi];
-      let run = -1, i0 = 0, i1 = 0;
-      if (ra >= 0 && ra === rb) { run = ra; i0 = pat.id[lo]; i1 = pat.id[hi]; }
-      else if (ra < 0 && rb >= 0) { run = rb; i0 = 0; i1 = pat.id[hi]; }             // entering
-      else if (ra >= 0 && rb < 0) {                                                  // leaving
-        run = ra; i0 = pat.id[lo];
-        const g = insetRuns[pat.s][ra]; i1 = g.cum[g.cum.length - 1];
-      }
-      if (run >= 0) {
-        // progress through the segment: from the main-map Hermite when the
-        // segment has extent there, else by time (downtown is so compressed
-        // on the main map that adjacent stops can share a rounded distance)
-        const span = d[hi] - d[lo], tspan = times[hi] - times[lo];
-        const fp = span > 0 ? Math.min(1, Math.max(0, (dist - d[lo]) / span))
-                 : tspan > 0 ? (tc - times[lo]) / tspan : 0;
-        const [ix, iy] = posAlong(insetRuns[pat.s][run], i0 + (i1 - i0) * fp);
-        insetDraws.push(tr.r, ix, iy, a);
-      }
+    // mirror into the DTLA inset panel — see insetPosAt, which the picker goes
+    // through too so a tap in the panel tests the position drawn there
+    if (insetVisible) {
+      const ip = insetPosAt(pat, lo, hi, dist, tc, times);
+      if (ip) insetDraws.push(tr.r, ip[0], ip[1], a, i);
     }
   }
   if (insetDraws.length && insetRect) {
@@ -2088,12 +2123,17 @@ function drawFrame(now) {
     ctx.beginPath();
     ctx.rect(insetRect[0], insetRect[1], insetRect[2] - insetRect[0], insetRect[3] - insetRect[1]);
     ctx.clip();
-    for (let k = 0; k < insetDraws.length; k += 4) {
+    for (let k = 0; k < insetDraws.length; k += 5) {
       const ri = insetDraws[k], x = insetDraws[k+1], y = insetDraws[k+2], a = insetDraws[k+3];
       if (a < 1) ctx.globalAlpha = a;
       const [spx, sw] = spriteSize(sprites[ri].half, s);
       ctx.drawImage(spriteAt(ri, spx), x - sw / 2, y - sw / 2, sw, sw);
       drawn++;
+      if (insetDraws[k+4] === pathTrip) {   // ring the mirror too, so the tap
+        ctx.beginPath();                    // that made the selection is marked
+        ctx.arc(x, y, (sprites[ri].half + 4) * s, 0, 7);
+        ctx.lineWidth = 2 * s; ctx.strokeStyle = "#111"; ctx.stroke();
+      }
       if (a < 1) ctx.globalAlpha = 1;
     }
     ctx.restore();
