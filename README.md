@@ -86,6 +86,19 @@ python3 -m http.server 8741
     put the shape on them the same arc reads 234 px and the corner comes back —
     as does Metro 246's turn off Pacific onto Paseo del Mar in San Pedro, and 47
     other routes'.
+  - "Something the last pass didn't have" has to count the *kind* of walk, not
+    just how many. A corridor whose length the shape can't yet vouch for isn't
+    thrown away: it goes in through the aligned-walk fallback below, one node
+    where a believed walk would lay several. Both bumped the same counter, so a
+    pass that turned a fallback into a believed walk looked like standing
+    still, the loop stopped, and the better fit it had just computed was
+    discarded. Metro 246's turn off Pacific Coast Hwy onto Figueroa is that
+    case exactly: the first pass reads 26 px of shape between the two badges
+    against the drawn corridor's 87 — three times out of band — and puts the
+    corner in as one aligned node; the second reads 71 px, believes the walk
+    and lays three nodes round the turn. Nine walks both times, so the corner
+    stayed a smooth 23 px arc cut across a square turn. Counting believed walks
+    apart is the whole fix, and it is what lets the corner through.
   - Route numbers collide across agencies, so a candidate badge is kept only
     when its own chip color is best explained by this agency's — measured
     against every *other* agency's drawn colors, but never against this

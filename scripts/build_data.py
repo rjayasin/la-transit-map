@@ -2632,7 +2632,7 @@ def trace_anchors(s, D, A, P, cum, tree):
     the caller re-fits while it keeps rising, and a stretch the warp talked it
     out of is walked on a later pass, once the badges have brought the arc
     length to something like the truth."""
-    out_s, out_D, walked = [s[:1]], [D[:1]], 0
+    out_s, out_D, walked, believed = [s[:1]], [D[:1]], 0, 0
     for i in range(len(s) - 1):
         ds = s[i + 1] - s[i]
         if ds > 0 and TRACE_SPAN[0] < math.dist(A[i], A[i + 1]) < TRACE_SPAN[1]:
@@ -2651,6 +2651,7 @@ def trace_anchors(s, D, A, P, cum, tree):
                 out_D.append(q - np.c_[np.interp(sv, cum, P[:, 0]),
                                        np.interp(sv, cum, P[:, 1])])
                 walked += 1
+                believed += 1
             elif not _ALIGN_OFF and length < TRACE_LIMIT * ds:
                 # Out of band, which until now threw the walk away. But the band
                 # is not a test of whether the corridor is the route's — it is
@@ -2693,7 +2694,7 @@ def trace_anchors(s, D, A, P, cum, tree):
                 _ALIGN_USED += 1
         out_s.append(s[i + 1:i + 2])
         out_D.append(D[i + 1:i + 2])
-    return np.concatenate(out_s), np.concatenate(out_D), walked
+    return np.concatenate(out_s), np.concatenate(out_D), walked, believed
 
 
 ANCHOR_PASSES = 3     # times the anchor fit may be re-run to pick up more badges
@@ -2919,7 +2920,7 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
         caps = (40.0, 26.0, 14.0)
     if anchors:
         A = np.asarray(anchors, dtype=float)
-        used = walked = 0
+        used = walked = believed = 0
         for _ in range(ANCHOR_PASSES):
             cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(P, axis=0).T))])
             d2 = ((P[None, :, :] - A[:, None, :]) ** 2).sum(2)
@@ -2935,12 +2936,25 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
             order = np.argsort(cum[j[near]], kind="stable")
             s = cum[j[near]][order]
             D = (A[near] - P[j[near]])[order]
-            s, D, w = trace_anchors(s, D, A[near][order], P, cum, tree)
+            s, D, w, b = trace_anchors(s, D, A[near][order], P, cum, tree)
             # nothing the last fit didn't already have: no badge it couldn't
-            # reach, and no corridor it couldn't walk
-            if near.sum() <= used and w <= walked:
+            # reach, and no corridor it couldn't walk — nor one it could only
+            # walk by *aligning*, which is the fallback for a corridor whose
+            # length the shape cannot yet vouch for, and which the next pass
+            # may well be able to believe outright. Counting the two together
+            # made converting one into the other look like standing still.
+            # Metro 246's turn off Pacific Coast Hwy onto Figueroa is that
+            # case: on the first pass the shape reads 26 px between the two
+            # badges against the drawn corridor's 87, three times out of band,
+            # so the corner went in as a single aligned node. On the second the
+            # same span reads 71 px, the walk is believed and lays three nodes
+            # round the corner — but the walk *count* was nine both times, the
+            # loop called it no progress, and the better fit was computed and
+            # thrown away. The corner stayed 23 px inside the drawn turn.
+            if near.sum() <= used and w <= walked and b <= believed:
                 break
             used, walked = max(used, int(near.sum())), max(walked, w)
+            believed = max(believed, b)
             P = P + np.c_[np.interp(cum, s, D[:, 0]), np.interp(cum, s, D[:, 1])]
         if used and default_caps:
             caps = (26.0, 14.0)            # anchors pin the street; stay tight
