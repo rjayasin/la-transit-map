@@ -1778,14 +1778,14 @@ OVERRIDE_PATHS = {
     #     of the same 350 px of shape it is dead on. `anchor_slide` assumes an
     #     error that "varies slowly enough that one vector covers every leg",
     #     and over this route it does not.
-    #   - So the slide it settles on is a compromise, 49 px, and the length
-    #     bound refuses it by 1 px. The westbound shape's compromise comes out
-    #     at 44 and is allowed, which is the whole of the difference between
-    #     the two directions.
-    #   - Widening ANCHOR_SLIDE is not the fix. It admits the 142 (and rescues
-    #     Torrance R3, 961 -> 219 on path_check), but slides in the 48-56 band
-    #     put a fresh cusp into four routes that had none — Long Beach 182 and
-    #     104, Torrance 4X, Metro 602 — for +1137 against the -742 it wins.
+    #   - So the slide it settles on is a compromise, and one the gain test now
+    #     refuses on its merits rather than on a length bound: a vector that
+    #     suits one end of the route and not the other cannot clear half the
+    #     residual. That test used to be loose enough (0.7) that the 49 px
+    #     compromise passed it, and only the old 48 px length bound stood in
+    #     the way — by a single pixel, while the westbound working's 44 px
+    #     compromise went through. That was the whole of the difference between
+    #     the two directions, and it was luck rather than judgement.
     #   - Unfitted, the badges cross: the waterfront chip at the foot of Harbor
     #     is nearest the *7th St* run of the warp rather than the shape's own
     #     start, and the Ocean corner and Gaffey chips land on the same 1 px of
@@ -2792,10 +2792,9 @@ def trace_anchors(s, D, A, P, cum, tree):
 
 
 ANCHOR_PASSES = 3     # times the anchor fit may be re-run to pick up more badges
-ANCHOR_SLIDE = 48.0   # px the shape may be slid bodily before its badges are read
 ANCHOR_PITCH = (8.0, 2.0)   # px; the slide is searched coarse, then refined
 ANCHOR_DRAG = 0.15    # px of residual charged per px of slide, per badge
-ANCHOR_GAIN = 0.7     # of the badge residual a slide must clear to be believed
+ANCHOR_GAIN = 0.5     # of the badge residual a slide must clear to be believed
 CROSSED_APART = 20.0  # px between two badges before they are different streets
 CROSSED_SPAN = 30.0   # px along the shape within which they'd be the same stretch
 
@@ -2840,11 +2839,37 @@ def anchor_slide(P, A, gate):
     one the badges don't agree on a direction for, and a slide that leaves most
     of the residual behind hasn't explained the badges, it has only nudged
     them. Only a slide that takes the shape from missing its badges to running
-    through them is worth re-reading them against."""
+    through them is worth re-reading them against.
+
+    The bound is the anchor gate itself, because past it there is nothing to
+    slide onto: a badge further from the shape than the gate does not count for
+    it at any offset, so a longer reach can only chase badges the fit will
+    ignore. It used to be a separate 48 px, which is shorter than the warp's
+    own error in the places the slide exists for. Through the west Valley the
+    sheet holds Devonshire ~87 px south of where the warp puts it and Tampa ~57
+    px east, so Metro 242 wanted a bodily (58, 92) — 109 px — and every badge
+    printed along Tampa attached to a point half the route away. One direction
+    came out cutting diagonally across blank page onto Winnetka; the other kept
+    the street but ran 51% longer than the ground it covers, which is what put
+    four of its segments over 120 km/h.
+
+    Reaching further is only safe with the gain read tighter, and 0.7 was too
+    loose to be a test at all once the base residual was hundreds of px: a
+    slide could leave a badge 40 px off its line and still "clear" it. At 0.5
+    the marginal slides are refused and the decisive ones — Metro 242's cuts a
+    352 px residual to 9 — are kept. Swept together over the whole map against
+    a 48 px bound: path_check 28704 -> 27283, drift_check 10920 -> 9984, and
+    segments over 120 km/h 61 -> 42 on the sheet and 13 -> 7 in the call-out.
+    Torrance R3 is the shape of the win — 961 -> 219, its flat hairpin beside
+    the Mary K. Giordano Regional Transit Center replaced by the loop into the
+    hub the sheet actually draws it serving. The eleven routes that score worse
+    all do so the way Metro 33 does: a terminus sliver a few px across, which
+    path_check charges more for than the larger scar it replaced, since RETRACE
+    only counts a doubling-back it can see both ends of."""
     kd = cKDTree(P)
     base = np.minimum(kd.query(A)[0], gate).sum()
     t, resid = np.zeros(2), base
-    span = ANCHOR_SLIDE
+    span = gate
     for pitch in ANCHOR_PITCH:
         g = np.arange(-span, span + pitch / 2, pitch)
         T = t + np.stack(np.meshgrid(g, g, indexing="ij"), -1).reshape(-1, 2)
@@ -2853,7 +2878,7 @@ def anchor_slide(P, A, gate):
         k = int((r + ANCHOR_DRAG * np.hypot(*T.T) * len(A)).argmin())
         t, resid = T[k], r[k]
         span = pitch
-    if np.hypot(*t) >= ANCHOR_SLIDE or resid > ANCHOR_GAIN * base:
+    if np.hypot(*t) >= gate or resid > ANCHOR_GAIN * base:
         return np.zeros(2)
     return t
 
