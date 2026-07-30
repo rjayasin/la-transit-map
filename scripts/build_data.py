@@ -3642,6 +3642,8 @@ def main():
         for row in read_csv(feed, "routes.txt"):
             label = MAP_LABELS.get((feed, row["route_id"])) or route_label(
                 row.get("route_short_name", ""), row.get("route_long_name", ""))
+            extra = set()          # designations the sheet prints that the
+                                   # feed's short name doesn't carry — see 910
             color = (row.get("route_color") or "").strip()
             text = (row.get("route_text_color") or "").strip()
             is_dash[row["route_id"]] = "DASH" in (row.get("route_long_name") or "")
@@ -3672,13 +3674,23 @@ def main():
                 # Harbor Gateway — though the choice does cost the San Pedro
                 # trips a badge, since down there the sheet prints only "950".
                 label = "910"
+                # It costs them the *sprite*, at least. As an anchor the sheet's
+                # other number is wanted whatever the vehicles are labelled, and
+                # nothing else here can supply it: Metro leaves
+                # route_short_name empty on the busways and writes the numbers
+                # into the long name, so a shape's tokens would be its label
+                # and nothing besides. The "950" at the 22nd St loop is the one
+                # thing on the sheet that says where this line goes once the
+                # freeway ends — see the busway snap below.
+                extra = {"950"}
             if row["route_id"].split("-")[0] == "901":
                 color, text = "%02X%02X%02X" % BUSWAY_ORANGE, "FFFFFF"   # G Line's own
             rail = row.get("route_type") in ("0", "1", "2")
             rmeta[row["route_id"]] = (label, color, text or "FFFFFF", rail)
             # tokens as printed on map badges, for anchor lookup
             short = (row.get("route_short_name") or "").strip()
-            badge_tokens[row["route_id"]] = set(short.replace("/", " ").split()) | {label}
+            badge_tokens[row["route_id"]] = (
+                set(short.replace("/", " ").split()) | {label} | extra)
             # ...and, apart, the ones read off the artwork rather than out of
             # the feed. A DASH is anchored on those alone; see ladot_livery.
             sheet_tokens[row["route_id"]] = (
@@ -3893,14 +3905,46 @@ def main():
                     # muted foreign badge colors, so a color test drops genuine
                     # ones. Metro's number badges are dense and its anchoring
                     # was already tuned without it.
-                    anc = (station_anchors(route_stops.get((feed, rid), ()), tree,
-                                           {s: stops_name.get((feed, s), "")
-                                            for s in route_stops.get((feed, rid), ())},
-                                           {s: stops_px.get((feed, s))
-                                            for s in route_stops.get((feed, rid), ())})
-                           if busway else branch_anchors(
-                               route_anchors(toks, tree) + pins,
-                               sid, route_sids[rid], kd_for))
+                    if busway:
+                        # Station names, and — where the sheet numbers the
+                        # ribbon — the numbers printed along it. The names run
+                        # out where the stations do: the J Line's last one is
+                        # Harbor Gateway, and the 700 px the 950 runs on past
+                        # it into San Pedro had nothing pinning it at all. That
+                        # is the stretch where the sheet stops going straight.
+                        # It brings the busway off the 110 where the freeway
+                        # ends, west along Channel, back east along Ocean and
+                        # south down Pacific to the 22nd St loop — a switchback
+                        # a snap cannot invent, since every point of the chord
+                        # across it is already sitting on some part of it, and
+                        # the warp drew exactly that chord. Only a walk between
+                        # two anchors recovers a corridor (`trace_anchors`),
+                        # and there were no two anchors to walk between. The
+                        # sheet prints a "950" at the loop and another where
+                        # the 950 leaves the 910 at Harbor Gateway; those two
+                        # bracket it.
+                        #
+                        # Numbers only. The G Line's designation is a letter,
+                        # and the sole "G" the sheet sets is the one in "See G
+                        # Line detour inset" — a caption, but one standing 4 px
+                        # from the ghosted ribbon it captions, which is inside
+                        # any reach a badge test can use.
+                        anc = (station_anchors(
+                                   route_stops.get((feed, rid), ()), tree,
+                                   {s: stops_name.get((feed, s), "")
+                                    for s in route_stops.get((feed, rid), ())},
+                                   {s: stops_px.get((feed, s))
+                                    for s in route_stops.get((feed, rid), ())})
+                               + route_anchors({t for t in toks if any(c.isdigit()
+                                                                      for c in t)},
+                                               tree, near=BADGE_NEAR_INK))
+                    else:
+                        anc = route_anchors(toks, tree) + pins
+                    # A badge is printed on one line, and the "950" at the loop
+                    # is on the one variant that gets there — the workings that
+                    # turn back at Harbor Gateway must not be dragged 640 px
+                    # south onto it.
+                    anc = branch_anchors(anc, sid, route_sids[rid], kd_for)
                     anchored += bool(anc)
                     can_refit = not busway
                     out_pts = snap_recording(pts, snap_tree, anchors=anc,
