@@ -24,8 +24,8 @@ from scipy.sparse.csgraph import dijkstra
 from scipy.spatial import cKDTree
 
 sys.path.insert(0, "scripts")
-from georef import (EXCLUDE, MASK_LEVEL, ROUTE_COLORS, TILE, TILES, TOL,  # noqa: E402
-                    load_masks, tile_scan)
+from georef import (EXCLUDE, MASK_LEVEL, MASK_TOL, ROUTE_COLORS, TILE, TILES,  # noqa: E402
+                    TOL, load_masks, tile_scan)
 from georef_inset import GEO as INSET_GEO, LEGEND as INSET_LEGEND, RECT as INSET_RECT  # noqa: E402
 
 TARGET = date(2026, 7, 22)  # a Wednesday inside the Metro JUNE26 calendar window
@@ -500,6 +500,80 @@ def tile_tree(colors, tol, level=MASK_LEVEL):
             lambda: tile_scan(colors, level, tol))
         _TREES[key] = cKDTree(pts[:, :2] / level) if len(pts) > 300 else None
     return _TREES[key]
+
+
+def tile_region(box, level=MASK_LEVEL):
+    """The tile pyramid over a map-px box, as an HxWx3 array at `level`."""
+    x0, y0, x1, y1 = (int(v * level) for v in box)
+    out = np.zeros((y1 - y0, x1 - x0, 3), dtype=np.int32)
+    for ty in range(y0 // TILE, (y1 - 1) // TILE + 1):
+        for tx in range(x0 // TILE, (x1 - 1) // TILE + 1):
+            path = f"{TILES}/{level}/{tx}_{ty}.webp"
+            if not os.path.exists(path):
+                continue
+            im = np.asarray(Image.open(path).convert("RGB"))
+            ax0, ay0 = max(x0, tx * TILE), max(y0, ty * TILE)
+            ax1, ay1 = min(x1, (tx + 1) * TILE), min(y1, (ty + 1) * TILE)
+            out[ay0 - y0:ay1 - y0, ax0 - x0:ax1 - x0] = \
+                im[ay0 - ty * TILE:ay1 - ty * TILE, ax0 - tx * TILE:ax1 - tx * TILE]
+    return out
+
+
+_INSET_TREES = {}
+
+# A route chip printed inside a station's label plate is filled with the line's
+# own colour, so no colour mask can tell it from the line. In the magnified
+# call-out it is a solid disc of that colour sitting a few tens of px off the
+# ribbon — near enough to capture a shape whose warp passes closer to it than
+# to the line, and both the B and the D dived into their own chips on the "7th
+# St/Metro Center" plate and came back. A drawn line is longer than a chip is
+# wide whichever way it runs, though: every ribbon component in the panel spans
+# at least 19 map px along its length and the chips all measure 8-9 square. So
+# a component that fits inside a chip's own footprint in both axes is not a line.
+INSET_CHIP_SPAN = 12.0     # map px
+
+
+def inset_tile_tree(colors, tol=MASK_TOL, level=MASK_LEVEL):
+    """A mask of the Downtown call-out read off the tile pyramid, where the
+    printed color is faithful, rather than off map.png's blend of it.
+
+    Rail on the main map has always been masked this way. The call-out was not,
+    and it is where it matters most, because the panel is the one place the
+    sheet redraws every downtown line at a legible size — so a line that misses
+    its mask there misses it in the only view that shows the difference.
+    map.png renders the E Line's printed (254,186,18) as (233,181,74), which is
+    60.0 away: exactly the rail tolerance, so `< 60` matched not one pixel of
+    it in the whole panel and the E kept its raw warp from 7th/Metro Center to
+    Little Tokyo, cutting diagonally across the blocks it is drawn along. On
+    the pyramid the same gold sits 0.0 from its own color.
+
+    The scan is the call-out only, which `tile_tree` cannot do — EXCLUDE cuts
+    this rectangle out of the sheet, being a redrawing of a network that is
+    also drawn elsewhere on it, and every other caller wants that."""
+    key = (tuple(map(tuple, colors)), tol, level)
+    if key not in _INSET_TREES:
+        def build():
+            band = tile_region(INSET_RECT, level)
+            d2 = np.full(band.shape[:2], np.inf, dtype=float)
+            for rgb in colors:
+                d2 = np.minimum(d2, ((band - np.array(rgb)) ** 2).sum(2))
+            m = d2 < tol * tol
+            lx0, ly0, lx1, ly1 = INSET_LEGEND    # the panel's own key, not route
+            m[(ly0 - INSET_RECT[1]) * level:(ly1 - INSET_RECT[1]) * level,
+              (lx0 - INSET_RECT[0]) * level:(lx1 - INSET_RECT[0]) * level] = False
+            lab, n = ndi.label(m)
+            span = INSET_CHIP_SPAN * level
+            for k, (ys, xs) in enumerate(ndi.find_objects(lab), 1):
+                if max(ys.stop - ys.start, xs.stop - xs.start) < span:
+                    m[ys, xs] &= lab[ys, xs] != k      # a chip, not a line
+            ys, xs = np.nonzero(m)
+            return np.c_[xs / level + INSET_RECT[0], ys / level + INSET_RECT[1]]
+        P = cached_pixels(
+            ("inset-tile", key, INSET_RECT, INSET_LEGEND,
+             art_stamp(f"{TILES}/{level}/0_0.webp"),
+             code_stamp(inset_tile_tree, tile_region)), build)
+        _INSET_TREES[key] = cKDTree(P) if len(P) > 300 else None
+    return _INSET_TREES[key]
 
 
 def mask_pixels(colors, tol, region):
@@ -2727,7 +2801,7 @@ def solid_pixels(tree):
 
 def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
                   anchor_gate=120.0, min_frac=0.5, tail=(10.0, 11), region="main",
-                  speckled=True):
+                  speckled=True, sole=False):
     """Snap a warped polyline onto a drawn-line mask. The displacement field is
     smoothed along the line so whole stretches move to the same drawn street
     instead of individual points grabbing different parallels. Returns None if
@@ -2786,7 +2860,23 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
     routes, not on the total.
 
     speckled: whether the tree came out of the raster, and so needs the final
-    landing guarded against stray pixels. A tree of PDF strokes does not."""
+    landing guarded against stray pixels. A tree of PDF strokes does not.
+
+    sole: the mask holds this one route's drawn line and nothing else, so
+    whatever it finds is this route's. Where that holds, the regions the mask
+    skips stop being a reason to leave a point where it is. Ordinarily they
+    are: a point the sheet drew nothing under has no correction of its own, and
+    interpolating one into it carries the line off into blank page and piles it
+    against whatever is nearest the far side. But that failure is a point being
+    dragged onto a *neighbour's* line, and on a mask of one line there is no
+    neighbour to be dragged onto — only its own line, drawn a little way off.
+    The Downtown call-out needs it. Its legend is a box printed over the corner
+    of a panel that redraws the whole downtown network, and the A Line's warp
+    crosses that box running 96 px north of the Washington Blvd it is drawn
+    along: with the box vetoing every point under it, the line could not be
+    pulled down onto blue that was well inside the coarse pass's reach, and ran
+    diagonally across the legend instead. `min_frac` still counts only what the
+    mask could cover, so a route the panel doesn't draw still keeps its warp."""
     P = np.array(densify(pts, 4.0), dtype=float)
     n = len(P)
     if n < 8 or tree is None:
@@ -2835,7 +2925,7 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
         # crushed onto the 409's Figueroa. Those points keep the warp, and the
         # smoothing below ramps the correction down to them.
         cov = maskable(P, region)
-        ok = (d < cap) & cov
+        ok = (d < cap) & (cov | sole)
         if ci == 0:
             # "mostly undrawn" is judged only over the stretch a mask could
             # cover. Metro 690 runs a third of its length under the title
@@ -2853,11 +2943,12 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
         k = np.ones(pwin) / pwin
         for c in (0, 1):
             col = np.interp(idx, idx[~np.isnan(disp[:, c])], disp[:, c][~np.isnan(disp[:, c])])
-            col[~cov] = 0.0
+            if not sole:
+                col[~cov] = 0.0
             disp[:, c] = np.convolve(np.pad(col, pwin // 2, mode="edge"), k, "valid")
         P = P + disp
     d, j = tree.query(P)                   # final tight snap + light smoothing
-    ok = (d < 8) & maskable(P, region)
+    ok = (d < 8) & (maskable(P, region) | sole)
     if speckled:
         ok &= solid_pixels(tree)[j]        # onto artwork, never onto a speck
     P[ok] = tree.data[j[ok]]
@@ -3311,7 +3402,20 @@ def outside_inset(ix, iy, ll):
         np.zeros(len(ix))])
 
 
-def inset_runs(ll, main_dist, snap_tree=None, anchors=None):
+# The cap ladder and smoothing window the call-out snaps on. A mask of one
+# route's colour can reach as far there as rail's does on the main map, and
+# needs to: the panel magnifies downtown about fourfold, so the same warp error
+# is four times the pixels, and the A Line comes into the frame's south-east
+# corner 96 px off its drawn Washington Blvd. A mask that holds every Metro bus
+# line in the panel at once gets the short reach it always had, since a longer
+# one would only find a neighbour sooner. Both take the shorter window — it is
+# the magnified grid's right-angle turns that want it, not the livery.
+INSET_CAPS = (60.0, 30.0, 14.0)
+INSET_SOLE_CAPS = (120.0, 60.0, 30.0, 14.0)
+INSET_WIN = 15
+
+
+def inset_runs(ll, main_dist, snap_tree=None, anchors=None, sole=False):
     """Portions of a shape inside the DTLA inset, as runs of inset-px
     polyline. Motion in the inset is computed natively in inset space (the
     schematic main map collapses downtown, so main-shape distance cannot
@@ -3376,8 +3480,9 @@ def inset_runs(ll, main_dist, snap_tree=None, anchors=None):
             # grid's right-angle turns square, and a tight anchor gate stops
             # chips on the other street of a one-way couplet from matching
             sc = snap_coherent([tuple(p) for p in pts], snap_tree,
-                               caps=(60.0, 30.0, 14.0), win=25, anchors=anchors,
-                               anchor_gate=75.0, min_frac=0.35, region="inset")
+                               caps=INSET_SOLE_CAPS if sole else INSET_CAPS,
+                               win=INSET_WIN, anchors=anchors, anchor_gate=75.0,
+                               min_frac=0.35, region="inset", sole=sole)
             if sc is not None:
                 pts = np.asarray(sc)
         # drop edge-hugging slivers that never meaningfully enter the frame
@@ -4043,10 +4148,16 @@ def main():
                 cols, tol, toks = shape_isnap.get(key, (None, 0, set()))
                 if key[0] == "gtfs_bus" and cols:
                     cols = [ORANGE]   # inset draws ALL Metro bus lines orange
-                tree = mask_tree(cols, tol, region="inset") if cols else None
+                # Rail is the one network whose printed colors are known
+                # exactly rather than sampled off the artwork, so it is the one
+                # that can be masked on the pyramid — see inset_tile_tree.
+                # Everything else is masked on the reading it was refined from.
+                tree = (inset_tile_tree(cols) if cols and key[0] == "gtfs_rail"
+                        else mask_tree(cols, tol, region="inset") if cols else None)
                 gate = None if key[0] in ("gtfs_bus", "gtfs_rail") else cols
                 anc = route_anchors(toks, tree, region="inset", colors=gate)
-                runs = inset_runs(ll, lambda px: main_dist(key, si, px), tree, anc)
+                runs = inset_runs(ll, lambda px: main_dist(key, si, px), tree, anc,
+                                  sole=key[0] == "gtfs_rail")
             shape_runs[si] = runs
         return shape_runs[si]
 
