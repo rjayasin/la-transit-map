@@ -2377,7 +2377,7 @@ def branch_anchors(anchors, sid, sids, kd_for):
     Additive, at 24 px — under the 30 px that separates parallel drawn lines,
     so a badge on the next street over can't be shared. Swept against the whole
     map: 20 and 22 come out level with 24 and 26, and 28 gives the ratio's
-    failure back. At 24 the sheet's routes read 1171 better on path_check and
+    failure back. At 24 the sheet's routes read 1191 better on path_check and
     672 on drift_check, with the six worst hairpins on the map (LADOT 573,
     Metro 222) gone and Long Beach Transit's whole network pulled in."""
     if not anchors or len(sids) < 2:
@@ -2858,14 +2858,22 @@ def anchor_slide(P, A, gate):
     slide could leave a badge 40 px off its line and still "clear" it. At 0.5
     the marginal slides are refused and the decisive ones — Metro 242's cuts a
     352 px residual to 9 — are kept. Swept together over the whole map against
-    a 48 px bound: path_check 28704 -> 27283, drift_check 10920 -> 9984, and
+    a 48 px bound: path_check 31148 -> 30322, drift_check 10920 -> 9984, and
     segments over 120 km/h 61 -> 42 on the sheet and 13 -> 7 in the call-out.
     Torrance R3 is the shape of the win — 961 -> 219, its flat hairpin beside
     the Mary K. Giordano Regional Transit Center replaced by the loop into the
-    hub the sheet actually draws it serving. The eleven routes that score worse
-    all do so the way Metro 33 does: a terminus sliver a few px across, which
-    path_check charges more for than the larger scar it replaced, since RETRACE
-    only counts a doubling-back it can see both ends of."""
+    hub the sheet actually draws it serving.
+
+    Thirteen routes score worse on path_check and drift says none of them is
+    worse to look at. The DASH Wilmington is the loudest, 274 -> 856, and it is
+    the case to understand: it now sits on its drawn olive everywhere — 8 px of
+    it over 12 px from the ink, down to 0 — and what it scores for is running
+    out to the "WM" beside Watson and back down the same stroke. The sheet
+    draws that stub, so the retracing is the artwork's, not the snapper's;
+    RETRACE only spares a turnaround whose two arms stay a block apart. Long
+    Beach 182 (72 px of drift -> 24), Metro 169 (180 -> 44) and Torrance 4X
+    (80 -> 56) are the same trade, and the rest are the terminus slivers Metro
+    33 has: a scar traded for a smaller one path_check charges more for."""
     kd = cKDTree(P)
     base = np.minimum(kd.query(A)[0], gate).sum()
     t, resid = np.zeros(2), base
