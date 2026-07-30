@@ -3,7 +3,7 @@
 **[Live map → rjayasin.github.io/la-transit-map](https://rjayasin.github.io/la-transit-map/)**
 
 Animated 24-hour visualization of every scheduled transit vehicle in LA — Metro
-bus & rail plus 12 municipal systems and Metrolink — played over Metro's
+bus & rail plus 11 municipal systems and Metrolink — played over Metro's
 official "Bus and Rail System" map (May 2026).
 
 ## Run
@@ -24,8 +24,8 @@ python3 -m http.server 8741
   (`tiles/{2,4,8}/`, 512px tiles ≈ up to 700 dpi of the 47″ sheet), rendered
   from the PDF vectors. Tiles cascade in as you zoom, and zoom is capped at the
   deepest level's 1:1, so the background is never upscaled.
-- **Data** — 15 static GTFS feeds are reduced to one service date and emitted
-  as `schedule.json` (~7 MB): **26,902 trips on 336 routes**, as route
+- **Data** — 14 static GTFS feeds are reduced to one service date and emitted
+  as `schedule.json` (~7 MB): **26,371 trips on 327 routes**, as route
   colors/labels, shape polylines in map pixels, per-stop distance along each
   shape, and stop arrival times. Trips crossing midnight are duplicated at
   −24 h so owl service appears at the start of the day. A trip begins at its
@@ -42,7 +42,15 @@ python3 -m http.server 8741
   every shape is then pulled onto its system's *drawn* line.
   - Each system's lines are masked by color. Rail colors are read off the tile
     pyramid, where the printed ink is faithful; bus colors are seeded from the
-    legend swatches and refined against pixels along the routes.
+    legend swatches and refined against pixels along the routes. Refining asks
+    the warp to be on the line already, though, and where it isn't the seed
+    stands as the sheet's legend strokes it, read back off the artwork *at
+    those strokes*. Beach Cities Transit is why: its seed was a pale gray-green
+    that is nothing on the page, the refinement drifted it to a flat gray, and
+    the mask came back as street art and lettering with both of its routes
+    snapped to whatever ran nearest. The sheet gives it the same evergreen it
+    gives Foothill Transit, which the legend says outright and 60 km of map
+    make harmless.
   - Metro and LADOT snap to the sheet's *vectors* rather than to that mask —
     see below; the mask still finds their badges, which are chips filled with
     the line color rather than strokes of it.
@@ -119,13 +127,28 @@ python3 -m http.server 8741
     passes nearest it: a shape keeps a badge while it is about as near as the
     nearest variant gets, and loses it when another explains it far better.
     On the shared trunk every variant is equally close and they all keep it.
+    Where the sheet designates a whole *agency* — see below — that comparison
+    has to range over every route the symbol covers rather than one route's
+    variants, since each of them is a candidate for the same word: the "BC"
+    printed on Beach Cities' 102 across Redondo Beach was dragging its 109
+    15 px off the PCH it runs on.
   - A color mask can only find a line the raster shows, and the sheet draws
     lines it doesn't. Those lines are read out of the PDF's vectors instead,
     where every route is a stroke in its agency's ink — no tolerance, no rival
-    colors, nothing to recover from a rendering. Four networks need it:
+    colors, nothing to recover from a rendering. Five networks need it:
     - **Metrolink** rides the crosshatched railroad, inked in the same gray the
       sheet uses for place labels and minor street art, so masking that color
       selects most of the page.
+    - **The operators the sheet symbolises by agency** rather than by route:
+      Beach Cities Transit and BurbankBus. The sheet prints no route number for
+      either — one "BC" or "BU" beside every line the operator runs, and that
+      is all it says — and it sets those codes as plain text alongside the line
+      rather than on a chip. So the mask's presence test, the agency's own
+      pixels *under* the word, finds a few antialiased glyph strokes and
+      rejects them: both agencies snapped with no anchors at all, a median 15
+      and 45 px off their own drawn lines. The strokes answer both halves —
+      they are where the line is, and distance to them is a test a word
+      standing *beside* a line can pass — and take both down to a median 1 px.
     - **LADOT** is the same story in olive: its mask comes back 278k pixels,
       mostly label glyphs, and every LADOT route snapped to the nearest word.
     - **Part-time services** are drawn as thin dashed lines, and at 4096 px
@@ -457,6 +480,13 @@ aren't drawn, or the route is too minor to badge. The interesting ones are
 *mislabelled*: the map does designate the route, just not as we do, so the
 badge is sitting right there to copy.
 
+It reports only the first kind for an agency the sheet designates *by
+operator*, though, and that is the case worth knowing about: it looks for a
+badge matching the route's own designation, and there isn't one to find —
+Beach Cities' 109 and 102 are both "BC" on the sheet, BurbankBus's two routes
+are both "BU", and neither number is printed anywhere. Both now carry the
+symbol the sheet prints (`MAP_LABELS`), which is also what gives them anchors.
+
 ## Catching a freeze
 
 The tab has frozen hard enough that only closing it helps — which also throws
@@ -587,7 +617,13 @@ returns the tail of them anyway.
 
 - **Missing systems** — Glendale Beeline (download blocked), OCTA / AVTA /
   Santa Clarita / Simi Valley (essentially off-map), Amtrak, and the community
-  shuttles in the map's legend with no public GTFS.
+  shuttles in the map's legend with no public GTFS. **Norwalk Transit** is
+  missing for a stranger reason: the Mobility Database entry catalogued as
+  `us-california-norwalk-transit-system-nts` is Norwalk Transit *District*,
+  Connecticut — America/New_York, a 203 phone number, routes to SoNo Station
+  and Greenwich. Its shapes warp to around (-10000, 320000), so all 531 of its
+  trips animated a quarter of a million px off the sheet, and the feed is gone
+  until a Californian one turns up.
 - **Stale feeds** — Torrance Transit's newest public GTFS is from Jan 2024;
   Culver City / Montebello / GTrans calendars end just before the target date.
   Those systems animate their busiest covered Wednesday instead.
@@ -597,6 +633,11 @@ returns the tail of them anyway.
   of whose length has no railroad drawn near it.
 - **Schematic corners** — the map distorts the far San Fernando Valley and the
   far east, where buses can drift off their drawn streets.
+- **Off the sheet entirely** — with Norwalk gone, the only route `speed_check`
+  still flags as off-map is Metrolink's 91/Perris Valley, whose run out to
+  Riverside and Perris reaches x≈5600 against a 4096 px sheet. That is honest:
+  the map stops before the line does, and those trains are hidden at the edge
+  rather than drawn somewhere they aren't.
 - **Downtown** is a ghosted call-out box on the source map; vehicles pass over
   it on the main map on the warp alone, since nothing is drawn under the panel
   to snap to, and are mirrored into the panel.
@@ -622,7 +663,6 @@ its official site.
 | `longbeach` | Long Beach Transit | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-long-beach-transit-lbt-gtfs-1198.zip?alt=media) |
 | `foothill` | Foothill Transit | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-foothill-transit-gtfs-101.zip?alt=media) |
 | `torrance` | Torrance Transit | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-torrance-transit-gtfs-34.zip?alt=media) |
-| `norwalk` | Norwalk Transit | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-norwalk-transit-system-nts-gtfs-2242.zip?alt=media) |
 | `montebello` | Montebello Bus Lines | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-montebello-bus-lines-gtfs-2201.zip?alt=media) |
 | `gtrans` | GTrans (Gardena) | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-gtrans-gtfs-2270.zip?alt=media) |
 | `pasadena` | Pasadena Transit | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-pasadena-transit-gtfs-41.zip?alt=media) |
