@@ -233,6 +233,26 @@ python3 -m http.server 8741
     where the track carries on rather than ending, and is dropped; a *long* run
     off the ink is the Downtown call-out, where nothing is drawn for 200 px and
     the warp is all there is, and is left alone.
+  - A busway is pinned by the station names printed beside its ribbon rather
+    than by badges standing on it, since the sheet gives the G Line no badge at
+    all. The names run out where the stations do, though, and the J Line's last
+    one is Harbor Gateway: the 700 px the 950 carries on past it into San Pedro
+    had nothing pinning it — which is exactly the stretch where the sheet stops
+    running straight. It takes the busway off the 110 where the freeway ends,
+    west along Channel, back east along Ocean and south down Pacific to the
+    22nd St loop, and the warp drew the chord across all of it. A snap cannot
+    invent a switchback: every point of that chord is already sitting on some
+    part of the thing it cuts across, so there is nothing to pull it anywhere.
+    Only a walk between two anchors recovers a corridor, and there were no two
+    anchors to walk between. The sheet prints a "950" at the loop and another
+    where the 950 leaves the 910 at Harbor Gateway, and those two bracket it —
+    p90 12.9 px off the drawn busway to 4.4, and the sharpest turn on the route
+    from a 126° hairpin to nothing. Numbers only: the G Line's designation is a
+    letter, and the sole "G" the sheet sets is the one in "See G Line detour
+    inset", a caption standing 4 px from the ribbon it captions. Metro also
+    leaves `route_short_name` empty on both busways and writes the numbers into
+    the long name, so "950" has to be handed to the J Line by hand — its
+    vehicles are badged "910", the working most of them are.
   - The G Line busway is squared the same way, being drawn the same way: its
     own ribbon, ending at a platform. It needs it more than rail does, because
     out in the Valley the warp's 50 px error runs *along* the busway as much as
