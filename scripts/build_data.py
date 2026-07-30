@@ -174,12 +174,25 @@ def parse_time(s):
 # lines: Beach Cities Transit is "BC" everywhere, its 102 and 109 alike, and
 # neither number is printed anywhere on the sheet. So both routes are badged BC
 # — which is also what gives them anchors, exactly as the Silver Streak's do.
+#
+# A DASH is named rather than numbered, and the sheet abbreviates the name its
+# own way. LADOT's feed calls the Wilmington loop "Wilmington Clockwise", which
+# route_label initialises to "WC"; the sheet badges it "WM", four times along
+# the loop. Watts is the same story and lands on the same four characters, so
+# those two DASHes ran under one designation that the sheet prints for neither
+# of them — a rider looking up a "WC" in Wilmington finds "WM", and one in
+# Watts finds "WT". Both directions of a loop share the sheet's badge: the
+# clockwise and counterclockwise workings are drawn as one line.
 MAP_LABELS = {
     ("foothill", "20707"): "SS",   # Silver Streak
     ("beachcities", "4815"): "BC",  # 109, LAX Transit Center / Palos Verdes Blvd
     ("beachcities", "4819"): "BC",  # 102, Redondo Beach Pier / Green Line
     ("burbank", "3162"): "BU",      # Pink Route
     ("burbank", "3163"): "BU",      # NoHo - Airport
+    ("ladot", "708"): "WM",         # DASH Wilmington, clockwise
+    ("ladot", "710"): "WM",         # DASH Wilmington, counterclockwise
+    ("ladot", "713"): "WT",         # DASH Watts, clockwise
+    ("ladot", "714"): "WT",         # DASH Watts, counterclockwise
 }
 
 
@@ -1495,7 +1508,7 @@ def route_anchors(tokens, tree, region="main", colors=None, margin=8.0, near=Non
     return pts
 
 
-def ladot_livery(tokens, is_dash):
+def ladot_livery(tokens, is_dash, sheet_tokens=()):
     """The olive strokes a LADOT route is drawn among, and its badges on them.
 
     LADOT's two liveries are two stroke styles of one ink, so the dash pattern
@@ -1513,11 +1526,31 @@ def ladot_livery(tokens, is_dash):
     So the name only proposes a livery and the printed badges settle it. Every
     other Commuter Express has all of its badges on the dashed strokes; the
     142 has all four of its on the solid ones. A DASH is left with the name's
-    answer, since it is given no anchors to settle anything with — its
-    designations are single letters the sheet also gives Metro's rail lines."""
+    answer, since it has nothing to settle anything with: a DASH is named, not
+    numbered, and the designation the feed's name yields is one the sheet
+    doesn't print — an initialism route_label made up ("WC", "PCN", "LHC"), or
+    a single letter the sheet also gives Metro's rail lines.
+
+    Which is not to say a DASH cannot be anchored, only that the feed cannot
+    say what to anchor it on. `sheet_tokens` is the designation read off the
+    artwork instead, by hand, in MAP_LABELS — and being the sheet's own word
+    for this route it names badges printed along this route's line and no
+    other. Nothing else the feed offers is allowed to anchor a DASH: an
+    initialism is a guess, and a guess that lands on a code the sheet does
+    print is worse than one that lands on nothing. "Southeast Clockwise" comes
+    out SC, which the sheet prints twenty-nine times, seven of them standing
+    on olive — and the nearest of those seven is 326 px from the Southeast
+    loop, the furthest 846.
+
+    The Wilmington loop is what this is for. Unanchored, 37% of it stood over
+    12 px off its own ink — the snap has to choose between the loop's own
+    olive and the streets of the grid drawn in the same ink beside it, and
+    with nothing pinning it, it took a chord across the Anaheim/Figueroa
+    corner and sewed the rest between neighbouring blocks."""
     prefer = ink_tree(LADOT_INK, dashed=not is_dash)
     if is_dash:
-        return prefer, []
+        return prefer, route_anchors(set(sheet_tokens), prefer,
+                                     near=BADGE_NEAR_INK)
     anc = route_anchors(tokens, prefer, near=BADGE_NEAR_INK)
     other = ink_tree(LADOT_INK, dashed=is_dash)
     alt = route_anchors(tokens, other, near=BADGE_NEAR_INK)
@@ -3605,7 +3638,7 @@ def main():
                 stops_name[(feed, r["stop_id"])] = r.get("stop_name", "")
                 stops_ll[(feed, r["stop_id"])] = (float(r["stop_lon"]), float(r["stop_lat"]))
 
-        rmeta, badge_tokens, is_dash = {}, {}, {}
+        rmeta, badge_tokens, sheet_tokens, is_dash = {}, {}, {}, {}
         for row in read_csv(feed, "routes.txt"):
             label = MAP_LABELS.get((feed, row["route_id"])) or route_label(
                 row.get("route_short_name", ""), row.get("route_long_name", ""))
@@ -3646,6 +3679,11 @@ def main():
             # tokens as printed on map badges, for anchor lookup
             short = (row.get("route_short_name") or "").strip()
             badge_tokens[row["route_id"]] = set(short.replace("/", " ").split()) | {label}
+            # ...and, apart, the ones read off the artwork rather than out of
+            # the feed. A DASH is anchored on those alone; see ladot_livery.
+            sheet_tokens[row["route_id"]] = (
+                {MAP_LABELS[(feed, row["route_id"])]}
+                if (feed, row["route_id"]) in MAP_LABELS else set())
 
         trip_info = {}
         for row in trip_rows:
@@ -3930,11 +3968,11 @@ def main():
                 # Commuter Express needs pinning where the warp is worst: at
                 # Marina del Rey it is 130 px out, further than the run down
                 # Via Marina is long, and the leg had no way to tell which end
-                # of the drawn line was which. DASH doesn't get anchors — its
-                # loops are drawn continuously and the ink alone puts them on
-                # the street, and its designations are single letters the sheet
-                # also gives Metro's rail lines.
-                tree, anc = ladot_livery(toks, bool(is_dash.get(rid)))
+                # of the drawn line was which. A DASH is pinned only by the
+                # designation MAP_LABELS reads off the sheet, the feed's own
+                # name for it being no designation the sheet prints.
+                tree, anc = ladot_livery(toks, bool(is_dash.get(rid)),
+                                         sheet_tokens.get(rid, set()))
                 line_ink = tree
                 anc = branch_anchors(anc, sid, route_sids[rid], kd_for)
                 anchored += bool(anc)
