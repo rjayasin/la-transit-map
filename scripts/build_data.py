@@ -2338,8 +2338,8 @@ def apply_override(full, base, spec):
     return [tuple(p) for p in out]
 
 
-BRANCH_SLACK = 2.0     # times the nearest variant's distance a badge may sit
-BRANCH_FLOOR = 20.0    # px of slack under that, so near-ties stay shared
+BRANCH_FLOOR = 24.0    # px further than the nearest variant a badge may sit and
+                       # still be shared, about the width of a drawn street
 
 
 def branch_anchors(anchors, sid, sids, kd_for):
@@ -2354,19 +2354,39 @@ def branch_anchors(anchors, sid, sids, kd_for):
     on the drawn line before the badges got hold of it.
 
     A badge is printed on one line, so it speaks for whichever variant passes
-    nearest it. Keep it for this shape while this shape is about as near as the
-    nearest variant gets, and drop it when another explains it far better. On
+    nearest it. Keep it for this shape while this shape comes within a street's
+    width of as near, and drop it when another explains it better than that. On
     the trunk, where every variant runs the same street and is equally close,
     that keeps the badge for all of them; it only bites where the route forks.
-    A route with one shape has nothing to compare against and keeps the lot."""
+    A route with one shape has nothing to compare against and keeps the lot.
+
+    The comparison is additive, and it used to be a ratio besides — twice the
+    nearest variant's distance was near enough to share. That reading fails in
+    exactly the places badges are needed most. Where the warp is good every
+    variant is a few px from the badge and the ratio is meaningless; where it is
+    bad the distances are all inflated by the same local error, and doubling it
+    buys slack measured in the error rather than in streets. Out at Sunset and
+    the 405 the warp is 66 px off, so a "602" printed on the Brentwood stretch
+    was 96 px from the short working that turns back at Church — half again as
+    far as the workings that actually run past it, and inside the ratio. The
+    badge sat 6 px of arc past the one pinning the turn, and pulled the last
+    stop of the working 163 px down Sunset into Brentwood, where the vehicle
+    sprinted the last leg at 235 km/h and vanished a mile short of the corner
+    the sheet ends it at.
+
+    Additive, at 24 px — under the 30 px that separates parallel drawn lines,
+    so a badge on the next street over can't be shared. Swept against the whole
+    map: 20 and 22 come out level with 24 and 26, and 28 gives the ratio's
+    failure back. At 24 the sheet's routes read 1171 better on path_check and
+    672 on drift_check, with the six worst hairpins on the map (LADOT 573,
+    Metro 222) gone and Long Beach Transit's whole network pulled in."""
     if not anchors or len(sids) < 2:
         return anchors
     A = np.asarray(anchors, dtype=float)
     dists = [kd_for(s).query(A)[0] for s in sids]
     best = np.min(np.vstack(dists), axis=0)
     mine = dists[sids.index(sid)]
-    keep = mine <= np.maximum(best * BRANCH_SLACK, best + BRANCH_FLOOR)
-    return [a for a, k in zip(anchors, keep) if k]
+    return [a for a, k in zip(anchors, mine <= best + BRANCH_FLOOR) if k]
 
 
 TRACE_STEP = 4.0          # px; lattice pitch for walking the drawn line
