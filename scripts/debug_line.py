@@ -323,6 +323,15 @@ def render(d, a, variants, inset, out):
         ys = [p[1] for p in drawn]
         box = (max(0, int(min(xs)) - PAD), max(0, int(min(ys)) - PAD),
                min(W, int(max(xs)) + PAD), min(H, int(max(ys)) + PAD))
+        # A path entirely off the sheet clamps to an empty box, and the crop
+        # then fails deep inside PIL on a negative size. Say what is actually
+        # wrong instead: a route out here has nothing to do with snapping, and
+        # a whole feed out here is the wrong feed — the Norwalk Transit GTFS
+        # catalogued as Californian was Connecticut's, and warped to y≈320000.
+        if box[2] - box[0] < 1 or box[3] - box[1] < 1:
+            sys.exit(f"{a.line}'s path is not on the sheet: "
+                     f"x {min(xs):.0f}..{max(xs):.0f}, y {min(ys):.0f}..{max(ys):.0f}"
+                     f" against a {W}x{H} map.")
 
     im, scale = background(box, forced=1 if a.png else a.level)
     dr = ImageDraw.Draw(im)

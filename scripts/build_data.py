@@ -31,8 +31,15 @@ from georef_inset import GEO as INSET_GEO, LEGEND as INSET_LEGEND, RECT as INSET
 TARGET = date(2026, 7, 22)  # a Wednesday inside the Metro JUNE26 calendar window
 GTFS = "data/gtfs"
 # gtfs_rail first so Metro trains draw config (snap) is applied; order otherwise cosmetic
+# Norwalk Transit is not here, and the feed is gone with it. The Mobility
+# Database entry catalogued as "us-california-norwalk-transit-system-nts" is
+# Norwalk Transit *District*, Connecticut — America/New_York, a 203 phone
+# number, and routes to SoNo Station, Wilton Center and Greenwich. Its shapes
+# warp to around (-10000, 320000), a quarter of a million px off the sheet, so
+# all 531 of its trips animated nowhere: every one of them off-map in
+# speed_check, none of them drawable, and debug_line died on the negative crop.
 FEEDS = ["gtfs_rail", "gtfs_bus", "bigbluebus", "culvercity", "ladot", "longbeach",
-         "foothill", "torrance", "norwalk", "montebello", "gtrans", "pasadena",
+         "foothill", "torrance", "montebello", "gtrans", "pasadena",
          "burbank", "beachcities", "metrolink"]
 WORKERS = min(8, (os.cpu_count() or 4))   # threads for the mask fits
 METRO_BUS_COLOR, METRO_BUS_TEXT = "E16710", "FFFFFF"
@@ -44,7 +51,7 @@ FEED_NAMES = {
     "bigbluebus": "Big Blue Bus", "culvercity": "Culver CityBus",
     "ladot": "LADOT", "longbeach": "Long Beach Transit",
     "foothill": "Foothill Transit", "torrance": "Torrance Transit",
-    "norwalk": "Norwalk Transit", "montebello": "Montebello Bus Lines",
+    "montebello": "Montebello Bus Lines",
     "gtrans": "GTrans", "pasadena": "Pasadena Transit",
     "burbank": "BurbankBus", "beachcities": "Beach Cities Transit",
     "metrolink": "Metrolink",
@@ -160,8 +167,19 @@ def parse_time(s):
 # 707 costs twice over — a rider sees a designation the map never prints, and
 # the badges are also the anchors, so the shape has nothing pinning it to its
 # own drawn line and wanders onto whichever Foothill green runs nearest.
+#
+# A whole agency can be designated that way too. The sheet's "Municipal &
+# Neighboring Bus Lines" legend gives each of the smaller operators one symbol
+# for the operator rather than one per route, and writes that symbol along its
+# lines: Beach Cities Transit is "BC" everywhere, its 102 and 109 alike, and
+# neither number is printed anywhere on the sheet. So both routes are badged BC
+# — which is also what gives them anchors, exactly as the Silver Streak's do.
 MAP_LABELS = {
     ("foothill", "20707"): "SS",   # Silver Streak
+    ("beachcities", "4815"): "BC",  # 109, LAX Transit Center / Palos Verdes Blvd
+    ("beachcities", "4819"): "BC",  # 102, Redondo Beach Pier / Green Line
+    ("burbank", "3162"): "BU",      # Pink Route
+    ("burbank", "3163"): "BU",      # NoHo - Airport
 }
 
 
@@ -748,13 +766,47 @@ LEGEND_SEEDS = {
     "gtrans": [(198, 165, 188)],
     "ladot": [(175, 170, 141), (154, 150, 117)],   # DASH + Commuter Express olives
     "longbeach": [(136, 88, 92)],
-    "norwalk": [(162, 208, 207)],   # badge-fill sampled; legend swatch too pale
     "bigbluebus": [(143, 135, 136)],
     "foothill": [(62, 100, 78)],    # dark evergreen lines; legend swatch too pale
     "montebello": [(172, 186, 153)],
     "torrance": [(137, 139, 174)],
     "burbank": [(132, 168, 155)],
-    "beachcities": [(170, 181, 169)],
+    # The same evergreen Foothill is drawn in — the sheet's legend gives both
+    # agencies the one swatch, and the sheet is 60 km wide enough that they
+    # never meet. The seed here used to be (170,181,169), a pale gray-green
+    # that is nothing on the page: refine_color drifted it to a flat gray, the
+    # mask came back as street art and lettering, and both Beach Cities routes
+    # snapped to whatever ran nearest.
+    "beachcities": [(62, 100, 78)],
+}
+
+# The two operators the sheet symbolises by *agency* rather than by route, and
+# so the two that snap on their legend ink rather than on a color mask. Neither
+# has a route number printed anywhere: the sheet writes "BC" beside every Beach
+# Cities line and "BU" beside every BurbankBus one, and that is the whole of
+# what it says about either. Those codes are set as plain text alongside the
+# line the way a Commuter Express number is, never on a chip, so the mask's
+# presence test — the agency's own pixels *under* the word — finds a handful of
+# antialiased glyph strokes and rejects them, and both agencies snapped with no
+# anchors at all. The strokes answer both halves at once: they are where the
+# line is, and distance to them is a test a word standing beside a line can
+# pass. See `route_anchors`'s `near`, which LADOT's Commuter Express uses for
+# exactly this.
+SYMBOL_FEEDS = {"beachcities", "burbank"}
+
+# Each agency's line as the sheet's own legend swatch strokes it, straight off
+# the PDF. Where an agency's seed can't be refined against the artwork these
+# say where its ink is, so the reading can be taken on the drawn line itself.
+LEGEND_INK = {
+    "bigbluebus": (0.604, 0.5608, 0.5794),
+    "culvercity": (0.8051, 0.8047, 0.4456),
+    "gtrans": (0.7995, 0.5765, 0.74),
+    "longbeach": (0.4995, 0.1196, 0.2324),
+    "foothill": (0.1677, 0.4166, 0.3111),
+    "beachcities": (0.1677, 0.4166, 0.3111),   # one swatch serves both
+    "montebello": (0.6295, 0.7205, 0.5582),
+    "torrance": (0.4859, 0.5034, 0.7086),
+    "burbank": (0.2691, 0.5799, 0.5177),
 }
 
 def refine_color(shape_pts, seed, r2=55 * 55, need=250):
@@ -780,6 +832,41 @@ def refine_color(shape_pts, seed, r2=55 * 55, need=250):
     if len(samples) < need:
         return None
     return tuple(np.median(samples, axis=0).astype(int).tolist())
+
+
+def stroke_color(feed):
+    """What map.png makes of `feed`'s drawn line, read on the sheet's own
+    strokes rather than along a route.
+
+    `refine_color` samples along the warp, which asks the warp to be on the
+    line already. That holds for most of the municipal agencies and fails for
+    exactly the two that need it most. Beach Cities Transit is drawn twice, up
+    the coast and out to LAX, and its warp is far enough off both that a
+    correct seed still comes back gray — the samples are the street art it is
+    lying over, not its own evergreen. BurbankBus is drawn barely at all: 1144
+    stroke points on the whole sheet, and two shapes to sample along, which
+    cannot reach the 250 samples a refinement needs however well aimed.
+
+    The legend says which ink is whose, so there is somewhere better to look:
+    the strokes themselves. The dominant cluster of what sits on them is the
+    line's own fill — a median across a 1-2 px line at 4096 px is half page,
+    the reading `drawn_color` describes — and it needs no route to be right
+    about anything. Returns None where the sheet strokes too little of the
+    agency to read."""
+    rgb = LEGEND_INK.get(feed)
+    if rgb is None:
+        return None
+    P = pdf_ink([rgb]).astype(int)
+    im, keep = map_image()
+    h, w = keep.shape
+    P = P[(P[:, 0] >= 0) & (P[:, 0] < w) & (P[:, 1] >= 0) & (P[:, 1] < h)]
+    if len(P) < 200:
+        return None
+    px = im[P[:, 1], P[:, 0]].astype(int)
+    bins = (px // 12) @ np.array([10000, 100, 1])
+    vals, counts = np.unique(bins, return_counts=True)
+    return tuple(np.median(px[bins == vals[counts.argmax()]], axis=0)
+                 .astype(int).tolist())
 
 
 SPRITE_LEVEL = 2      # tile pyramid level the sprite colors are read from
@@ -3539,6 +3626,16 @@ def main():
         route_sids = defaultdict(list)
         for sid in warped:
             route_sids[route_by_shape.get(sid)].append(sid)
+        # Where the sheet designates a whole agency rather than each route, one
+        # symbol covers several routes and branch_anchors has to range over all
+        # of their shapes, not just one route's variants: every "BC" on the
+        # sheet is a candidate anchor for both Beach Cities routes at once, and
+        # the one printed on the 102's leg across Redondo Beach was pulling the
+        # 109 15 px off the PCH it runs on.
+        label_sids = defaultdict(list)
+        for sid in warped:
+            r = route_by_shape.get(sid)
+            label_sids[rmeta[r][0] if r in rmeta else r].append(sid)
         _kd = {}
 
         def kd_for(sid):
@@ -3550,8 +3647,14 @@ def main():
         agency_tree, sprite_cols = None, None
         if feed in LEGEND_SEEDS and warped:
             seeds = LEGEND_SEEDS[feed]
+            # The seed refined against the artwork the routes lie over, and —
+            # where there isn't enough of that to refine from — the same
+            # reading taken on the sheet's own strokes instead. Without the
+            # fallback an agency the refinement can't reach has no mask at all
+            # and every one of its shapes keeps the warp, which is what left
+            # BurbankBus's two workings off their drawn teal.
             refined = [refine_color(list(warped.values()), s) for s in seeds]
-            good = [c for c in refined if c]
+            good = [c for c in refined if c] or [c for c in [stroke_color(feed)] if c]
             if good:
                 agency_tree = mask_tree(good, 30.0)
             # Sprites take the color the sheet actually prints: the PDF's ink
@@ -3734,6 +3837,23 @@ def main():
                     can_refit = True
                     out_pts = snap_recording(pts, tree, anchors=anc, caps=LADOT_CAPS,
                                             win=LADOT_WIN, speckled=False)
+                shape_isnap[(feed, sid)] = (good, 30.0, toks)
+            elif feed in SYMBOL_FEEDS:
+                # Snapped and anchored on the sheet's own strokes — see
+                # SYMBOL_FEEDS for why the mask can hold neither. Beach Cities
+                # shares its evergreen with Foothill Transit, which the legend
+                # is explicit about and the geography makes harmless: the
+                # nearest Foothill stroke is most of the county away, further
+                # than any cap here can reach.
+                tree = line_ink = ink_tree([LEGEND_INK[feed]])
+                anc = branch_anchors(
+                    route_anchors(toks, tree, near=BADGE_NEAR_INK),
+                    sid, label_sids[rmeta[rid][0] if rid in rmeta else rid], kd_for)
+                anchored += bool(anc)
+                if tree is not None:
+                    can_refit = True
+                    out_pts = snap_recording(pts, tree, anchors=anc,
+                                             caps=INK_CAPS, win=61, speckled=False)
                 shape_isnap[(feed, sid)] = (good, 30.0, toks)
             elif agency_tree is not None:
                 anchor_tree = agency_tree
