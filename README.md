@@ -396,14 +396,14 @@ python3 -m http.server 8741
     way, so the terminus is given where the warp puts it.
   - Where not even a pin can be placed, the corridor itself is drawn by hand
     (`OVERRIDE_PATHS`) and spliced into the snapped shape. It takes several
-    failures at once to come to that, and four cases have them: Metro 761's
-    corner from Sunset into UCLA; LADOT 142 through San Pedro, below; Torrance
-    5's south end, where the "5" printed on the drawn PCH is 43 px from the
-    warp's *Arlington* leg and 65 from the PCH leg it is printed on, so the fit
-    pulls a point 130 px into the route down onto it and leaves the terminus to
-    snap onto the grey the sheet draws the streets themselves in; and
-    Montebello 10 down Atlantic, where the
-    sheet draws a street vertical that really slants southwest. That lands the
+    failures at once to come to that, and five cases have them: Metro 761's
+    corner from Sunset into UCLA; Metro 501's North Hollywood end, below; LADOT
+    142 through San Pedro, below; Torrance 5's south end, where the "5" printed
+    on the drawn PCH is 43 px from the warp's *Arlington* leg and 65 from the
+    PCH leg it is printed on, so the fit pulls a point 130 px into the route
+    down onto it and leaves the terminus to snap onto the grey the sheet draws
+    the streets themselves in; and Montebello 10 down Atlantic, where the sheet
+    draws a street vertical that really slants southwest. That lands the
     warp's Whittier junction 68 px west of the drawn one and turns a corner
     into a dog-leg; the dog-leg inflates the arc between the two "10" badges
     bracketing the stretch to 211 px against the drawn corridor's 145, so the
@@ -414,6 +414,24 @@ python3 -m http.server 8741
     one, so it speaks for the wrong stretch of the shape. What was left was the
     chord between the badges, 65 px off the line at its worst, down to 6th and
     Fraser and back up a piece of Whittier the route never runs.
+  - Metro 501's North Hollywood end is the one where a pin has nowhere to
+    stand at all. The sheet brings the route in off the 134, round the corner
+    at Lankershim and up the Lankershim corridor into the station; the stored
+    path left the drawn line a block short of that corner, ran west across
+    blank page and stopped 55 px out in the open on the 549's thin orange
+    beside the busway — a line ending nowhere, which is the one thing a
+    terminus must not look like. The warp is why nothing can be pinned: the
+    501 leaves North Hollywood down Lankershim, turns east and serves Olive
+    and Alameda in Burbank before it reaches the freeway, and the warp lays
+    that Burbank leg straight over where the sheet draws Lankershim. Every
+    point of the drawn corridor — the station, the corner, anywhere between —
+    is nearer the warp's Burbank leg, a hundred px further into the route,
+    than it is to the warp's own Lankershim, so a pin anchors the middle of
+    the route and leaves the end where it was. The corridor is two straight
+    runs and a corner and the sheet draws it plainly, so it is drawn by hand,
+    ending 12 px past where the ink stops so the vehicle finishes on the
+    station marker rather than at the edge of the box the sheet draws round
+    it. Over the whole route that is p90 7.2 px off the drawn line to 2.7.
   - The 142's San Pedro end is the failure a *bodily* slide cannot answer for.
     The slide assumes the warp's error "varies slowly enough that one vector
     covers every leg"; over this route it does not — 78 px south of the drawn

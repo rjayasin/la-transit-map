@@ -1824,6 +1824,37 @@ OVERRIDE_PATHS = {
             (2159, 2058), (2157, 2064), (2157, 2071),
         ],   # Atlantic, from below the Chavez corner to the Whittier junction
     },
+    # Metro 501's North Hollywood end. The sheet runs it in off the 134, round
+    # the corner at Lankershim and up the Lankershim corridor into the station;
+    # the stored path instead left the drawn line a block short of that corner,
+    # carried on west across blank page and stopped 55 px out in the open, on
+    # the 549's own thin orange beside the busway — a line ending nowhere, which
+    # is the one thing a terminus must not look like.
+    #
+    # A pin cannot answer it, and for a reason the warp makes plain: the 501
+    # leaves North Hollywood down Lankershim, turns east, and serves Olive and
+    # Alameda in Burbank before it reaches the freeway, and the warp lays that
+    # Burbank leg straight over where the sheet draws Lankershim. So every point
+    # of the drawn corridor — the station itself, the corner, anywhere between —
+    # is nearer the warp's Burbank leg, a hundred px further into the route,
+    # than it is to the warp's own Lankershim. A pin there anchors the middle of
+    # the route and leaves the end where it was.
+    #
+    # The corridor is two straight runs and a corner, and the sheet draws it
+    # plainly, so it is drawn by hand. The box brackets the warp from the
+    # terminus to where the shape rejoins the drawn 501 on the freeway; both
+    # workings enter it exactly once, at their North Hollywood end. The path
+    # runs the last 12 px past where the ink stops, onto the station marker
+    # itself, so the vehicle finishes at North Hollywood rather than at the edge
+    # of the box the sheet draws around it.
+    ("gtfs_bus", "501"): {
+        "box": (1180, 1320, 1345, 1440),
+        "path": [
+            (1289.5, 1382.5), (1303.0, 1393.5), (1310.6, 1406.0),
+            (1318.5, 1419.8), (1326.8, 1432.4), (1333.0, 1443.1),
+            (1338.7, 1452.9), (1343.6, 1455.7),
+        ],   # North Hollywood station -> Lankershim -> the corner onto the 134
+    },
     # LADOT 142 (route_id 870) through San Pedro. The sheet draws the corridor
     # its stop list describes and draws it plainly — Miner & Harbor, west along
     # 7th, north up Gaffey, east along Ocean — and the westbound working lands
