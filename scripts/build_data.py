@@ -1672,6 +1672,28 @@ PINNED_ANCHORS = {
     ("longbeach", "2"): [(1610, 3044)],
 }
 
+# Termini given in *warp* px instead of on the drawing, for trimming only — they
+# are never read as anchors. A pin in PINNED_ANCHORS has to do both jobs at once,
+# and that only works where the warp lands near enough to the drawn terminus for
+# one point to serve as both.
+#
+# Torrance 5 is where it doesn't. The sheet ends the route at Pacific Coast Hwy &
+# Crenshaw, badging it there; the GTFS carries on 1.4 km up Crenshaw Bl to the
+# layover at Palos Verdes Dr N, over ground the sheet gives the route no line on
+# — and, as with Big Blue Bus 14, there is ink down there all the same, the grey
+# the sheet draws Crenshaw and Palos Verdes Dr in being near enough Torrance's
+# own, so the tail snapped onto that and hung off the end of the line into blank
+# page. This is a schematic corner: the warp puts the PCH junction at (1412,
+# 3189), 59 px from where the sheet draws it. A pin on the drawn corner cannot
+# trim it, and not because 59 px is out of reach — the trim takes the *nearest*
+# point of the shape, and the layover's own start point, which the warp lands 26
+# px from that corner, is nearer to it than the terminus is. Every point of the
+# drawn corridor answers the same way: the corner or the layover's start, never
+# the terminus in between. So the terminus is named where the warp puts it.
+TRIM_TERMINI = {
+    ("torrance", "5"): [(1412, 3189)],   # PCH & Crenshaw, in warp px
+}
+
 TERMINUS_REACH = 35.0   # px a shape must pass within of a pin to be cut to it
 TERMINUS_TAIL = 110.0   # px of overshoot past the pin that gets trimmed off
 
@@ -1806,6 +1828,45 @@ OVERRIDE_PATHS = {
              # snapper's own first point past it and that one sits at x=1691:
              # running the corridor out to the box edge puts a 7 px backtrack in
              # the seam, which is a 179 deg cusp however short it is.
+    },
+    # Torrance 5's south end, from the terminus at Pacific Coast Hwy & Crenshaw
+    # east along PCH and north into Arlington. TRIM_TERMINI cuts the layover off
+    # the shape; what is left still comes out beside the drawing rather than on
+    # it, and for the reason that put the terminus out of the trim's reach in the
+    # first place — this is a schematic corner, and the warp holds the whole PCH
+    # stretch ~66 px south of where the sheet draws it.
+    #   - There is a "5" on the drawn PCH, at the west end of the stretch, and it
+    #     is the only badge the route has down here. Nothing about it is out of
+    #     reach: it is 43 px from the shape, well inside the anchor gate. It
+    #     attaches to the wrong stretch, which is Montebello 10's failure again —
+    #     the warp's *Arlington* leg passes 43 px from that badge while the warp's
+    #     own PCH leg, the one the badge is printed on, is 65 px away. So the fit
+    #     pulls a point 130 px into the route down onto the badge and leaves the
+    #     terminus to find its own way.
+    #   - What it finds is the same grey the layover rode: the sheet draws PCH,
+    #     Crenshaw and Palos Verdes Dr through here and gives Torrance no line of
+    #     its own on any of them, so the stretch snapped 40 px west onto street
+    #     ink and hung below the drawn corner.
+    #   - A pin cannot answer this either, for the reason a pin cannot answer
+    #     Montebello 10's: a point on the drawn PCH is nearer the warp's Arlington
+    #     leg than its PCH one, so it attaches to the wrong stretch too.
+    # Two streets and a corner, so it is drawn by hand. The box sits south and
+    # east of the drawn corridor, where the warp lands the shape, and stops where
+    # the snap has Arlington right on its own.
+    ("torrance", "5"): {
+        "box": (1405, 3106, 1470, 3210),
+        "path": [
+            (1396.0, 3132.5), (1408.0, 3132.5), (1421.0, 3132.5),
+            (1433.0, 3132.5),
+        ],   # PCH, from the Crenshaw corner the sheet ends the route at as far
+             # east as the snap can be rejoined. The box stops short of the
+             # corner into Arlington rather than carrying on up the avenue,
+             # because the two directions do not lag by the same amount: at the
+             # same point along the shape the northbound working is 64 px
+             # further up Arlington than the southbound one, and a corridor run
+             # out past the corner would have to seam to both at once. Along
+             # PCH they agree — at the box's edge one sits at x=1436 and the
+             # other at x=1430.
     },
 }
 
@@ -2328,8 +2389,16 @@ def apply_override(full, base, spec):
         return full
     lo, hi = int(inside[0]), int(inside[-1])
     path = np.asarray(spec["path"], dtype=float)
-    seg = (path if np.hypot(*(B[lo] - path[0])) <= np.hypot(*(B[lo] - path[-1]))
-           else path[::-1])                # start the corridor where the shape enters
+    # Orient by the course the shape holds across the box, not by which end of
+    # the corridor its entry point is nearer. The two agree wherever the box is
+    # entered near one end of the drawn stretch, and that is every corner here
+    # but Torrance 5's: the sheet ends that route halfway along the corridor's
+    # length from where the warp leaves the shape's own terminus, which stands
+    # 59 px from one end of the path and 60 from the other. A distance that
+    # close to tied decides nothing, while the direction of travel is not close
+    # at all.
+    seg = (path if np.dot(B[hi] - B[lo], path[-1] - path[0]) >= 0
+           else path[::-1])                # run the corridor the way the shape does
     d = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(seg, axis=0).T))])
     t = np.linspace(0, d[-1], hi - lo + 1)
     res = np.c_[np.interp(t, d, seg[:, 0]), np.interp(t, d, seg[:, 1])]
@@ -3985,8 +4054,9 @@ def main():
             rid = route_by_shape.get(sid)
             toks = badge_tokens.get(rid, set())
             pins = PINNED_ANCHORS.get((feed, (rid or "").split("-")[0]), [])
-            if pins:
-                pts = trim_terminus(pts, pins)   # end at the drawn hub, not past it
+            cuts = pins + TRIM_TERMINI.get((feed, (rid or "").split("-")[0]), [])
+            if cuts:
+                pts = trim_terminus(pts, cuts)   # end at the drawn hub, not past it
             if feed == "gtfs_rail":
                 tree = rail_trees.get(rid)
                 if tree is not None:
