@@ -213,6 +213,22 @@ MAP_LABELS = {
     # only for Studio City up in the Valley and inside the words "SC AV".
     ("ladot", "1757"): "SE",        # DASH Southeast, clockwise
     ("ladot", "1758"): "SE",        # DASH Southeast, counterclockwise
+    # Two Valley loops, and the second is the case this table exists for at its
+    # sharpest. "Northridge" initialises to "NOR", which the sheet prints
+    # nowhere — an honest orphan, and orphan_check has been listing it. "Van
+    # Nuys/Studio City Clockwise" doesn't get initialised at all: its first
+    # token is four characters, so route_label keeps it, and every one of those
+    # buses ran badged "Van" — which the sheet *does* print, three times, in
+    # "Van Nuys" the district and "Van Nuys Bl" the street, and not once as a
+    # route. So it never showed up as an orphan while being the more misleading
+    # of the two: a rider who goes looking for "Van" on the map finds it. The
+    # sheet badges these loops "NR", once, on the drawn Wilbur Ave, and "VS",
+    # twice, on Hazeltine and on Moorpark. Naming them also anchors them —
+    # sheet_tokens is all a DASH has, so before this both loops snapped with no
+    # anchor at all.
+    ("ladot", "798"): "NR",         # DASH Northridge
+    ("ladot", "799"): "VS",         # DASH Van Nuys/Studio City, clockwise
+    ("ladot", "800"): "VS",         # DASH Van Nuys/Studio City, counterclockwise
 }
 
 
@@ -1670,6 +1686,70 @@ PINNED_ANCHORS = {
     # overshoots by is past the trim limit besides. This sits on the drawn ink,
     # 16 and 24 px from the two of them, and trims both.
     ("longbeach", "2"): [(1610, 3044)],
+    # Metro 217's Eagle Rock end, on the drawn Colorado a little east of where
+    # Broadway turns down onto it. The sheet's badges run out before the route
+    # does: the easternmost "217" is printed at that turn, at (1752,1493), and
+    # the route carries on ~90 px past it to its terminus at Colorado &
+    # Eagledale with nothing pinning the stretch. Through Glendale the warp
+    # stands ~40 px north of the artwork — the sheet draws Broadway at y=1476
+    # and the warp puts it at 1436 — and what is drawn 40 px north of Colorado
+    # Blvd is the 501 along the Ventura Fwy, in Metro's own orange, 2 px from
+    # where the warp left the tail. So the last stretch snapped onto the freeway
+    # and ran 110 px east along it, and Eagle Rock's terminus came out on the
+    # 134.
+    #
+    # That tail is also what cost the route its corner, 200 px back down the
+    # line. The walk between the badges at (1752,1493) and (1685,1532) does
+    # recover Brand and Broadway — 128 px of drawn corridor against a first-pass
+    # arc of 57, so it goes in through the aligned-walk fallback, and by the
+    # second pass the arc reads 116 and the walk is believed outright. But the
+    # fit carrying that corner also carries the tail, and with the tail held up
+    # on the freeway the corner has nowhere to land: the line comes down off the
+    # freeway onto Broadway, darts 18 px southeast toward the turn and doubles
+    # straight back up it. That is 452 deg of hairpin against the chord's zero,
+    # so the whole aligned fit was refused on `stored_penalty` and what shipped
+    # was the chord — cut diagonally across the blocks between Los Feliz and the
+    # turn, with the freeway tail still on the end of it. Pinned, the same fit
+    # has somewhere to go, scores no hairpin at all and is kept: over the
+    # Glendale end the two full-length workings go from a median 20 px off the
+    # drawn corridor (worst 46) to a median 2 (worst 12).
+    #
+    # One pin and not two, though the turn itself is still the loosest part of
+    # the run — up to 12 px off the drawn bend, pulled by that last badge, which
+    # is printed 17 px below the line it labels. A second pin on the drawn
+    # Broadway at (1745,1476) tidies the westbound working and drags the
+    # eastbound one to a median 13 px off the corridor: one pin has to serve
+    # both directions, and here it cannot.
+    ("gtfs_bus", "217"): [(1802, 1499)],
+    # The two Valley DASH loops MAP_LABELS has just named, which the sheet
+    # badges once and twice respectively — enough to say which olive is theirs,
+    # nowhere near enough to lay a loop on it. Out here the warp is at its
+    # worst, and worst *unevenly*: it stands a median 41 px off the drawn
+    # Northridge loop and 94 px off it at the far corner, 27 and 78 px for Van
+    # Nuys/Studio City. Both are wider than the blocks the loops are drawn
+    # around, so each leg went to whichever olive it landed nearest. Measured as
+    # the share of its own drawn loop a shape runs within 8 px of, Northridge
+    # covered 26% and the two Van Nuys workings 61% each.
+    #
+    # Van Nuys/Studio City comes right: three pins take both directions to
+    # 100%, the whole circuit a median half a pixel off its own ink. Northridge
+    # gets to 88% and stops there, and the missing 12% is one thing — the stub
+    # where the loop leaves Nordhoff at Corbin, drops a block south and comes
+    # back east along Parthenia, which stays cut as a corner. No pin reaches it.
+    # The drawn Corbin stands 7 px from the *warp's Wilbur* leg, which is the
+    # last leg of the circuit, so a pin there reads as a terminus the shape
+    # overruns and trim_terminus cuts 66 px off the end of the loop instead of
+    # anchoring it. Move the pin east along the drawn Parthenia far enough to
+    # clear the trim's 35 px reach and it attaches to the warp's Reseda leg
+    # instead, half a loop away, where its displacement pushes the wrong street.
+    # A search over the whole drawn loop turns up coordinates that do cover the
+    # stub and not one that survives being moved 4 px in any direction — which
+    # is a number working by accident rather than an anchor that holds.
+    ("ladot", "798"): [(645, 1236), (652, 1140)],       # DASH Northridge
+    ("ladot", "799"): [(1032, 1472), (999, 1336),       # DASH Van Nuys/
+                       (1180, 1507)],                   #   Studio City, cw
+    ("ladot", "800"): [(1032, 1472), (999, 1336),
+                       (1180, 1507)],                   #   ...and ccw
 }
 
 # Termini given in *warp* px instead of on the drawing, for trimming only — they
@@ -1788,6 +1868,37 @@ OVERRIDE_PATHS = {
             (2175, 2027), (2173, 2034), (2170, 2040), (2166, 2046), (2162, 2052),
             (2159, 2058), (2157, 2064), (2157, 2071),
         ],   # Atlantic, from below the Chavez corner to the Whittier junction
+    },
+    # Metro 501's North Hollywood end. The sheet runs it in off the 134, round
+    # the corner at Lankershim and up the Lankershim corridor into the station;
+    # the stored path instead left the drawn line a block short of that corner,
+    # carried on west across blank page and stopped 55 px out in the open, on
+    # the 549's own thin orange beside the busway — a line ending nowhere, which
+    # is the one thing a terminus must not look like.
+    #
+    # A pin cannot answer it, and for a reason the warp makes plain: the 501
+    # leaves North Hollywood down Lankershim, turns east, and serves Olive and
+    # Alameda in Burbank before it reaches the freeway, and the warp lays that
+    # Burbank leg straight over where the sheet draws Lankershim. So every point
+    # of the drawn corridor — the station itself, the corner, anywhere between —
+    # is nearer the warp's Burbank leg, a hundred px further into the route,
+    # than it is to the warp's own Lankershim. A pin there anchors the middle of
+    # the route and leaves the end where it was.
+    #
+    # The corridor is two straight runs and a corner, and the sheet draws it
+    # plainly, so it is drawn by hand. The box brackets the warp from the
+    # terminus to where the shape rejoins the drawn 501 on the freeway; both
+    # workings enter it exactly once, at their North Hollywood end. The path
+    # runs the last 12 px past where the ink stops, onto the station marker
+    # itself, so the vehicle finishes at North Hollywood rather than at the edge
+    # of the box the sheet draws around it.
+    ("gtfs_bus", "501"): {
+        "box": (1180, 1320, 1345, 1440),
+        "path": [
+            (1289.5, 1382.5), (1303.0, 1393.5), (1310.6, 1406.0),
+            (1318.5, 1419.8), (1326.8, 1432.4), (1333.0, 1443.1),
+            (1338.7, 1452.9), (1343.6, 1455.7),
+        ],   # North Hollywood station -> Lankershim -> the corner onto the 134
     },
     # LADOT 142 (route_id 870) through San Pedro. The sheet draws the corridor
     # its stop list describes and draws it plainly — Miner & Harbor, west along
@@ -4229,7 +4340,13 @@ def main():
                 tree, anc = ladot_livery(toks, bool(is_dash.get(rid)),
                                          sheet_tokens.get(rid, set()))
                 line_ink = tree
-                anc = branch_anchors(anc, sid, route_sids[rid], kd_for)
+                # `+ pins` as every other branch does it. LADOT was the one
+                # network PINNED_ANCHORS could not reach, which is a gap rather
+                # than a policy: a hand-placed point on the drawn line serves
+                # here exactly as it does elsewhere, and a DASH — badged once or
+                # twice on the whole sheet, if at all — is the case with least
+                # else to go on.
+                anc = branch_anchors(anc + pins, sid, route_sids[rid], kd_for)
                 anchored += bool(anc)
                 if tree is not None:
                     can_refit = True
