@@ -238,12 +238,19 @@ python3 -m http.server 8741
     DASH — a compressed one is a guess, and a guess that lands on a code the
     sheet does print is worse than one that lands on nothing: "Southeast
     Clockwise" comes out "SC", which the sheet prints twenty-nine times, the
-    nearest of them 326 px from the Southeast loop. Four more read off the sheet
-    the same way: Boyle Heights is badged "BE" and not the "BH" that name
+    nearest of them 326 px from the Southeast loop. Seven more read off the
+    sheet the same way: Boyle Heights is badged "BE" and not the "BH" that name
     compresses to, El Sereno/City Terrace is "SC" (the first token being short
     enough to keep, those buses carried an "El" the sheet prints only in EL
-    SEGUNDO and EL MONTE), and Southeast is "SE" — which has to come with El
-    Sereno's, or the two of them would share one designation.
+    SEGUNDO and EL MONTE), Southeast is "SE" — which has to come with El
+    Sereno's, or the two of them would share one designation — and the two
+    Valley loops are "NR" and "VS". Northridge is the ordinary case, an
+    initialism ("NOR") the sheet prints nowhere. Van Nuys/Studio City is the
+    sharp one: its first token is four characters, so nothing is compressed at
+    all and the buses ran badged "Van", which the sheet *does* print — three
+    times, in "Van Nuys" the district and "Van Nuys Bl" the street, and never as
+    a route. It never appeared as an orphan while being the more misleading of
+    the two, because a rider who goes looking for "Van" on the map finds it.
   - Two capitals is also the shape of half the words on the sheet, so a DASH
     designation is taken on its *chip* rather than merely near the ink. Where a
     Commuter Express number is set as plain text beside its line and distance is
@@ -364,15 +371,43 @@ python3 -m http.server 8741
     across it, and Metro 180's step from Broadway onto Colorado before it.
   - Where the sheet prints no badge over a stretch that needs one, a point on
     the drawn line is placed by hand (`PINNED_ANCHORS`) and serves as a badge
-    does. Two reasons it comes to that: a shared transit hub prints each of its
-    routes once in the municipal gray, so Metro 2's chip at the UCLA gateway is
-    Big Blue Bus's and the colour gate rightly refuses it; and the badge-to-
+    does. Three reasons it comes to that: a shared transit hub prints each of
+    its routes once in the municipal gray, so Metro 2's chip at the UCLA gateway
+    is Big Blue Bus's and the colour gate rightly refuses it; the badge-to-
     badge corridor walk needs the mask to be continuous, which it is not where
     Culver CityBus's olive crosses BBB 14's gray by the Culver City Transit
-    Center. A pin near an end of a shape also cuts the overshoot back to itself,
-    for the schematic that ends a route at its hub while the GTFS runs on to a
-    layover the map omits — BBB 14 carried on past the transit centre and
-    snapped onto the railroad crosshatch down the 405.
+    Center; and the badges can simply run out before the route does. Metro
+    217's last "217" is printed where Broadway turns down onto Colorado in
+    Glendale, 90 px short of the terminus at Colorado & Eagledale, and through
+    here the warp stands 40 px north of the artwork — which is exactly where
+    the sheet draws the 501 along the Ventura Fwy, in Metro's own orange and 2
+    px from the tail. The end of the route snapped onto the freeway and ran
+    east along it. It cost the corner as well: the walk that recovers Brand and
+    Broadway lands the line beside a tail still up on the 134, so it comes down
+    onto Broadway, darts at the turn and doubles back — 452 deg of hairpin
+    against the chord's zero, so the aligned fit was refused and the chord
+    across the blocks is what shipped. A pin on the drawn Colorado settles
+    both, a median 20 px off the drawn corridor to 2. A pin near an end of a
+    shape also cuts the overshoot back to itself, for the schematic that ends a
+    route at its hub while the GTFS runs on to a layover the map omits — BBB 14
+    carried on past the transit centre and snapped onto the railroad crosshatch
+    down the 405.
+  - A pin is what a DASH loop out in the Valley needs, because a badge or two is
+    all the sheet gives it and the warp there is both large and uneven — a
+    median 41 px off the drawn Northridge loop and 94 at the far corner, wider
+    than the blocks the loop is drawn around, so each leg went to whichever
+    olive it landed nearest. Measured as the share of its own drawn loop a shape
+    runs within 8 px of, Northridge covered 26% and the two Van Nuys/Studio City
+    workings 61% each. Three pins take Van Nuys/Studio City to 100%, a median
+    half a pixel off its ink; two take Northridge to 88%. The missing 12% is the
+    stub where that loop leaves Nordhoff at Corbin, drops a block south and
+    comes back along Parthenia, and nothing can pin it: the drawn Corbin stands
+    7 px from the *warp's Wilbur* leg, the last leg of the circuit, so a pin
+    there reads as a terminus and trims 66 px off the end of the loop instead of
+    anchoring it — and moved far enough east to clear that, it attaches to the
+    warp's Reseda leg half a loop away. LADOT was also the one network
+    `PINNED_ANCHORS` could not reach at all, its branch never adding them to the
+    anchor list; that was a gap rather than a policy, and it is closed.
   - One pin cannot always do both jobs, and where it can't the terminus is
     named in *warp* px for the trim alone (`TRIM_TERMINI`). Torrance 5 is the
     case: the sheet ends it at Pacific Coast Hwy & Crenshaw, the GTFS runs 1.2
@@ -384,14 +419,14 @@ python3 -m http.server 8741
     way, so the terminus is given where the warp puts it.
   - Where not even a pin can be placed, the corridor itself is drawn by hand
     (`OVERRIDE_PATHS`) and spliced into the snapped shape. It takes several
-    failures at once to come to that, and four cases have them: Metro 761's
-    corner from Sunset into UCLA; LADOT 142 through San Pedro, below; Torrance
-    5's south end, where the "5" printed on the drawn PCH is 43 px from the
-    warp's *Arlington* leg and 65 from the PCH leg it is printed on, so the fit
-    pulls a point 130 px into the route down onto it and leaves the terminus to
-    snap onto the grey the sheet draws the streets themselves in; and
-    Montebello 10 down Atlantic, where the
-    sheet draws a street vertical that really slants southwest. That lands the
+    failures at once to come to that, and five cases have them: Metro 761's
+    corner from Sunset into UCLA; Metro 501's North Hollywood end, below; LADOT
+    142 through San Pedro, below; Torrance 5's south end, where the "5" printed
+    on the drawn PCH is 43 px from the warp's *Arlington* leg and 65 from the
+    PCH leg it is printed on, so the fit pulls a point 130 px into the route
+    down onto it and leaves the terminus to snap onto the grey the sheet draws
+    the streets themselves in; and Montebello 10 down Atlantic, where the sheet
+    draws a street vertical that really slants southwest. That lands the
     warp's Whittier junction 68 px west of the drawn one and turns a corner
     into a dog-leg; the dog-leg inflates the arc between the two "10" badges
     bracketing the stretch to 211 px against the drawn corridor's 145, so the
@@ -402,6 +437,24 @@ python3 -m http.server 8741
     one, so it speaks for the wrong stretch of the shape. What was left was the
     chord between the badges, 65 px off the line at its worst, down to 6th and
     Fraser and back up a piece of Whittier the route never runs.
+  - Metro 501's North Hollywood end is the one where a pin has nowhere to
+    stand at all. The sheet brings the route in off the 134, round the corner
+    at Lankershim and up the Lankershim corridor into the station; the stored
+    path left the drawn line a block short of that corner, ran west across
+    blank page and stopped 55 px out in the open on the 549's thin orange
+    beside the busway — a line ending nowhere, which is the one thing a
+    terminus must not look like. The warp is why nothing can be pinned: the
+    501 leaves North Hollywood down Lankershim, turns east and serves Olive
+    and Alameda in Burbank before it reaches the freeway, and the warp lays
+    that Burbank leg straight over where the sheet draws Lankershim. Every
+    point of the drawn corridor — the station, the corner, anywhere between —
+    is nearer the warp's Burbank leg, a hundred px further into the route,
+    than it is to the warp's own Lankershim, so a pin anchors the middle of
+    the route and leaves the end where it was. The corridor is two straight
+    runs and a corner and the sheet draws it plainly, so it is drawn by hand,
+    ending 12 px past where the ink stops so the vehicle finishes on the
+    station marker rather than at the edge of the box the sheet draws round
+    it. Over the whole route that is p90 7.2 px off the drawn line to 2.7.
   - The 142's San Pedro end is the failure a *bodily* slide cannot answer for.
     The slide assumes the warp's error "varies slowly enough that one vector
     covers every leg"; over this route it does not — 78 px south of the drawn
