@@ -213,6 +213,22 @@ MAP_LABELS = {
     # only for Studio City up in the Valley and inside the words "SC AV".
     ("ladot", "1757"): "SE",        # DASH Southeast, clockwise
     ("ladot", "1758"): "SE",        # DASH Southeast, counterclockwise
+    # Two Valley loops, and the second is the case this table exists for at its
+    # sharpest. "Northridge" initialises to "NOR", which the sheet prints
+    # nowhere — an honest orphan, and orphan_check has been listing it. "Van
+    # Nuys/Studio City Clockwise" doesn't get initialised at all: its first
+    # token is four characters, so route_label keeps it, and every one of those
+    # buses ran badged "Van" — which the sheet *does* print, three times, in
+    # "Van Nuys" the district and "Van Nuys Bl" the street, and not once as a
+    # route. So it never showed up as an orphan while being the more misleading
+    # of the two: a rider who goes looking for "Van" on the map finds it. The
+    # sheet badges these loops "NR", once, on the drawn Wilbur Ave, and "VS",
+    # twice, on Hazeltine and on Moorpark. Naming them also anchors them —
+    # sheet_tokens is all a DASH has, so before this both loops snapped with no
+    # anchor at all.
+    ("ladot", "798"): "NR",         # DASH Northridge
+    ("ladot", "799"): "VS",         # DASH Van Nuys/Studio City, clockwise
+    ("ladot", "800"): "VS",         # DASH Van Nuys/Studio City, counterclockwise
 }
 
 
@@ -1705,6 +1721,35 @@ PINNED_ANCHORS = {
     # eastbound one to a median 13 px off the corridor: one pin has to serve
     # both directions, and here it cannot.
     ("gtfs_bus", "217"): [(1802, 1499)],
+    # The two Valley DASH loops MAP_LABELS has just named, which the sheet
+    # badges once and twice respectively — enough to say which olive is theirs,
+    # nowhere near enough to lay a loop on it. Out here the warp is at its
+    # worst, and worst *unevenly*: it stands a median 41 px off the drawn
+    # Northridge loop and 94 px off it at the far corner, 27 and 78 px for Van
+    # Nuys/Studio City. Both are wider than the blocks the loops are drawn
+    # around, so each leg went to whichever olive it landed nearest. Measured as
+    # the share of its own drawn loop a shape runs within 8 px of, Northridge
+    # covered 26% and the two Van Nuys workings 61% each.
+    #
+    # Van Nuys/Studio City comes right: three pins take both directions to
+    # 100%, the whole circuit a median half a pixel off its own ink. Northridge
+    # gets to 88% and stops there, and the missing 12% is one thing — the stub
+    # where the loop leaves Nordhoff at Corbin, drops a block south and comes
+    # back east along Parthenia, which stays cut as a corner. No pin reaches it.
+    # The drawn Corbin stands 7 px from the *warp's Wilbur* leg, which is the
+    # last leg of the circuit, so a pin there reads as a terminus the shape
+    # overruns and trim_terminus cuts 66 px off the end of the loop instead of
+    # anchoring it. Move the pin east along the drawn Parthenia far enough to
+    # clear the trim's 35 px reach and it attaches to the warp's Reseda leg
+    # instead, half a loop away, where its displacement pushes the wrong street.
+    # A search over the whole drawn loop turns up coordinates that do cover the
+    # stub and not one that survives being moved 4 px in any direction — which
+    # is a number working by accident rather than an anchor that holds.
+    ("ladot", "798"): [(645, 1236), (652, 1140)],       # DASH Northridge
+    ("ladot", "799"): [(1032, 1472), (999, 1336),       # DASH Van Nuys/
+                       (1180, 1507)],                   #   Studio City, cw
+    ("ladot", "800"): [(1032, 1472), (999, 1336),
+                       (1180, 1507)],                   #   ...and ccw
 }
 
 # Termini given in *warp* px instead of on the drawing, for trimming only — they
@@ -4295,7 +4340,13 @@ def main():
                 tree, anc = ladot_livery(toks, bool(is_dash.get(rid)),
                                          sheet_tokens.get(rid, set()))
                 line_ink = tree
-                anc = branch_anchors(anc, sid, route_sids[rid], kd_for)
+                # `+ pins` as every other branch does it. LADOT was the one
+                # network PINNED_ANCHORS could not reach, which is a gap rather
+                # than a policy: a hand-placed point on the drawn line serves
+                # here exactly as it does elsewhere, and a DASH — badged once or
+                # twice on the whole sheet, if at all — is the case with least
+                # else to go on.
+                anc = branch_anchors(anc + pins, sid, route_sids[rid], kd_for)
                 anchored += bool(anc)
                 if tree is not None:
                     can_refit = True

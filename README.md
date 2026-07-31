@@ -238,12 +238,19 @@ python3 -m http.server 8741
     DASH — a compressed one is a guess, and a guess that lands on a code the
     sheet does print is worse than one that lands on nothing: "Southeast
     Clockwise" comes out "SC", which the sheet prints twenty-nine times, the
-    nearest of them 326 px from the Southeast loop. Four more read off the sheet
-    the same way: Boyle Heights is badged "BE" and not the "BH" that name
+    nearest of them 326 px from the Southeast loop. Seven more read off the
+    sheet the same way: Boyle Heights is badged "BE" and not the "BH" that name
     compresses to, El Sereno/City Terrace is "SC" (the first token being short
     enough to keep, those buses carried an "El" the sheet prints only in EL
-    SEGUNDO and EL MONTE), and Southeast is "SE" — which has to come with El
-    Sereno's, or the two of them would share one designation.
+    SEGUNDO and EL MONTE), Southeast is "SE" — which has to come with El
+    Sereno's, or the two of them would share one designation — and the two
+    Valley loops are "NR" and "VS". Northridge is the ordinary case, an
+    initialism ("NOR") the sheet prints nowhere. Van Nuys/Studio City is the
+    sharp one: its first token is four characters, so nothing is compressed at
+    all and the buses ran badged "Van", which the sheet *does* print — three
+    times, in "Van Nuys" the district and "Van Nuys Bl" the street, and never as
+    a route. It never appeared as an orphan while being the more misleading of
+    the two, because a rider who goes looking for "Van" on the map finds it.
   - Two capitals is also the shape of half the words on the sheet, so a DASH
     designation is taken on its *chip* rather than merely near the ink. Where a
     Commuter Express number is set as plain text beside its line and distance is
@@ -385,6 +392,22 @@ python3 -m http.server 8741
     route at its hub while the GTFS runs on to a layover the map omits — BBB 14
     carried on past the transit centre and snapped onto the railroad crosshatch
     down the 405.
+  - A pin is what a DASH loop out in the Valley needs, because a badge or two is
+    all the sheet gives it and the warp there is both large and uneven — a
+    median 41 px off the drawn Northridge loop and 94 at the far corner, wider
+    than the blocks the loop is drawn around, so each leg went to whichever
+    olive it landed nearest. Measured as the share of its own drawn loop a shape
+    runs within 8 px of, Northridge covered 26% and the two Van Nuys/Studio City
+    workings 61% each. Three pins take Van Nuys/Studio City to 100%, a median
+    half a pixel off its ink; two take Northridge to 88%. The missing 12% is the
+    stub where that loop leaves Nordhoff at Corbin, drops a block south and
+    comes back along Parthenia, and nothing can pin it: the drawn Corbin stands
+    7 px from the *warp's Wilbur* leg, the last leg of the circuit, so a pin
+    there reads as a terminus and trims 66 px off the end of the loop instead of
+    anchoring it — and moved far enough east to clear that, it attaches to the
+    warp's Reseda leg half a loop away. LADOT was also the one network
+    `PINNED_ANCHORS` could not reach at all, its branch never adding them to the
+    anchor list; that was a gap rather than a policy, and it is closed.
   - One pin cannot always do both jobs, and where it can't the terminus is
     named in *warp* px for the trim alone (`TRIM_TERMINI`). Torrance 5 is the
     case: the sheet ends it at Pacific Coast Hwy & Crenshaw, the GTFS runs 1.2
