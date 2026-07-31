@@ -1670,6 +1670,41 @@ PINNED_ANCHORS = {
     # overshoots by is past the trim limit besides. This sits on the drawn ink,
     # 16 and 24 px from the two of them, and trims both.
     ("longbeach", "2"): [(1610, 3044)],
+    # Metro 217's Eagle Rock end, on the drawn Colorado a little east of where
+    # Broadway turns down onto it. The sheet's badges run out before the route
+    # does: the easternmost "217" is printed at that turn, at (1752,1493), and
+    # the route carries on ~90 px past it to its terminus at Colorado &
+    # Eagledale with nothing pinning the stretch. Through Glendale the warp
+    # stands ~40 px north of the artwork — the sheet draws Broadway at y=1476
+    # and the warp puts it at 1436 — and what is drawn 40 px north of Colorado
+    # Blvd is the 501 along the Ventura Fwy, in Metro's own orange, 2 px from
+    # where the warp left the tail. So the last stretch snapped onto the freeway
+    # and ran 110 px east along it, and Eagle Rock's terminus came out on the
+    # 134.
+    #
+    # That tail is also what cost the route its corner, 200 px back down the
+    # line. The walk between the badges at (1752,1493) and (1685,1532) does
+    # recover Brand and Broadway — 128 px of drawn corridor against a first-pass
+    # arc of 57, so it goes in through the aligned-walk fallback, and by the
+    # second pass the arc reads 116 and the walk is believed outright. But the
+    # fit carrying that corner also carries the tail, and with the tail held up
+    # on the freeway the corner has nowhere to land: the line comes down off the
+    # freeway onto Broadway, darts 18 px southeast toward the turn and doubles
+    # straight back up it. That is 452 deg of hairpin against the chord's zero,
+    # so the whole aligned fit was refused on `stored_penalty` and what shipped
+    # was the chord — cut diagonally across the blocks between Los Feliz and the
+    # turn, with the freeway tail still on the end of it. Pinned, the same fit
+    # has somewhere to go, scores no hairpin at all and is kept: over the
+    # Glendale end the two full-length workings go from a median 20 px off the
+    # drawn corridor (worst 46) to a median 2 (worst 12).
+    #
+    # One pin and not two, though the turn itself is still the loosest part of
+    # the run — up to 12 px off the drawn bend, pulled by that last badge, which
+    # is printed 17 px below the line it labels. A second pin on the drawn
+    # Broadway at (1745,1476) tidies the westbound working and drags the
+    # eastbound one to a median 13 px off the corridor: one pin has to serve
+    # both directions, and here it cannot.
+    ("gtfs_bus", "217"): [(1802, 1499)],
 }
 
 # Termini given in *warp* px instead of on the drawing, for trimming only — they

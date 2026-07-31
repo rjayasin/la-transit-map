@@ -364,15 +364,27 @@ python3 -m http.server 8741
     across it, and Metro 180's step from Broadway onto Colorado before it.
   - Where the sheet prints no badge over a stretch that needs one, a point on
     the drawn line is placed by hand (`PINNED_ANCHORS`) and serves as a badge
-    does. Two reasons it comes to that: a shared transit hub prints each of its
-    routes once in the municipal gray, so Metro 2's chip at the UCLA gateway is
-    Big Blue Bus's and the colour gate rightly refuses it; and the badge-to-
+    does. Three reasons it comes to that: a shared transit hub prints each of
+    its routes once in the municipal gray, so Metro 2's chip at the UCLA gateway
+    is Big Blue Bus's and the colour gate rightly refuses it; the badge-to-
     badge corridor walk needs the mask to be continuous, which it is not where
     Culver CityBus's olive crosses BBB 14's gray by the Culver City Transit
-    Center. A pin near an end of a shape also cuts the overshoot back to itself,
-    for the schematic that ends a route at its hub while the GTFS runs on to a
-    layover the map omits — BBB 14 carried on past the transit centre and
-    snapped onto the railroad crosshatch down the 405.
+    Center; and the badges can simply run out before the route does. Metro
+    217's last "217" is printed where Broadway turns down onto Colorado in
+    Glendale, 90 px short of the terminus at Colorado & Eagledale, and through
+    here the warp stands 40 px north of the artwork — which is exactly where
+    the sheet draws the 501 along the Ventura Fwy, in Metro's own orange and 2
+    px from the tail. The end of the route snapped onto the freeway and ran
+    east along it. It cost the corner as well: the walk that recovers Brand and
+    Broadway lands the line beside a tail still up on the 134, so it comes down
+    onto Broadway, darts at the turn and doubles back — 452 deg of hairpin
+    against the chord's zero, so the aligned fit was refused and the chord
+    across the blocks is what shipped. A pin on the drawn Colorado settles
+    both, a median 20 px off the drawn corridor to 2. A pin near an end of a
+    shape also cuts the overshoot back to itself, for the schematic that ends a
+    route at its hub while the GTFS runs on to a layover the map omits — BBB 14
+    carried on past the transit centre and snapped onto the railroad crosshatch
+    down the 405.
   - One pin cannot always do both jobs, and where it can't the terminus is
     named in *warp* px for the trim alone (`TRIM_TERMINI`). Torrance 5 is the
     case: the sheet ends it at Pacific Coast Hwy & Crenshaw, the GTFS runs 1.2
