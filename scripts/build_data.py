@@ -915,7 +915,22 @@ LEGEND_SEEDS = {
     "culvercity": [(215, 215, 157)],
     "gtrans": [(198, 165, 188)],
     "ladot": [(175, 170, 141), (154, 150, 117)],   # DASH + Commuter Express olives
-    "longbeach": [(136, 88, 92)],
+    # Two, because Long Beach Transit's mask was only ever finding the *edges*
+    # of its thick lines. The sheet strokes them (98,38,53) and the shoulder
+    # where that meets the cream page reads (137,92,91); refine_color, sampling
+    # along a warp that is mostly beside the line, settles on the shoulder —
+    # (133,98,99) — and at tol 30 that takes in the shoulder and nothing else.
+    # The core of a thick line is 47 away and out; so is every line the sheet
+    # draws *thin*, which at 4096 px is a single-pixel core of (112,60,70)
+    # between two pale blends, and has no pixel inside the mask anywhere along
+    # it. Route 22 down Clark Av is drawn that way and there was nothing for it
+    # to snap to: the nearest mask pixel to its path is 44 px off, on the
+    # lettering, while its own line runs 10 px away. Naming the stroke itself
+    # as a second seed refines to (104,48,58) and puts the ink in the mask.
+    # Over the agency, measured as the share of path standing more than 12 px
+    # from any LBT ink, that is 4.83% to 4.32%; the 91 round Cal State Long
+    # Beach covers 59/78/59% of its drawn staple against 74/90/74%.
+    "longbeach": [(136, 88, 92), (98, 38, 53)],
     "bigbluebus": [(143, 135, 136)],
     "foothill": [(62, 100, 78)],    # dark evergreen lines; legend swatch too pale
     "montebello": [(172, 186, 153)],
@@ -1686,6 +1701,80 @@ PINNED_ANCHORS = {
     # overshoots by is past the trim limit besides. This sits on the drawn ink,
     # 16 and 24 px from the two of them, and trims both.
     ("longbeach", "2"): [(1610, 3044)],
+    # Long Beach Transit 92 round Cal State Long Beach, on the drawn campus
+    # east side a few px above the corner it turns onto 7th St at. The sheet
+    # takes the route down Bellflower Bl, east along Beach Dr, south past the
+    # campus and west along 7th — a 265 px staple round three sides of the
+    # university — and the two badges bracketing it are the "92" on Bellflower
+    # at (2219,3122) and the middle chip of the 91/92/93 stack on 7th at
+    # (2215,3255).
+    #
+    # Between them the drawn web offers a way through that is shorter, and it
+    # is a corridor rather than a stray pixel: Pacific Coast Hwy's diagonal
+    # merges into Bellflower just above the Beach corner, so the walk comes
+    # down Bellflower, crosses onto PCH where the two meet and runs straight
+    # to 7th — 153 px against the staple's 265. The length band is exactly
+    # what catches a walk cutting a corner the route really turns, and it
+    # comes within a hair of catching this one: the warp's own arc between the
+    # badges reads 214, so the ratio is 0.72 against a 0.75 floor. Refused as
+    # a shortcut, the walk goes in through the aligned-walk fallback instead —
+    # the two courses do align, both running south down the page — and that is
+    # self-confirming. With the shape pulled onto PCH the next pass measures
+    # the arc at 171, the ratio reads 0.90 and the walk is believed outright.
+    # Both directions came out cutting the corner off the campus, running
+    # diagonally over blank page between Bellflower and 7th: 39% and 38% of
+    # the drawn staple had the stored path within 8 px of it.
+    #
+    # One point on the drawn east side splits the stretch in two and leaves
+    # neither half a shortcut to take. Bellflower-to-pin walks 168 against an
+    # arc of 171 and is believed on the first pass; pin-to-7th walks 79
+    # against 43, out of band while the shape is still cutting the corner and
+    # taken by alignment, then believed at 1.04 on the second pass. Over the
+    # staple that is a median 3.4 and 8.8 px off the drawn corridor down to
+    # 2.6 and 2.8, worst 30.7 and 25.6 down to 8.2 and 8.5, and 39%/38% of it
+    # covered to 97%/99%.
+    #
+    # Low on the east side rather than up on Beach Dr, because a pin only
+    # closes the shortcuts that lie south of it: at (2288,3245) the stretch
+    # below the pin still cuts back across the campus to the badge and
+    # coverage comes out 43%/70%, and a pin on Beach Dr at (2272,3219) leaves
+    # 54%/52%. Down here it holds rather than working by accident: moved 4 px
+    # in any direction it still covers 91% of the staple or better.
+    #
+    # The 91, the 93 and the 94 are drawn along the same staple and cut the
+    # same corner for the same reason, so the one point serves all four. With
+    # the ink seed above in place it takes the 91 from 23/33/32% of the staple
+    # covered to 74/90/74, the 93 from 26/13/25 to 83/97/83, and the 94 from
+    # 41/46/30/41 to 83/84/41/83 — the 94's last working being a short one that
+    # only touches the top of the staple. The 41, the 46, the 171 and the 175
+    # run through the campus in the feed as well, and are not here: the sheet
+    # draws none of them past the "41 45 46" chips on Pacific Coast Hwy, so
+    # there is no staple of theirs to pin them to.
+    ("longbeach", "91"): [(2288, 3262)],
+    ("longbeach", "92"): [(2288, 3262)],
+    ("longbeach", "93"): [(2288, 3262)],
+    ("longbeach", "94"): [(2288, 3262)],
+    # Long Beach Transit 131 on the drawn Redondo Av, halfway between the "131"
+    # chip printed on it at (2113,3286) and the one on 2nd St at (2161,3342).
+    # The sheet takes the route straight down Redondo and round onto 2nd, ~100
+    # px; the walk between those two badges came out 92 px going another way
+    # entirely — east along 4th St, south down Ximeno Av and back east — and
+    # being the shorter of the two it won, was believed at 0.97, and took the
+    # shape with it. Both corridors are drawn, so nothing in the length band
+    # can separate them.
+    #
+    # What makes the wrong one shorter is the chips themselves. A chip is
+    # filled with the legend's saturated maroon, which is nothing like the mask
+    # colour, but its antialiased border blends through it, so every chip on
+    # the sheet is a ring of mask pixels — and the sheet stacks them. The
+    # "111"/"112" pair and the "121"/"131" pair are printed in one column at
+    # x=2161, which bridges the 24 px between where the drawn Ximeno stops and
+    # 2nd St; the "131" chip on Redondo bridges the 4 px from Redondo to 4th.
+    # With both rungs the ladder is a corridor, and a corridor is what the walk
+    # is looking for. One pin on Redondo between the two badges splits the
+    # stretch so neither half can reach the ladder: 27% of the drawn corridor
+    # covered to 100%, a median 15.3 px off it to 1.8.
+    ("longbeach", "131"): [(2113, 3320)],
     # Metro 217's Eagle Rock end, on the drawn Colorado a little east of where
     # Broadway turns down onto it. The sheet's badges run out before the route
     # does: the easternmost "217" is printed at that turn, at (1752,1493), and

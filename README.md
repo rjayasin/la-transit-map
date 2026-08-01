@@ -54,6 +54,19 @@ python3 -m http.server 8741
     snapped to whatever ran nearest. The sheet gives it the same evergreen it
     gives Foothill Transit, which the legend says outright and 60 km of map
     make harmless.
+  - A drifted seed can also come back plausible and still be the wrong half of
+    the line. Long Beach Transit is strokes of (98,38,53) over a cream page, and
+    the shoulder where the two meet reads (137,92,91); refining along a warp
+    that is mostly *beside* the line settles on the shoulder, and a tolerance
+    round the shoulder takes in the shoulder and nothing else — the core of a
+    thick line is 47 away and out, and a line the sheet draws *thin* is a
+    single-pixel core of (112,60,70) between two pale blends and has no pixel
+    inside the mask anywhere along its length. So the routes drawn thin had
+    nothing to snap to at all: the 22 down Clark Av stands 10 px off its own
+    line while the nearest thing in the mask is 44 px away, on the lettering.
+    Naming the stroke itself as a second seed puts the ink in the mask. Across
+    the agency, measured as the share of path standing over 12 px from any
+    LBT ink, 4.83% to 4.32%.
   - Metro and LADOT snap to the sheet's *vectors* rather than to that mask —
     see below; the mask still finds their badges, which are chips filled with
     the line color rather than strokes of it.
@@ -392,6 +405,50 @@ python3 -m http.server 8741
     route at its hub while the GTFS runs on to a layover the map omits — BBB 14
     carried on past the transit centre and snapped onto the railroad crosshatch
     down the 405.
+  - A pin also answers the case where both badges *are* printed and it is the
+    drawn web between them that misleads. Long Beach Transit 92 comes down
+    Bellflower Bl, and the sheet takes it east along Beach Dr, south past Cal
+    State Long Beach and west along 7th St — a 265 px staple round three sides
+    of the campus, bracketed by the "92" on Bellflower and the middle chip of
+    the 91/92/93 stack on 7th. Pacific Coast Hwy's diagonal merges into
+    Bellflower just above the Beach corner, though, so the walk can come down
+    Bellflower, cross onto PCH where the two meet and run straight to 7th: 153
+    px, and the length band that catches a walk cutting a corner the route
+    really turns comes within a hair of catching this one — the warp's own arc
+    reads 214, a ratio of 0.72 against the 0.75 floor. Refused as a shortcut,
+    the walk goes in through the aligned-walk fallback instead, both courses
+    running south down the page, and that is self-confirming: with the shape
+    pulled onto PCH the next pass measures the arc at 171, reads 0.90 and
+    believes the walk outright. Both directions ran diagonally over blank page
+    between Bellflower and 7th, with 39% and 38% of the drawn staple covered.
+    One point on the drawn campus east side splits the stretch so each half is
+    walked along the staple itself: 97% and 99% covered, a median 3.4 and 8.8
+    px off the drawn corridor down to 2.6 and 2.8. Where the pin stands matters
+    more than usual, because a pin only closes the shortcuts that lie beyond
+    it — up on Beach Dr the stretch below it still cuts back across the campus
+    and coverage comes out 54%/52%, so it goes low on the east side, a few px
+    above the corner onto 7th. The 91, the 93 and the 94 are drawn along the
+    same staple and cut the same corner for the same reason, so the one point
+    serves all four: 23/33/32% covered to 74/90/74 on the 91, 26/13/25 to
+    83/97/83 on the 93, 41/46/30/41 to 83/84/41/83 on the 94. The 41, 46, 171
+    and 175 run through the campus in the feed too and are not pinned — the
+    sheet draws none of them past the "41 45 46" chips on Pacific Coast Hwy,
+    so there is no staple of theirs to pin them to.
+  - The other way a walk finds a corridor that isn't there is by climbing the
+    sheet's own route chips. A chip is filled with the legend's saturated
+    maroon, nothing like the mask colour — but its antialiased border blends
+    through that colour on its way to the page, so every chip is a ring of mask
+    pixels, and the sheet stacks them in columns. Long Beach Transit 131 is
+    drawn straight down Redondo Av and round onto 2nd St, ~100 px between the
+    "131" chip on Redondo and the one on 2nd; the walk came back 92 px going
+    east along 4th St and south down Ximeno Av instead, and won on length. The
+    rungs are what let it: the "111"/"112" and "121"/"131" chips are printed in
+    one column at x=2161 and bridge the 24 px between where the drawn Ximeno
+    stops and 2nd St, while the "131" chip on Redondo bridges the 4 px from
+    Redondo across to 4th. Both corridors are drawn, so the length band has
+    nothing to separate them by; a pin on Redondo between the two badges splits
+    the stretch so neither half reaches the ladder. 27% of the drawn corridor
+    covered to 100%, a median 15.3 px off it to 1.8.
   - A pin is what a DASH loop out in the Valley needs, because a badge or two is
     all the sheet gives it and the warp there is both large and uneven — a
     median 41 px off the drawn Northridge loop and 94 at the far corner, wider
