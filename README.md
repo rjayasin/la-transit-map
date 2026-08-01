@@ -449,6 +449,20 @@ python3 -m http.server 8741
     nothing to separate them by; a pin on Redondo between the two badges splits
     the stretch so neither half reaches the ladder. 27% of the drawn corridor
     covered to 100%, a median 15.3 px off it to 1.8.
+  - The length band's far edge does the same damage from the other side, and
+    it shows up as a fault in one direction only. Long Beach Transit 111 is
+    drawn down Lakewood Bl between the "111" at the top of the 111/112/192
+    stack and the one printed on Lakewood a block further south; the corridor
+    between them walks 109 px, and the southbound working's arc across it reads
+    79.5 — 1.37, over the 1.35 ceiling. So the walk went in through the
+    aligned-walk fallback, which lays one node where a believed walk lays
+    three, and what the fit interpolated between the badges was the chord: a
+    staircase down across the "LAKEWOOD" label and over three blocks of blank
+    page. The northbound workings read the same stretch as 113.5 against 148.3,
+    inside the band, and come down Lakewood correctly. A pin halfway leaves
+    each half short enough that the straight interpolation *is* the corridor —
+    the two southbound workings go from 6% of their length standing off LBT ink
+    to 3%, and from 44% of the drawn corridor covered to 92%.
   - A pin is what a DASH loop out in the Valley needs, because a badge or two is
     all the sheet gives it and the warp there is both large and uneven — a
     median 41 px off the drawn Northridge loop and 94 at the far corner, wider
