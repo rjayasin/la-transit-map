@@ -392,6 +392,30 @@ python3 -m http.server 8741
     route at its hub while the GTFS runs on to a layover the map omits — BBB 14
     carried on past the transit centre and snapped onto the railroad crosshatch
     down the 405.
+  - A pin also answers the case where both badges *are* printed and it is the
+    drawn web between them that misleads. Long Beach Transit 92 comes down
+    Bellflower Bl, and the sheet takes it east along Beach Dr, south past Cal
+    State Long Beach and west along 7th St — a 265 px staple round three sides
+    of the campus, bracketed by the "92" on Bellflower and the middle chip of
+    the 91/92/93 stack on 7th. Pacific Coast Hwy's diagonal merges into
+    Bellflower just above the Beach corner, though, so the walk can come down
+    Bellflower, cross onto PCH where the two meet and run straight to 7th: 153
+    px, and the length band that catches a walk cutting a corner the route
+    really turns comes within a hair of catching this one — the warp's own arc
+    reads 214, a ratio of 0.72 against the 0.75 floor. Refused as a shortcut,
+    the walk goes in through the aligned-walk fallback instead, both courses
+    running south down the page, and that is self-confirming: with the shape
+    pulled onto PCH the next pass measures the arc at 171, reads 0.90 and
+    believes the walk outright. Both directions ran diagonally over blank page
+    between Bellflower and 7th, with 39% and 38% of the drawn staple covered.
+    One point on the drawn campus east side splits the stretch so each half is
+    walked along the staple itself: 97% and 99% covered, a median 3.4 and 8.8
+    px off the drawn corridor down to 2.6 and 2.8. Where the pin stands matters
+    more than usual, because a pin only closes the shortcuts that lie beyond
+    it — up on Beach Dr the stretch below it still cuts back across the campus
+    and coverage comes out 54%/52%, so it goes low on the east side, a few px
+    above the corner onto 7th. The 91 and the 93 are drawn along the same
+    staple and cut the same corner; they are left as they are.
   - A pin is what a DASH loop out in the Valley needs, because a badge or two is
     all the sheet gives it and the warp there is both large and uneven — a
     median 41 px off the drawn Northridge loop and 94 at the far corner, wider

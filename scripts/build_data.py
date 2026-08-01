@@ -1686,6 +1686,46 @@ PINNED_ANCHORS = {
     # overshoots by is past the trim limit besides. This sits on the drawn ink,
     # 16 and 24 px from the two of them, and trims both.
     ("longbeach", "2"): [(1610, 3044)],
+    # Long Beach Transit 92 round Cal State Long Beach, on the drawn campus
+    # east side a few px above the corner it turns onto 7th St at. The sheet
+    # takes the route down Bellflower Bl, east along Beach Dr, south past the
+    # campus and west along 7th — a 265 px staple round three sides of the
+    # university — and the two badges bracketing it are the "92" on Bellflower
+    # at (2219,3122) and the middle chip of the 91/92/93 stack on 7th at
+    # (2215,3255).
+    #
+    # Between them the drawn web offers a way through that is shorter, and it
+    # is a corridor rather than a stray pixel: Pacific Coast Hwy's diagonal
+    # merges into Bellflower just above the Beach corner, so the walk comes
+    # down Bellflower, crosses onto PCH where the two meet and runs straight
+    # to 7th — 153 px against the staple's 265. The length band is exactly
+    # what catches a walk cutting a corner the route really turns, and it
+    # comes within a hair of catching this one: the warp's own arc between the
+    # badges reads 214, so the ratio is 0.72 against a 0.75 floor. Refused as
+    # a shortcut, the walk goes in through the aligned-walk fallback instead —
+    # the two courses do align, both running south down the page — and that is
+    # self-confirming. With the shape pulled onto PCH the next pass measures
+    # the arc at 171, the ratio reads 0.90 and the walk is believed outright.
+    # Both directions came out cutting the corner off the campus, running
+    # diagonally over blank page between Bellflower and 7th: 39% and 38% of
+    # the drawn staple had the stored path within 8 px of it.
+    #
+    # One point on the drawn east side splits the stretch in two and leaves
+    # neither half a shortcut to take. Bellflower-to-pin walks 168 against an
+    # arc of 171 and is believed on the first pass; pin-to-7th walks 79
+    # against 43, out of band while the shape is still cutting the corner and
+    # taken by alignment, then believed at 1.04 on the second pass. Over the
+    # staple that is a median 3.4 and 8.8 px off the drawn corridor down to
+    # 2.6 and 2.8, worst 30.7 and 25.6 down to 8.2 and 8.5, and 39%/38% of it
+    # covered to 97%/99%.
+    #
+    # Low on the east side rather than up on Beach Dr, because a pin only
+    # closes the shortcuts that lie south of it: at (2288,3245) the stretch
+    # below the pin still cuts back across the campus to the badge and
+    # coverage comes out 43%/70%, and a pin on Beach Dr at (2272,3219) leaves
+    # 54%/52%. Down here it holds rather than working by accident: moved 4 px
+    # in any direction it still covers 91% of the staple or better.
+    ("longbeach", "92"): [(2288, 3262)],
     # Metro 217's Eagle Rock end, on the drawn Colorado a little east of where
     # Broadway turns down onto it. The sheet's badges run out before the route
     # does: the easternmost "217" is printed at that turn, at (1752,1493), and
