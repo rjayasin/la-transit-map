@@ -915,7 +915,22 @@ LEGEND_SEEDS = {
     "culvercity": [(215, 215, 157)],
     "gtrans": [(198, 165, 188)],
     "ladot": [(175, 170, 141), (154, 150, 117)],   # DASH + Commuter Express olives
-    "longbeach": [(136, 88, 92)],
+    # Two, because Long Beach Transit's mask was only ever finding the *edges*
+    # of its thick lines. The sheet strokes them (98,38,53) and the shoulder
+    # where that meets the cream page reads (137,92,91); refine_color, sampling
+    # along a warp that is mostly beside the line, settles on the shoulder —
+    # (133,98,99) — and at tol 30 that takes in the shoulder and nothing else.
+    # The core of a thick line is 47 away and out; so is every line the sheet
+    # draws *thin*, which at 4096 px is a single-pixel core of (112,60,70)
+    # between two pale blends, and has no pixel inside the mask anywhere along
+    # it. Route 22 down Clark Av is drawn that way and there was nothing for it
+    # to snap to: the nearest mask pixel to its path is 44 px off, on the
+    # lettering, while its own line runs 10 px away. Naming the stroke itself
+    # as a second seed refines to (104,48,58) and puts the ink in the mask.
+    # Over the agency, measured as the share of path standing more than 12 px
+    # from any LBT ink, that is 4.83% to 4.32%; the 91 round Cal State Long
+    # Beach covers 59/78/59% of its drawn staple against 74/90/74%.
+    "longbeach": [(136, 88, 92), (98, 38, 53)],
     "bigbluebus": [(143, 135, 136)],
     "foothill": [(62, 100, 78)],    # dark evergreen lines; legend swatch too pale
     "montebello": [(172, 186, 153)],
@@ -1725,7 +1740,41 @@ PINNED_ANCHORS = {
     # coverage comes out 43%/70%, and a pin on Beach Dr at (2272,3219) leaves
     # 54%/52%. Down here it holds rather than working by accident: moved 4 px
     # in any direction it still covers 91% of the staple or better.
+    #
+    # The 91, the 93 and the 94 are drawn along the same staple and cut the
+    # same corner for the same reason, so the one point serves all four. With
+    # the ink seed above in place it takes the 91 from 23/33/32% of the staple
+    # covered to 74/90/74, the 93 from 26/13/25 to 83/97/83, and the 94 from
+    # 41/46/30/41 to 83/84/41/83 — the 94's last working being a short one that
+    # only touches the top of the staple. The 41, the 46, the 171 and the 175
+    # run through the campus in the feed as well, and are not here: the sheet
+    # draws none of them past the "41 45 46" chips on Pacific Coast Hwy, so
+    # there is no staple of theirs to pin them to.
+    ("longbeach", "91"): [(2288, 3262)],
     ("longbeach", "92"): [(2288, 3262)],
+    ("longbeach", "93"): [(2288, 3262)],
+    ("longbeach", "94"): [(2288, 3262)],
+    # Long Beach Transit 131 on the drawn Redondo Av, halfway between the "131"
+    # chip printed on it at (2113,3286) and the one on 2nd St at (2161,3342).
+    # The sheet takes the route straight down Redondo and round onto 2nd, ~100
+    # px; the walk between those two badges came out 92 px going another way
+    # entirely — east along 4th St, south down Ximeno Av and back east — and
+    # being the shorter of the two it won, was believed at 0.97, and took the
+    # shape with it. Both corridors are drawn, so nothing in the length band
+    # can separate them.
+    #
+    # What makes the wrong one shorter is the chips themselves. A chip is
+    # filled with the legend's saturated maroon, which is nothing like the mask
+    # colour, but its antialiased border blends through it, so every chip on
+    # the sheet is a ring of mask pixels — and the sheet stacks them. The
+    # "111"/"112" pair and the "121"/"131" pair are printed in one column at
+    # x=2161, which bridges the 24 px between where the drawn Ximeno stops and
+    # 2nd St; the "131" chip on Redondo bridges the 4 px from Redondo to 4th.
+    # With both rungs the ladder is a corridor, and a corridor is what the walk
+    # is looking for. One pin on Redondo between the two badges splits the
+    # stretch so neither half can reach the ladder: 27% of the drawn corridor
+    # covered to 100%, a median 15.3 px off it to 1.8.
+    ("longbeach", "131"): [(2113, 3320)],
     # Metro 217's Eagle Rock end, on the drawn Colorado a little east of where
     # Broadway turns down onto it. The sheet's badges run out before the route
     # does: the easternmost "217" is printed at that turn, at (1752,1493), and
