@@ -1775,6 +1775,25 @@ PINNED_ANCHORS = {
     # stretch so neither half can reach the ladder: 27% of the drawn corridor
     # covered to 100%, a median 15.3 px off it to 1.8.
     ("longbeach", "131"): [(2113, 3320)],
+    # Long Beach Transit 111 halfway down the drawn Lakewood Bl in Lakewood,
+    # between the "111" at the top of the 111/112/192 stack at (2136,2810) and
+    # the one printed on Lakewood at (2148,2913). This one is the length band's
+    # *other* edge, and it is what makes it a one-direction fault: the sheet's
+    # corridor between those two badges walks 109 px, the southbound working's
+    # arc across it reads 79.5, and 1.37 is over the 1.35 ceiling — so the walk
+    # went in through the aligned-walk fallback, which lays a single node where
+    # a believed walk would lay three, and what the fit interpolated between
+    # the badges was the chord. That chord is a staircase down across the
+    # "LAKEWOOD" label and over three blocks of blank page. The two northbound
+    # workings read the same stretch as 113.5 against 148.3, well inside the
+    # band, believe the walk and come down the drawn Lakewood correctly.
+    #
+    # A pin halfway leaves each half short enough that the straight
+    # interpolation *is* the corridor. Measured as arc standing more than 12 px
+    # from any LBT ink, the two southbound workings go 6% to 3% and the
+    # northbound one stays at 0; of the drawn corridor itself they cover 44%
+    # against 92%. It holds 4 px in any direction.
+    ("longbeach", "111"): [(2146, 2880)],
     # Metro 217's Eagle Rock end, on the drawn Colorado a little east of where
     # Broadway turns down onto it. The sheet's badges run out before the route
     # does: the easternmost "217" is printed at that turn, at (1752,1493), and
