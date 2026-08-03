@@ -541,9 +541,10 @@ python3 -m http.server 8741
     way, so the terminus is given where the warp puts it.
   - Where not even a pin can be placed, the corridor itself is drawn by hand
     (`OVERRIDE_PATHS`) and spliced into the snapped shape. It takes several
-    failures at once to come to that, and five cases have them: Metro 761's
-    corner from Sunset into UCLA; Metro 501's North Hollywood end, below; LADOT
-    142 through San Pedro, below; Torrance 5's south end, where the "5" printed
+    failures at once to come to that, and six cases have them: Metro 761's
+    corner from Sunset into UCLA; Metro 501's North Hollywood end, below; Metro
+    251's Eagle Rock end, below; LADOT 142 through San Pedro, below; Torrance
+    5's south end, where the "5" printed
     on the drawn PCH is 43 px from the warp's *Arlington* leg and 65 from the
     PCH leg it is printed on, so the fit pulls a point 130 px into the route
     down onto it and leaves the terminus to snap onto the grey the sheet draws
@@ -577,6 +578,40 @@ python3 -m http.server 8741
     ending 12 px past where the ink stops so the vehicle finishes on the
     station marker rather than at the edge of the box the sheet draws round
     it. Over the whole route that is p90 7.2 px off the drawn line to 2.7.
+  - Metro 251's Eagle Rock end is the one where the badges bracket the fault
+    without reaching into it. The route comes up Eagle Rock Bl, turns west
+    along Colorado and finishes at Colorado & Eagledale where Colorado meets
+    Broadway by Eagle Rock Plaza; the stored path instead climbed off the plaza
+    onto the Ventura Fwy, ran 67 px east along the 501's orange, came down onto
+    Colorado a block past Eagle Rock Bl and doubled back west to the corner it
+    should have turned at — the northbound workings making the same excursion
+    lower and smaller, out along the 81's Yosemite Dr and back. It is the 217's
+    failure one street west and the same freeway: through here the warp stands
+    ~80 px east and ~25 px north of the artwork, and what is drawn where it
+    lays Colorado is the 501, 2 px away and in Metro's own orange. Neither
+    check sees it for that reason — the excursion is ink of the right colour,
+    so `drift_check` scores the route 1.4%, and it is smooth, so `path_check`
+    scores it zero. The sheet prints three "251"s here, and both plaza chips
+    attach to the same point of the warp 24 px into the shape while the next
+    anchor is 216 px of arc further on, down Eagle Rock Bl: everything between
+    is a straight interpolation between two displacements 74 px apart, across a
+    corner the warp puts 80 px east of the drawn one. No walk can recover it
+    either — the two chips bracketing that corner are 38 px apart on the sheet,
+    under the 60 px floor a corridor walk needs. And no pin can be placed
+    between them, for Montebello 10's reason: the drawn corner stands 43 px
+    from the warp's layover leg and 86 px from the warp's own corner, so a
+    point there speaks for the wrong stretch, and pins on the stub, at the
+    corner and on Colorado east of it all attach to that same point and leave
+    the freeway run where it was. Two streets and a corner, so the corridor is
+    drawn by hand. The layover loop the southbound workings run out to Verdugo
+    Rd is not in it: the sheet draws that as the line *above* Colorado, and
+    carrying the corridor round it would finish the northbound working at the
+    junction rather than at the terminus, so both directions share the one
+    stretch of Colorado and the loop plays as a crawl along it while the bus
+    lays over. Over the last 200 px of the route the southbound workings go
+    from a median 22.6 px off the drawn corridor (worst 67.7) to 0.7, the
+    northbound ones from 1.3 (worst 26.2) to 1.0, and the corridor is covered
+    100% either way.
   - The 142's San Pedro end is the failure a *bodily* slide cannot answer for.
     The slide assumes the warp's error "varies slowly enough that one vector
     covers every leg"; over this route it does not — 78 px south of the drawn

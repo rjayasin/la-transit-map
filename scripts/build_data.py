@@ -2054,6 +2054,77 @@ OVERRIDE_PATHS = {
             (1338.7, 1452.9), (1343.6, 1455.7),
         ],   # North Hollywood station -> Lankershim -> the corner onto the 134
     },
+    # Metro 251's Eagle Rock end. The route comes up Eagle Rock Bl, turns west
+    # along Colorado and finishes at Colorado & Eagledale, where Colorado meets
+    # Broadway by Eagle Rock Plaza — the lower of the two lines the sheet draws
+    # converging there. The southbound workings run a layover loop out to
+    # Verdugo Rd and back east along Broadway before they start south.
+    #
+    # The stored path instead climbed off the plaza onto the Ventura Fwy, ran
+    # 67 px east along the 501's orange, came down onto Colorado a block past
+    # Eagle Rock Bl and doubled back west to the corner it should have turned
+    # at. The northbound workings made the same excursion lower and smaller:
+    # out along the 81's drawn Yosemite Dr for 25 px, up to Colorado and back
+    # west. Neither check sees any of it — the 501 and Yosemite Dr are Metro's
+    # own orange, so the excursion is ink of the right colour and drift_check
+    # scores the route 1.4% with a worst point of 20.6 px, and it is smooth, so
+    # path_check scores it a flat zero.
+    #
+    # The warp is why. Through Eagle Rock it stands ~80 px east and ~25 px
+    # north of the artwork: the Colorado & Eagle Rock corner comes out at
+    # (1866,1471) where the sheet draws it at (1784,1496), and the terminus at
+    # (1813,1454) against the sheet's (1745,1490). What is drawn where the warp
+    # lays Colorado is the 501 along the Ventura Fwy at y=1455.7, 2 px away and
+    # in Metro's own orange — the 217's failure one street west, and the same
+    # freeway.
+    #
+    # The sheet prints three "251"s here and they bracket the fault without
+    # reaching into it. Both plaza chips attach to the same point of the warp,
+    # 24 px into the shape, and the next anchor is 216 px of arc further on,
+    # down Eagle Rock Bl; everything between is a straight interpolation
+    # between two displacements 74 px apart, across a corner the warp puts 80
+    # px east of the drawn one. There is no walk to recover the corridor
+    # either — the two chips bracketing that corner are 38 px apart on the
+    # sheet, under TRACE_SPAN's 60 px floor. The crossed-badge slide does fire,
+    # two chips a street apart claiming one point of the shape being exactly
+    # what it is for, and is refused on every pass, as it should be: the route
+    # is 1,400 px long and this error is local to its last 200.
+    #
+    # Nor can a pin be placed in between, for Montebello 10's reason. Every
+    # point of the drawn corridor from the terminus to the Eagle Rock Bl
+    # junction is nearer the warp's *layover leg* than the Colorado run it
+    # would have to speak for: the drawn corner at (1784,1497) stands 43 px
+    # from the warp 24 px into the shape and 86 px from the warp's own corner.
+    # Pinned on the stub, at the corner, and on Colorado east of it, all three
+    # attach to that same point and leave the freeway run where it was.
+    #
+    # Two streets and a corner, so it is drawn by hand. The box brackets the
+    # warp's whole Eagle Rock end — the layover loop included, since that is
+    # where the climb onto the freeway starts — and stops where the warp is
+    # back on the drawn Eagle Rock Bl. Both directions enter it once, and the
+    # short workings that turn back at Avenue 28 & Idell never reach it. The
+    # loop is not in the path: the sheet draws its Verdugo and Broadway legs as
+    # the line *above* Colorado, and running the corridor round them would
+    # finish the northbound working at the junction rather than at the
+    # terminus. So the two directions share the one stretch of Colorado and the
+    # loop plays out as a crawl along it while the bus lays over. Measured
+    # against the drawn corridor over the last 200 px of the route, the
+    # southbound workings go from a median 22.6 px off it (worst 67.7) to 0.7
+    # (worst 1.0) and the northbound ones from 1.3 (worst 26.2) to 1.0, with
+    # the corridor covered 82% and 89% to 100%.
+    ("gtfs_bus", "251"): {
+        "box": (1780, 1430, 1875, 1580),
+        "path": [
+            (1745.0, 1489.5), (1757.0, 1489.5), (1769.0, 1489.5),
+            (1777.0, 1489.6), (1780.5, 1490.2), (1782.5, 1492.0),
+            (1783.6, 1494.5), (1784.0, 1497.5), (1784.0, 1510.0),
+            (1784.0, 1525.0), (1784.0, 1545.0), (1784.0, 1570.0),
+        ],   # Colorado, from the Broadway junction the sheet ends the route at
+             # east to Eagle Rock Bl and south down the boulevard. The south end
+             # stops 10 px short of the box edge: the snap picks the boulevard
+             # up at y=1567 southbound and y=1573 northbound, and 1570 seams to
+             # both within 3 px rather than leaving one of them a 10 px step.
+    },
     # LADOT 142 (route_id 870) through San Pedro. The sheet draws the corridor
     # its stop list describes and draws it plainly — Miner & Harbor, west along
     # 7th, north up Gaffey, east along Ocean — and the westbound working lands
