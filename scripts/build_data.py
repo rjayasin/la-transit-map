@@ -974,6 +974,52 @@ LEGEND_INK = {
     "burbank": (0.2691, 0.5799, 0.5177),
 }
 
+# Agencies that snap onto those strokes rather than onto their colour mask, the
+# way Metro and LADOT do: the mask still supplies the anchors, since a badge is
+# a chip filled with the line colour and not a stroke of it, but the line the
+# shape is pulled onto is the drawing itself.
+#
+# Montebello is here because a colour mask cannot hold its sage at all. Its
+# thick corridors — the stretches two or three routes share — sit inside the
+# refined (165,174,149) and mask solidly; the stretches only one route runs are
+# drawn thin, and at 4096 px a thin sage line is a blend with the cream page
+# that reads (183,194,162) and paler. 35% of the agency's strokes have no mask
+# pixel on them. What *is* in the mask instead is the sheet's grey street
+# lettering, which blends into range from the other side — "PICO RIVERA",
+# "WASHINGTON", "PASSONS", "BROADWAY" all come back as Montebello ink.
+#
+# So the 50 down Washington Bl had a mask with its own line missing and the
+# words printed beside it present, and the badge-to-badge walk did what the
+# drawing told it: from the "50" at Washington & Montebello Bl the lettering
+# bridges north onto the thick 10/60 corridor along Whittier Bl, which runs
+# unbroken to Whittier, and 338 px that way beat the 304 px of drawn Washington
+# — so the walk was believed, and the shape rode Whittier Bl across Pico Rivera
+# and dropped back down to the badge at Mar Vista as a 165-degree cusp. West of
+# there the same hole put the Grande Vista jog — Soto up to Olympic, east, and
+# down Grande Vista back to Washington, which the sheet draws as a compact
+# dog-leg — 158 px round Metro's orange Olympic Bl instead of the 76 px the
+# sheet draws it in.
+#
+# The Long Beach answer — naming the thin stroke as a second seed — is no use
+# here. LBT's thin lines have a dark core, (112,60,70) against a cream page, so
+# a second seed lands on the ink and nothing else. Montebello's thin lines have
+# no core: the missed readings smear from (183,194,162) to (221,224,199) with
+# no cluster in them, and a seed pale enough to cover the strokes takes the page
+# with it — the mask goes from 167k pixels to 977k, six times the artwork.
+#
+# The PDF has the same lines as vectors, thin and thick alike, complete under
+# every label painted over them and with no chips or lettering in them at all.
+# On drift_check, which measures this agency on those strokes now for the same
+# reason, seven of the eight routes improve and every one of the 37 shapes
+# moves: the 50 goes from 27% of its arc standing over 12 px off its own ink to
+# 0, the 90 40% to 3, the 30 27% to 0, the 70 24% to 9, the 10 17% to 1, the 20
+# 7% to 3, the 40 zero throughout. The eighth is the 60, whose drifting arc is
+# 212 px either way — its northern loop up to Whittier Narrows runs over page
+# the sheet draws it no line on, and only the share of that classed as beyond
+# the drawing moves, 40 px to 24.
+INK_SNAP = {"montebello"}
+
+
 def refine_color(shape_pts, seed, r2=55 * 55, need=250):
     """Median of pixels along the shapes that are close to the seed color.
     Pixels that match a dominant background color better than the seed are
@@ -3086,6 +3132,92 @@ ANCHOR_GAIN = 0.5     # of the badge residual a slide must clear to be believed
 CROSSED_APART = 20.0  # px between two badges before they are different streets
 CROSSED_SPAN = 30.0   # px along the shape within which they'd be the same stretch
 
+PASS_SLACK = 4.0      # px. A second place the shape comes this near a badge is
+                      # the same drawn line run twice, not a parallel one: half
+                      # a line width, where two parallel streets are a street.
+PASS_RISE = 40.0      # px. And it is a second *pass* only if the shape left the
+                      # badge in between — went at least this far from it and
+                      # came back. A route running alongside a badge holds much
+                      # the same distance for hundreds of px, and every point of
+                      # that run is within the slack of every other.
+PASS_BACK = -0.5      # cos 120 deg: and it has to be running back the other way
+PASS_HOOD = 12.0      # px of shape read either side of a pass, for its heading
+
+
+def _pass_heading(P, cum, k, hood=PASS_HOOD):
+    """Unit course the shape holds where it passes a badge."""
+    lo = int(np.searchsorted(cum, cum[k] - hood))
+    hi = min(len(P) - 1, int(np.searchsorted(cum, cum[k] + hood)))
+    v = P[hi] - P[lo]
+    n = float(np.hypot(*v))
+    return v / n if n > 1e-9 else np.zeros(2)
+
+
+def badge_passes(P, cum, A, gate, slack=PASS_SLACK, rise=PASS_RISE):
+    """(badge index, shape index) for every pass the shape makes at each badge.
+
+    A badge belongs to the point of the shape nearest it, and for almost every
+    route that is the whole story. A route that runs the same drawn corridor
+    twice is nearest it twice, at two places far apart along its own length,
+    and pinning only the nearer leaves the other pass unanchored.
+
+    Foothill 861 is the case. It loops out of Duarte up Highland Av, east along
+    Royal Oaks Dr, round Encanto Pkwy, and comes back the same way, and the
+    sheet prints one "861" on Royal Oaks at the Highland corner. That chip
+    attached to the outbound pass, so on the way home the fit had nothing
+    between the Encanto chip and the one at Duarte & Buena Vista — one 262 px
+    span, which the corridor walk crossed by dropping down Las Lomas Rd onto
+    Foothill's own 187 along Huntington Dr and running west on that instead:
+    209 px against the drawn corridor's 250-odd, a ratio of 0.80 and inside the
+    band by a hair. The return leg rode Huntington for 130 px, a block south of
+    the Royal Oaks it is drawn along, and read as no drift at all — the 187's
+    ink is the same evergreen.
+
+    Three conditions, and the last two are what keep this from firing
+    everywhere. A pass counts only if the shape comes back within `slack` of
+    the distance the nearest one stands at, which is under a line width. It has
+    to have *left* in between — gone `rise` px from the badge and returned — or
+    a route running alongside a chip for a few hundred px, every point of it
+    within a hair of every other, would be pinned to it over and over, each
+    anchor demanding that its own point be the one on the badge. And it has to
+    be running back the other way, which is what doubling along one drawn line
+    means: Montebello 20 comes up Greenwood Av, west along Whittier Bl to
+    Garfield and back east, then north up Montebello Bl, and the warp lays
+    Greenwood near enough to the "20" printed on Montebello for the slack to
+    take it — two parallel streets a block apart, both northbound, and the case
+    `crossed_badges` and `anchor_slide` exist for rather than this one. Pinning
+    both dragged the Whittier spur 24 px north off its line.
+
+    The nearest pass is kept whatever its course; the test is on the others,
+    against it."""
+    out = []
+    for i, a in enumerate(A):
+        d = np.hypot(P[:, 0] - a[0], P[:, 1] - a[1])
+        best = float(d.min())
+        if best >= gate:
+            continue
+        # One visit per run of the shape that stays inside `rise` of the badge;
+        # the shape has to go further than that for the next run to be a second
+        # pass rather than more of the same approach.
+        near = d <= best + rise
+        edges = np.flatnonzero(np.diff(near.astype(np.int8)))
+        starts = np.r_[0 if near[0] else [], edges[near[edges + 1]] + 1].astype(int)
+        hits = []
+        for s in starts:
+            e = s
+            while e + 1 < len(near) and near[e + 1]:
+                e += 1
+            k = s + int(np.argmin(d[s:e + 1]))
+            if d[k] <= best + slack:
+                hits.append(k)
+        if not hits:
+            continue
+        first = min(hits, key=lambda k: d[k])
+        h0 = _pass_heading(P, cum, first)
+        out += [(i, k) for k in hits
+                if k == first or float(h0 @ _pass_heading(P, cum, k)) <= PASS_BACK]
+    return out
+
 
 def crossed_badges(A, cum, j):
     """Whether two badges on different streets are claiming the same stretch.
@@ -3338,20 +3470,24 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
         used = walked = believed = 0
         for _ in range(ANCHOR_PASSES):
             cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(P, axis=0).T))])
-            d2 = ((P[None, :, :] - A[:, None, :]) ** 2).sum(2)
-            j = d2.argmin(1)
-            near = np.sqrt(d2[np.arange(len(A)), j]) < anchor_gate  # badge serves this shape
-            if crossed_badges(A[near], cum, j[near]):
+            # (badge, shape point): one per badge in reach, and one per *pass*
+            # where the shape runs its drawn corridor twice — see badge_passes
+            hit = badge_passes(P, cum, A, anchor_gate)
+            ai = np.array([h[0] for h in hit], dtype=int)
+            j = np.array([h[1] for h in hit], dtype=int)
+            if len(ai) and crossed_badges(A[ai], cum, j):
                 # the warp is out by more than the streets are apart; read the
                 # badges again against a shape slid onto them
                 S = A - anchor_slide(P, A, anchor_gate)
-                d2 = ((P[None, :, :] - S[:, None, :]) ** 2).sum(2)
-                j = d2.argmin(1)
-                near = np.sqrt(d2[np.arange(len(A)), j]) < anchor_gate
-            order = np.argsort(cum[j[near]], kind="stable")
-            s = cum[j[near]][order]
-            D = (A[near] - P[j[near]])[order]
-            s, D, w, b = trace_anchors(s, D, A[near][order], P, cum, tree)
+                hit = badge_passes(P, cum, S, anchor_gate)
+                ai = np.array([h[0] for h in hit], dtype=int)
+                j = np.array([h[1] for h in hit], dtype=int)
+            if not len(ai):
+                break
+            order = np.argsort(cum[j], kind="stable")
+            s = cum[j][order]
+            D = (A[ai] - P[j])[order]
+            s, D, w, b = trace_anchors(s, D, A[ai][order], P, cum, tree)
             # nothing the last fit didn't already have: no badge it couldn't
             # reach, and no corridor it couldn't walk — nor one it could only
             # walk by *aligning*, which is the fallback for a corridor whose
@@ -3366,9 +3502,9 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
             # round the corner — but the walk *count* was nine both times, the
             # loop called it no progress, and the better fit was computed and
             # thrown away. The corner stayed 23 px inside the drawn turn.
-            if near.sum() <= used and w <= walked and b <= believed:
+            if len(ai) <= used and w <= walked and b <= believed:
                 break
-            used, walked = max(used, int(near.sum())), max(walked, w)
+            used, walked = max(used, len(ai)), max(walked, w)
             believed = max(believed, b)
             P = P + np.c_[np.interp(cum, s, D[:, 0]), np.interp(cum, s, D[:, 1])]
         if used and default_caps:
@@ -4503,8 +4639,25 @@ def main():
                     sid, route_sids[rid], kd_for)
                 anchored += bool(anc)
                 can_refit = True
-                out_pts = snap_recording(pts, agency_tree, anchors=anc)
-                line_ink = agency_tree
+                # Snap on the strokes where the sheet's vectors can be trusted
+                # to hold this agency's whole drawing, anchor on the pixels
+                # either way — the same split Metro's branch makes above, and
+                # for the same reason: a chip is filled with the line colour
+                # rather than stroked in it, so it stands on the mask and not
+                # on the ink. The ink is the centreline alone, which is what
+                # INK_CAPS' coarse-to-fine ladder is for; a mask smears each
+                # line across its casing and its badges, and the two tight
+                # passes anchored mask snapping settles for cannot answer for
+                # the distance. `speckled` goes with the mask: the ink has no
+                # stray pixels to shrug off. See INK_SNAP.
+                ink = ink_tree([LEGEND_INK[feed]]) if feed in INK_SNAP else None
+                out_pts = snap_recording(pts, ink or agency_tree, anchors=anc,
+                                         caps=INK_CAPS if ink else None,
+                                         speckled=ink is None)
+                line_ink = ink or agency_tree
+                # The call-out keeps the mask whatever the main map does:
+                # pdf_ink drops every stroke inside the panel, so there is no
+                # ink down there to snap a downtown run onto.
                 shape_isnap[(feed, sid)] = (good, 30.0, toks)
             elif feed in STREET_SNAP:
                 # No livery, so no anchors either: the sheet prints "PT" beside
