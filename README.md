@@ -192,6 +192,21 @@ python3 -m http.server 8741
     County Line's name, sharing its track for the whole of its length here and
     drawn as that one line; the Inland Empire-Orange County line borrows
     nothing, coming no nearer than 467 px to any label on the sheet.
+  - A name is written a handful of times and nowhere else, though, so a line can
+    run a long way before its first one — and where the sheet needs a name to
+    tell two tracks apart, that head is the stretch with nothing to tell it.
+    The Riverside Line's own first "RIVERSIDE LINE" is 392 px into a 4,010 px
+    shape; before it the interpolation has nothing to interpolate between and
+    clamps, so the whole head carried that one anchor's own (-2.5,+21). Right
+    where the label is, and wrong upstream of it: the warp already runs within
+    6 px of its own track through Vernon, and 21 px down lands it midway
+    between the two, 9 px from each. The line then rode the Orange County track
+    for 90 px — the same swap the names exist to prevent, in the other
+    direction — and neither check could see it, one crosshatched livery meaning
+    a line on its neighbour's track is on ink of the right colour. A pin on the
+    drawn track east of the split gives the head something of its own; both
+    workings go from a median 14 px off it to under a pixel, and from 39% of
+    the stretch covered to 100%.
   - A route's badges cover the whole route, but a shape is one *variant* of
     it, so where a route forks, the badges on one fork are still inside the
     gate of a variant taking the other and drag it bodily across. Metro 487's
@@ -527,9 +542,10 @@ python3 -m http.server 8741
     7 px from the *warp's Wilbur* leg, the last leg of the circuit, so a pin
     there reads as a terminus and trims 66 px off the end of the loop instead of
     anchoring it — and moved far enough east to clear that, it attaches to the
-    warp's Reseda leg half a loop away. LADOT was also the one network
+    warp's Reseda leg half a loop away. LADOT was also a network
     `PINNED_ANCHORS` could not reach at all, its branch never adding them to the
-    anchor list; that was a gap rather than a policy, and it is closed.
+    anchor list; that was a gap rather than a policy, and it is closed — as is
+    the same gap in Metrolink's branch, which the Riverside Line needed.
   - One pin cannot always do both jobs, and where it can't the terminus is
     named in *warp* px for the trim alone (`TRIM_TERMINI`). Torrance 5 is the
     case: the sheet ends it at Pacific Coast Hwy & Crenshaw, the GTFS runs 1.2
@@ -541,8 +557,9 @@ python3 -m http.server 8741
     way, so the terminus is given where the warp puts it.
   - Where not even a pin can be placed, the corridor itself is drawn by hand
     (`OVERRIDE_PATHS`) and spliced into the snapped shape. It takes several
-    failures at once to come to that, and five cases have them: Metro 761's
-    corner from Sunset into UCLA; Metro 501's North Hollywood end, below; LADOT
+    failures at once to come to that, and seven cases have them: Metro 761's
+    corner from Sunset into UCLA; Metro 501's North Hollywood end, below; Metro
+    251's Eagle Rock end, below; Montebello 20's Whittier Bl stub, below; LADOT
     142 through San Pedro, below; Torrance 5's south end, where the "5" printed
     on the drawn PCH is 43 px from the warp's *Arlington* leg and 65 from the
     PCH leg it is printed on, so the fit pulls a point 130 px into the route
@@ -577,6 +594,73 @@ python3 -m http.server 8741
     ending 12 px past where the ink stops so the vehicle finishes on the
     station marker rather than at the edge of the box the sheet draws round
     it. Over the whole route that is p90 7.2 px off the drawn line to 2.7.
+  - Metro 251's Eagle Rock end is the one where the badges bracket the fault
+    without reaching into it. The route comes up Eagle Rock Bl, turns west
+    along Colorado and finishes at Colorado & Eagledale where Colorado meets
+    Broadway by Eagle Rock Plaza; the stored path instead climbed off the plaza
+    onto the Ventura Fwy, ran 67 px east along the 501's orange, came down onto
+    Colorado a block past Eagle Rock Bl and doubled back west to the corner it
+    should have turned at — the northbound workings making the same excursion
+    lower and smaller, out along the 81's Yosemite Dr and back. It is the 217's
+    failure one street west and the same freeway: through here the warp stands
+    ~80 px east and ~25 px north of the artwork, and what is drawn where it
+    lays Colorado is the 501, 2 px away and in Metro's own orange. Neither
+    check sees it for that reason — the excursion is ink of the right colour,
+    so `drift_check` scores the route 1.4%, and it is smooth, so `path_check`
+    scores it zero. The sheet prints three "251"s here, and both plaza chips
+    attach to the same point of the warp 24 px into the shape while the next
+    anchor is 216 px of arc further on, down Eagle Rock Bl: everything between
+    is a straight interpolation between two displacements 74 px apart, across a
+    corner the warp puts 80 px east of the drawn one. No walk can recover it
+    either — the two chips bracketing that corner are 38 px apart on the sheet,
+    under the 60 px floor a corridor walk needs. And no pin can be placed
+    between them, for Montebello 10's reason: the drawn corner stands 43 px
+    from the warp's layover leg and 86 px from the warp's own corner, so a
+    point there speaks for the wrong stretch, and pins on the stub, at the
+    corner and on Colorado east of it all attach to that same point and leave
+    the freeway run where it was. Two streets and a corner, so the corridor is
+    drawn by hand. The layover loop the southbound workings run out to Verdugo
+    Rd is not in it: the sheet draws that as the line *above* Colorado, and
+    carrying the corridor round it would finish the northbound working at the
+    junction rather than at the terminus, so both directions share the one
+    stretch of Colorado and the loop plays as a crawl along it while the bus
+    lays over. Over the last 200 px of the route the southbound workings go
+    from a median 22.6 px off the drawn corridor (worst 67.7) to 0.7, the
+    northbound ones from 1.3 (worst 26.2) to 1.0, and the corridor is covered
+    100% either way.
+  - Montebello 20's Whittier Bl stub is the one that doubles back. The route
+    comes down Montebello Bl, turns west along Whittier, runs out to Garfield Av
+    and comes straight back — the stop list ends the westward run at Garfield &
+    Whittier and picks up again heading east — and the sheet draws that as one
+    line, Whittier being the 10's corridor and shared. What shipped was a wedge:
+    the two legs ran either side of the drawn Whittier, up to 17.7 px off it
+    southbound and 24.3 northbound, with the fold 14 px short of the drawn
+    Garfield corner as a 155° cusp; 21 px of the northbound run stood off every
+    Montebello stroke on the sheet, a rectangle over blank page. Three failures
+    at once. The feed's own shapes are part of it — the southbound return from
+    Garfield is a single straight chord rather than a traced street, and the
+    northbound ones jump from Greenwood & Carmelita to Garfield & Whittier, run
+    south down Garfield and east along a street the route never touches, come
+    back, and jump again before finally running east; that spurious loop is the
+    rectangle. The sheet stretches the Montebello Bl junction south, so the
+    warp's Whittier is *rotated* against the drawn one — 31 px out at one end of
+    the stub and 7 at the other — and no one correction fits both. And the stub
+    is 170 px of arc out and back against a 244 px smoothing window, so the two
+    legs are averaged into each other and into the legs either side, and neither
+    can land while the other pulls. A pin reaches both legs — a badge pins every
+    pass a shape makes at it — and still cannot close it: pinned mid-stub, one
+    direction runs 12 px past the drawn Garfield corner and the other stops 3 px
+    short, trading the wedge for an overshoot. So the corridor is drawn by hand,
+    out and back along the drawn Whittier, which is also what lets one path
+    serve both directions: the run's net displacement is nil, so the path has to
+    close on itself and the orientation test is a no-op. Over the stub the four
+    workings go from a median 2.9 px (southbound) and 9.4 px (northbound) off
+    the drawn corridor to 0.9, from 74% and 66% of it covered to 100%, and the
+    route's drift from 3.2% of its length to none. `path_check` ranks it worse
+    for it — 268 to 933 — and that is the trade rather than a regression: the
+    retrace is exact now, so the fold at Garfield is a true 180° where before it
+    was a 155° cusp *beside* the line. It is the DASH Wilmington case; the sheet
+    draws the stub, so the doubling back is the artwork's.
   - The 142's San Pedro end is the failure a *bodily* slide cannot answer for.
     The slide assumes the warp's error "varies slowly enough that one vector
     covers every leg"; over this route it does not — 78 px south of the drawn
