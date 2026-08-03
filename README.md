@@ -159,6 +159,25 @@ python3 -m http.server 8741
     error varies slowly enough that one vector covers every leg. The slide is
     charged for its length and refused unless it clears most of the residual,
     so it only decides which badge speaks for which leg.
+  - "The point nearest it" is also one point, and a route that runs the same
+    drawn corridor twice passes the badge twice — so the badge pins every pass
+    it makes. Foothill 861 loops out of Duarte up Highland Av, east along Royal
+    Oaks Dr and round Encanto Pkwy, and comes home the same way; the sheet
+    prints one "861" on Royal Oaks at the Highland corner and it went to the
+    outbound pass. The return then had nothing between the Encanto chip and the
+    one at Duarte & Buena Vista — one 262 px span, and the corridor walk crossed
+    it by dropping down Las Lomas Rd onto Foothill's own 187 along Huntington Dr
+    and running west on that: 209 px against the drawn corridor's 250-odd, a
+    ratio of 0.80 and inside the band by a hair. The return leg rode Huntington
+    for 130 px, a block south of the Royal Oaks it is drawn along, and read as
+    no drift at all, the 187's ink being the same evergreen. A second pass
+    counts only where the shape comes back within half a line width of the
+    distance the nearest one stands at, having left the badge in between, and
+    running the other way — which is what doubling along one drawn line means.
+    Two legs on *parallel* streets are a street apart at the badge and stay one
+    leg's, which is the case above; both northbound is Montebello 20 up
+    Greenwood Av and Montebello Bl, and the heading test is what tells them
+    apart.
   - Metrolink carries no badge anywhere on the sheet, and its lines share one
     ink and one crosshatched livery, so where two run parallel the artwork
     alone cannot say which is which: through Vernon the Orange County and
