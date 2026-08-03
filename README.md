@@ -67,9 +67,11 @@ python3 -m http.server 8741
     Naming the stroke itself as a second seed puts the ink in the mask. Across
     the agency, measured as the share of path standing over 12 px from any
     LBT ink, 4.83% to 4.32%.
-  - Metro and LADOT snap to the sheet's *vectors* rather than to that mask —
-    see below; the mask still finds their badges, which are chips filled with
-    the line color rather than strokes of it.
+  - Metro, LADOT and Montebello snap to the sheet's *vectors* rather than to
+    that mask — see below; the mask still finds their badges, which are chips
+    filled with the line color rather than strokes of it. Montebello is there
+    because a second seed is no answer to *its* thin lines: they have no core to
+    name.
   - The snap displacement is smoothed along the shape, so whole stretches move
     onto the same street instead of individual points grabbing different
     parallels, with a short-window pass afterwards to take up the slack at
@@ -187,7 +189,7 @@ python3 -m http.server 8741
   - A color mask can only find a line the raster shows, and the sheet draws
     lines it doesn't. Those lines are read out of the PDF's vectors instead,
     where every route is a stroke in its agency's ink — no tolerance, no rival
-    colors, nothing to recover from a rendering. Five networks need it:
+    colors, nothing to recover from a rendering. Six networks need it:
     - **Metrolink** rides the crosshatched railroad, inked in the same gray the
       sheet uses for place labels and minor street art, so masking that color
       selects most of the page.
@@ -203,6 +205,36 @@ python3 -m http.server 8741
       standing *beside* a line can pass — and take both down to a median 1 px.
     - **LADOT** is the same story in olive: its mask comes back 278k pixels,
       mostly label glyphs, and every LADOT route snapped to the nearest word.
+    - **Montebello Bus Lines**, where the mask holds the *thick* half of the
+      agency and the lettering, and misses the rest. The corridors two or three
+      of its routes share are drawn thick and mask solidly; the stretches one
+      route runs alone are drawn thin, and at 4096 px a thin sage line is a
+      blend with the page reading (183,194,162) and paler. 35% of the agency's
+      strokes have no mask pixel on them, while "PICO RIVERA", "WASHINGTON",
+      "PASSONS" and "BROADWAY" all come back as Montebello ink, the gray
+      lettering blending into range from the other side. So the 50 down
+      Washington Bl had a mask with its own line missing and the words beside it
+      present, and the badge-to-badge walk went where the drawing pointed: from
+      the "50" at Washington & Montebello Bl the lettering bridges north onto
+      the thick 10/60 corridor along Whittier Bl, which runs unbroken to
+      Whittier — 338 px that way against 304 of drawn Washington. The shorter
+      way won, so the 50 rode Whittier Bl across Pico Rivera and dropped back
+      down to its badge at Mar Vista as a 165° cusp; west of there the same hole
+      sent the Grande Vista jog — Soto up to Olympic, east, and down Grande
+      Vista to Washington, a compact dog-leg on the sheet — 158 px round Metro's
+      orange Olympic Bl instead of the 76 the sheet draws it in. Long Beach's
+      answer does not carry over: LBT's thin lines have a dark core to name as a
+      second seed, and Montebello's have none — the missed readings smear from
+      (183,194,162) to (221,224,199) with no cluster in them, and a seed pale
+      enough to cover the strokes takes the page with it, 167k mask pixels to
+      977k. Every one of the 37 Montebello shapes moves onto the vectors, and
+      seven of the eight routes improve on `drift_check` — which measures the
+      agency on those same strokes now: the 50 goes from 27% of its arc standing
+      over 12 px off its own ink to 0, the 90 40% to 3, the 30 27% to 0, the 70
+      24% to 9, the 10 17% to 1, the 20 7% to 3. The eighth is the 60, whose
+      drifting arc is 212 px either way: its northern loop up to Whittier
+      Narrows runs over page the sheet draws it no line on, and all that moves
+      is how much of that counts as beyond the drawing rather than off it.
     - **Part-time services** are drawn as thin dashed lines, and at 4096 px
       those dashes blend into the page or vanish under a heavier line alongside
       — Metro 233 through the Sepulveda Pass is dashed orange laid against the

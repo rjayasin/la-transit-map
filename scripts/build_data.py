@@ -974,6 +974,52 @@ LEGEND_INK = {
     "burbank": (0.2691, 0.5799, 0.5177),
 }
 
+# Agencies that snap onto those strokes rather than onto their colour mask, the
+# way Metro and LADOT do: the mask still supplies the anchors, since a badge is
+# a chip filled with the line colour and not a stroke of it, but the line the
+# shape is pulled onto is the drawing itself.
+#
+# Montebello is here because a colour mask cannot hold its sage at all. Its
+# thick corridors — the stretches two or three routes share — sit inside the
+# refined (165,174,149) and mask solidly; the stretches only one route runs are
+# drawn thin, and at 4096 px a thin sage line is a blend with the cream page
+# that reads (183,194,162) and paler. 35% of the agency's strokes have no mask
+# pixel on them. What *is* in the mask instead is the sheet's grey street
+# lettering, which blends into range from the other side — "PICO RIVERA",
+# "WASHINGTON", "PASSONS", "BROADWAY" all come back as Montebello ink.
+#
+# So the 50 down Washington Bl had a mask with its own line missing and the
+# words printed beside it present, and the badge-to-badge walk did what the
+# drawing told it: from the "50" at Washington & Montebello Bl the lettering
+# bridges north onto the thick 10/60 corridor along Whittier Bl, which runs
+# unbroken to Whittier, and 338 px that way beat the 304 px of drawn Washington
+# — so the walk was believed, and the shape rode Whittier Bl across Pico Rivera
+# and dropped back down to the badge at Mar Vista as a 165-degree cusp. West of
+# there the same hole put the Grande Vista jog — Soto up to Olympic, east, and
+# down Grande Vista back to Washington, which the sheet draws as a compact
+# dog-leg — 158 px round Metro's orange Olympic Bl instead of the 76 px the
+# sheet draws it in.
+#
+# The Long Beach answer — naming the thin stroke as a second seed — is no use
+# here. LBT's thin lines have a dark core, (112,60,70) against a cream page, so
+# a second seed lands on the ink and nothing else. Montebello's thin lines have
+# no core: the missed readings smear from (183,194,162) to (221,224,199) with
+# no cluster in them, and a seed pale enough to cover the strokes takes the page
+# with it — the mask goes from 167k pixels to 977k, six times the artwork.
+#
+# The PDF has the same lines as vectors, thin and thick alike, complete under
+# every label painted over them and with no chips or lettering in them at all.
+# On drift_check, which measures this agency on those strokes now for the same
+# reason, seven of the eight routes improve and every one of the 37 shapes
+# moves: the 50 goes from 27% of its arc standing over 12 px off its own ink to
+# 0, the 90 40% to 3, the 30 27% to 0, the 70 24% to 9, the 10 17% to 1, the 20
+# 7% to 3, the 40 zero throughout. The eighth is the 60, whose drifting arc is
+# 212 px either way — its northern loop up to Whittier Narrows runs over page
+# the sheet draws it no line on, and only the share of that classed as beyond
+# the drawing moves, 40 px to 24.
+INK_SNAP = {"montebello"}
+
+
 def refine_color(shape_pts, seed, r2=55 * 55, need=250):
     """Median of pixels along the shapes that are close to the seed color.
     Pixels that match a dominant background color better than the seed are
@@ -4503,8 +4549,25 @@ def main():
                     sid, route_sids[rid], kd_for)
                 anchored += bool(anc)
                 can_refit = True
-                out_pts = snap_recording(pts, agency_tree, anchors=anc)
-                line_ink = agency_tree
+                # Snap on the strokes where the sheet's vectors can be trusted
+                # to hold this agency's whole drawing, anchor on the pixels
+                # either way — the same split Metro's branch makes above, and
+                # for the same reason: a chip is filled with the line colour
+                # rather than stroked in it, so it stands on the mask and not
+                # on the ink. The ink is the centreline alone, which is what
+                # INK_CAPS' coarse-to-fine ladder is for; a mask smears each
+                # line across its casing and its badges, and the two tight
+                # passes anchored mask snapping settles for cannot answer for
+                # the distance. `speckled` goes with the mask: the ink has no
+                # stray pixels to shrug off. See INK_SNAP.
+                ink = ink_tree([LEGEND_INK[feed]]) if feed in INK_SNAP else None
+                out_pts = snap_recording(pts, ink or agency_tree, anchors=anc,
+                                         caps=INK_CAPS if ink else None,
+                                         speckled=ink is None)
+                line_ink = ink or agency_tree
+                # The call-out keeps the mask whatever the main map does:
+                # pdf_ink drops every stroke inside the panel, so there is no
+                # ink down there to snap a downtown run onto.
                 shape_isnap[(feed, sid)] = (good, 30.0, toks)
             elif feed in STREET_SNAP:
                 # No livery, so no anchors either: the sheet prints "PT" beside

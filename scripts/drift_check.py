@@ -34,9 +34,9 @@ the sheet draws no ink there by design, so distance to it means nothing.
 Where the ink can be trusted and where it can't
 -----------------------------------------------
 The PDF gives one stroke per drawn line for Metro bus (orange, the Rapid red,
-the busway ribbon), LADOT's two olives, and the railroads. Those rows are exact
-— the strokes are the drawing itself, complete underneath every label painted
-over them.
+the busway ribbon), LADOT's two olives, Montebello's sage, and the railroads.
+Those rows are exact — the strokes are the drawing itself, complete underneath
+every label painted over them.
 
 Everything else has no vector ink of its own and is measured against the colour
 mask instead, marked `mask` in the `src` column. A mask is knocked out wherever
@@ -134,8 +134,16 @@ def tree_for(system, label, cache, rail_trees):
         rid = next((k for k, n in RAIL_LABELS.items() if n == label), None)
         out = ((rail_trees or {}).get(rid), "mask" if rid else "-")
     else:
-        cols = agency_mask_colors(system)
-        out = (B.mask_tree(cols, 30.0) if cols else None, "mask")
+        feed = next((f for f, n in B.FEED_NAMES.items() if n == system), None)
+        if feed in B.INK_SNAP:
+            # Snapped on the sheet's strokes, so measured on them: Montebello's
+            # mask misses the thin third of its own drawing and holds the grey
+            # street lettering instead, which is what put the 50 on Whittier Bl
+            # across Pico Rivera reading zero drift the whole way.
+            out = (B.ink_tree([B.LEGEND_INK[feed]]), "ink")
+        else:
+            cols = agency_mask_colors(system)
+            out = (B.mask_tree(cols, 30.0) if cols else None, "mask")
     cache[key] = out
     return out
 
