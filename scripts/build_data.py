@@ -1899,6 +1899,39 @@ PINNED_ANCHORS = {
     # A search over the whole drawn loop turns up coordinates that do cover the
     # stub and not one that survives being moved 4 px in any direction — which
     # is a number working by accident rather than an anchor that holds.
+    # Metrolink's Riverside Line through Vernon, on its own drawn track a little
+    # east of where the Orange County Line branches off it. The two run out of
+    # downtown as one corridor, split at (1845,2077) west of Soto and fan apart
+    # going southeast — 34 px between them at x=1875, 43 px at x=1925 — and the
+    # stored path took the wrong one: 90 px of it rode the Orange County track,
+    # from x=1844 to x=1900, before climbing back onto its own. This is the
+    # failure `line_name_anchors` was written for, in the other direction; the
+    # names are what tell the two apart, and here the Riverside Line runs out of
+    # them.
+    #
+    # The sheet writes "RIVERSIDE LINE" four times, and the first is at
+    # (1954,2116) — 392 px into a 4,010 px shape. Before it the interpolation
+    # has nothing to interpolate between and clamps, so the whole head of the
+    # line carries that one anchor's own displacement, (-2.5,+21). That is right
+    # where the label is and wrong everywhere upstream: the warp already runs
+    # within 6 px of its own track from x=1850 to x=1925, and +21 px lands it
+    # midway between the two — 9 px from each at x=1850, 16.6 against 17.4 at
+    # x=1875 — where a snap with a 100 px first cap is deciding by fractions of
+    # a pixel and the smoothing carries whole stretches to whichever won.
+    #
+    # Neither check can see it, and for the reason the snapper couldn't either:
+    # one crosshatched livery holds every railroad on the sheet, so a line on
+    # its neighbour's track is on ink of the right colour. drift_check scores
+    # the Riverside Line 12 px of 2,700 and what it flags is the diagonal
+    # *between* the tracks, worst 18 px at (1908,2110); path_check scores it a
+    # flat zero, the excursion being smooth.
+    #
+    # One point on the drawn track 15 px east of the split, where the warp
+    # passes 10 px away, gives the head something of its own to sit on. Both
+    # workings go from a median 14 px off their own track (worst 37) to under a
+    # pixel (worst 1.4), and from 39% of the drawn stretch covered to 100%. It
+    # holds 4 px in any direction.
+    ("metrolink", "Riverside Line"): [(1860, 2077.4)],
     ("ladot", "798"): [(645, 1236), (652, 1140)],       # DASH Northridge
     ("ladot", "799"): [(1032, 1472), (999, 1336),       # DASH Van Nuys/
                        (1180, 1507)],                   #   Studio City, cw
@@ -2054,6 +2087,77 @@ OVERRIDE_PATHS = {
             (1338.7, 1452.9), (1343.6, 1455.7),
         ],   # North Hollywood station -> Lankershim -> the corner onto the 134
     },
+    # Metro 251's Eagle Rock end. The route comes up Eagle Rock Bl, turns west
+    # along Colorado and finishes at Colorado & Eagledale, where Colorado meets
+    # Broadway by Eagle Rock Plaza — the lower of the two lines the sheet draws
+    # converging there. The southbound workings run a layover loop out to
+    # Verdugo Rd and back east along Broadway before they start south.
+    #
+    # The stored path instead climbed off the plaza onto the Ventura Fwy, ran
+    # 67 px east along the 501's orange, came down onto Colorado a block past
+    # Eagle Rock Bl and doubled back west to the corner it should have turned
+    # at. The northbound workings made the same excursion lower and smaller:
+    # out along the 81's drawn Yosemite Dr for 25 px, up to Colorado and back
+    # west. Neither check sees any of it — the 501 and Yosemite Dr are Metro's
+    # own orange, so the excursion is ink of the right colour and drift_check
+    # scores the route 1.4% with a worst point of 20.6 px, and it is smooth, so
+    # path_check scores it a flat zero.
+    #
+    # The warp is why. Through Eagle Rock it stands ~80 px east and ~25 px
+    # north of the artwork: the Colorado & Eagle Rock corner comes out at
+    # (1866,1471) where the sheet draws it at (1784,1496), and the terminus at
+    # (1813,1454) against the sheet's (1745,1490). What is drawn where the warp
+    # lays Colorado is the 501 along the Ventura Fwy at y=1455.7, 2 px away and
+    # in Metro's own orange — the 217's failure one street west, and the same
+    # freeway.
+    #
+    # The sheet prints three "251"s here and they bracket the fault without
+    # reaching into it. Both plaza chips attach to the same point of the warp,
+    # 24 px into the shape, and the next anchor is 216 px of arc further on,
+    # down Eagle Rock Bl; everything between is a straight interpolation
+    # between two displacements 74 px apart, across a corner the warp puts 80
+    # px east of the drawn one. There is no walk to recover the corridor
+    # either — the two chips bracketing that corner are 38 px apart on the
+    # sheet, under TRACE_SPAN's 60 px floor. The crossed-badge slide does fire,
+    # two chips a street apart claiming one point of the shape being exactly
+    # what it is for, and is refused on every pass, as it should be: the route
+    # is 1,400 px long and this error is local to its last 200.
+    #
+    # Nor can a pin be placed in between, for Montebello 10's reason. Every
+    # point of the drawn corridor from the terminus to the Eagle Rock Bl
+    # junction is nearer the warp's *layover leg* than the Colorado run it
+    # would have to speak for: the drawn corner at (1784,1497) stands 43 px
+    # from the warp 24 px into the shape and 86 px from the warp's own corner.
+    # Pinned on the stub, at the corner, and on Colorado east of it, all three
+    # attach to that same point and leave the freeway run where it was.
+    #
+    # Two streets and a corner, so it is drawn by hand. The box brackets the
+    # warp's whole Eagle Rock end — the layover loop included, since that is
+    # where the climb onto the freeway starts — and stops where the warp is
+    # back on the drawn Eagle Rock Bl. Both directions enter it once, and the
+    # short workings that turn back at Avenue 28 & Idell never reach it. The
+    # loop is not in the path: the sheet draws its Verdugo and Broadway legs as
+    # the line *above* Colorado, and running the corridor round them would
+    # finish the northbound working at the junction rather than at the
+    # terminus. So the two directions share the one stretch of Colorado and the
+    # loop plays out as a crawl along it while the bus lays over. Measured
+    # against the drawn corridor over the last 200 px of the route, the
+    # southbound workings go from a median 22.6 px off it (worst 67.7) to 0.7
+    # (worst 1.0) and the northbound ones from 1.3 (worst 26.2) to 1.0, with
+    # the corridor covered 82% and 89% to 100%.
+    ("gtfs_bus", "251"): {
+        "box": (1780, 1430, 1875, 1580),
+        "path": [
+            (1745.0, 1489.5), (1757.0, 1489.5), (1769.0, 1489.5),
+            (1777.0, 1489.6), (1780.5, 1490.2), (1782.5, 1492.0),
+            (1783.6, 1494.5), (1784.0, 1497.5), (1784.0, 1510.0),
+            (1784.0, 1525.0), (1784.0, 1545.0), (1784.0, 1570.0),
+        ],   # Colorado, from the Broadway junction the sheet ends the route at
+             # east to Eagle Rock Bl and south down the boulevard. The south end
+             # stops 10 px short of the box edge: the snap picks the boulevard
+             # up at y=1567 southbound and y=1573 northbound, and 1570 seams to
+             # both within 3 px rather than leaving one of them a 10 px step.
+    },
     # LADOT 142 (route_id 870) through San Pedro. The sheet draws the corridor
     # its stop list describes and draws it plainly — Miner & Harbor, west along
     # 7th, north up Gaffey, east along Ocean — and the westbound working lands
@@ -2093,6 +2197,70 @@ OVERRIDE_PATHS = {
              # snapper's own first point past it and that one sits at x=1691:
              # running the corridor out to the box edge puts a 7 px backtrack in
              # the seam, which is a 179 deg cusp however short it is.
+    },
+    # Montebello 20's Whittier Bl stub. The route comes down Montebello Bl, turns
+    # west along Whittier, runs out to Garfield Av and comes straight back — the
+    # stop list ends the westward run at Garfield & Whittier and picks up again
+    # heading east — and the sheet draws that as one line, Whittier being the
+    # 10's corridor and shared. What shipped was a wedge instead: the two legs
+    # ran a few px apart either side of the drawn Whittier, up to 17.7 px off it
+    # southbound and 24.3 px northbound, and the fold came 14 px short of the
+    # drawn Garfield corner as a 155 deg cusp — which is the point `path_check`
+    # ranked the route on. The northbound legs left the drawing altogether: 21
+    # px of their run stands off every Montebello stroke on the sheet, a
+    # rectangle over blank page north of Whittier.
+    #
+    # Three failures, and they compound:
+    #   - The feed's own shapes. The southbound return from Garfield to
+    #     Montebello & Whittier is a single straight segment — a chord, not a
+    #     traced street. The northbound ones are worse: from Greenwood &
+    #     Carmelita they jump straight to Garfield & Whittier, run south down
+    #     Garfield and east along a street the route never touches, come back to
+    #     Carmelita, jump to Garfield & Whittier a second time and only then run
+    #     east. That spurious loop is the rectangle.
+    #   - A schematic corner. The sheet stretches the Montebello Bl junction
+    #     south: the warp puts Whittier & Montebello at (2279,2105) against the
+    #     drawn (2271,2136), while at the Garfield end it is 7 px out. The warp's
+    #     Whittier is *rotated* against the drawn one rather than displaced along
+    #     it, so no one correction fits both ends of a 90 px stub.
+    #   - The stub is 170 px of arc out and back, and the snap smooths its
+    #     displacement over 61 densified points — 244 px. The two legs are
+    #     averaged into each other and into the Montebello Bl and Greenwood legs
+    #     either side, so neither can land on the line while the other pulls.
+    # A pin does reach both legs — `badge_passes` gives an anchor to every pass a
+    # shape makes at a point — and it is still no answer, because the fit
+    # interpolates away from it: pinned mid-stub on the drawn Whittier, the
+    # southbound working runs 12 px *past* the drawn Garfield corner to (2200,
+    # 2095) and the northbound one stops 3 px short of it, and the wedge is
+    # traded for an overshoot rather than closed.
+    #
+    # So the corridor is drawn by hand, and it is the one override that doubles
+    # back: the path runs from the junction west along the drawn Whittier to
+    # Garfield and returns along it. That is also what lets one path serve both
+    # directions — the run's net displacement is nil, so the orientation test is
+    # a no-op and the path has to close on itself, which it does. The box
+    # brackets the warp from just west of the Montebello Bl junction out past
+    # Garfield and down as far as the Greenwood corridor; each direction enters
+    # it once, the southbound off Montebello Bl and the northbound where its
+    # chord from Greenwood crosses in, and the feed's spurious Garfield loop
+    # falls inside and is replaced with the rest. Over the stub the four
+    # workings go from a median 2.9 px (southbound) and 9.4 px (northbound) off
+    # the drawn corridor to 0.9, and from 74% and 66% of it covered to 100%.
+    #
+    # `path_check` ranks the route worse for it, and that is the trade rather
+    # than a regression: the retrace is now exact, so the fold at Garfield is a
+    # true 180 deg where before it was a 155 deg cusp *beside* the line. It is
+    # the DASH Wilmington case — the sheet draws the stub, so the doubling back
+    # is the artwork's and not the snapper's.
+    ("montebello", "20"): {
+        "box": (2186, 2080, 2276, 2146),
+        "path": [
+            (2271.0, 2136.5), (2260.0, 2129.4), (2252.0, 2124.9),
+            (2244.0, 2120.4), (2236.0, 2115.8), (2228.0, 2111.2),
+            (2220.0, 2106.6), (2212.0, 2103.0), (2220.0, 2106.6),
+            (2228.0, 2111.2), (2236.0, 2115.8), (2244.0, 2120.4),
+            (2252.0, 2124.9), (2260.0, 2129.4), (2271.0, 2136.5),
+        ],   # Whittier Bl: the Montebello Bl junction out to Garfield and back
     },
     # Torrance 5's south end, from the terminus at Pacific Coast Hwy & Crenshaw
     # east along PCH and north into Arlington. TRIM_TERMINI cuts the layover off
@@ -4563,7 +4731,13 @@ def main():
                 # says that, so it anchors like a numbered route's badges.
                 tree = line_ink = rail_line_tree()
                 if tree is not None:
-                    anc = line_name_anchors(rid or "", tree)
+                    # `+ pins` as every other branch does it. A railroad's name
+                    # is written along it a handful of times and nowhere else,
+                    # so a line can run a quarter of its length on the sheet
+                    # before the first one — and where the warp has to be told
+                    # which of two parallel tracks is which, that head is the
+                    # stretch with nothing to tell it. See the Riverside Line.
+                    anc = line_name_anchors(rid or "", tree) + pins
                     anchored += bool(anc)
                     can_refit = True
                     out_pts = snap_recording(pts, tree, anchors=anc, caps=RAIL_CAPS,
@@ -4584,8 +4758,8 @@ def main():
                 tree, anc = ladot_livery(toks, bool(is_dash.get(rid)),
                                          sheet_tokens.get(rid, set()))
                 line_ink = tree
-                # `+ pins` as every other branch does it. LADOT was the one
-                # network PINNED_ANCHORS could not reach, which is a gap rather
+                # `+ pins` as every other branch does it. LADOT was one of the
+                # networks PINNED_ANCHORS could not reach, which is a gap rather
                 # than a policy: a hand-placed point on the drawn line serves
                 # here exactly as it does elsewhere, and a DASH — badged once or
                 # twice on the whole sheet, if at all — is the case with least
