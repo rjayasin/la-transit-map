@@ -529,6 +529,28 @@ python3 -m http.server 8741
     each half short enough that the straight interpolation *is* the corridor —
     the two southbound workings go from 6% of their length standing off LBT ink
     to 3%, and from 44% of the drawn corridor covered to 92%.
+  - Where the badges run out at a corner, what is left unanchored is a whole
+    limb of the route. Long Beach Transit 61 comes up Atlantic Av, turns west
+    along Artesia Bl and finishes at Artesia (A Line) Station, and the
+    northernmost "61" on the sheet is printed on Atlantic *below* that corner —
+    so the 140 px of drawn Artesia and the terminus at the end of it had no
+    anchor between them. Past the last one the interpolation clamps to its
+    displacement, and through here the warp stands a near-uniform 24 px south of
+    the artwork, which left the corridor arriving 18 px low with the snap to
+    find its own way back. What it found was the neighbour: the 51's curve off
+    Artesia down Long Beach Bl crosses the warp's own Artesia, so the shape
+    caught it, came off the drawn line and ran 80 px west over blank page
+    through the letters of "VICTORIA" before hooking up to the station from
+    below — the northbound workings finishing 44 px short of it, in the open.
+    One pin on the drawn Artesia is enough, the error being a straight shift
+    rather than a rotation: with a point on the artwork as the last anchor the
+    clamp carries that same correction over the rest of the limb. Where it
+    stands is decided by the trim, not by the fault — out where the sag is worst
+    the pin has only 99 px of shape beyond it, inside `TERMINUS_TAIL`, so
+    `trim_terminus` reads it as a terminus the shape overruns and cuts the
+    station approach off; east of the Long Beach Bl junction there is room for
+    both. The three full-length workings go from a median 4.3, 7.4 and 7.2 px
+    off the drawn corridor to 1.2, and from 57% of it covered to 92%.
   - A pin is what a DASH loop out in the Valley needs, because a badge or two is
     all the sheet gives it and the warp there is both large and uneven — a
     median 41 px off the drawn Northridge loop and 94 at the far corner, wider

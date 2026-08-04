@@ -1840,6 +1840,52 @@ PINNED_ANCHORS = {
     # northbound one stays at 0; of the drawn corridor itself they cover 44%
     # against 92%. It holds 4 px in any direction.
     ("longbeach", "111"): [(2146, 2880)],
+    # Long Beach Transit 61's Artesia end, on the drawn Artesia Bl a little east
+    # of where the 51 curves off it down Long Beach Bl. The route comes up
+    # Atlantic, turns west along Artesia — the stops say so the whole way,
+    # Artesia at Butler, Long Beach Bl, Harbor and Santa Fe — and finishes at
+    # Artesia (A Line) Station. The sheet draws exactly that: one stroke at
+    # y=2752.2 running from the Atlantic corner west to x=1849, where the
+    # station box is.
+    #
+    # None of that stretch was anchored. The northernmost "61" is printed at
+    # (1993.5,2770.1), on Atlantic below the corner, and there is no badge west
+    # of it at all — 140 px of drawn corridor and the terminus with nothing on
+    # them. Past the last anchor the interpolation clamps to that anchor's own
+    # displacement, and through here the warp stands a near-uniform 24 px south
+    # of the artwork (it lays Artesia at y≈2777), so the corridor arrived ~18 px
+    # low with the snap left to find its own way back.
+    #
+    # What it found was the 51. That line's curve off Artesia down Long Beach Bl
+    # reaches y=2766..2790 between x=1924 and 1949 — across the warp's own
+    # Artesia — so the shape caught it, came off the drawn line at x=1949, and
+    # ran 80 px west at y≈2774 over blank page, through the letters of
+    # "VICTORIA", before hooking up to the station from below. The northbound
+    # workings finished at (1849,2786), 44 px south of the station they are drawn
+    # into. drift_check ranked the route second in its system for it: 112 px of
+    # 820 off the ink, worst 36.9 at (1844,2783).
+    #
+    # One pin is all it takes, the warp's error here being a straight shift
+    # rather than a rotation: with a point on the drawn Artesia as the last
+    # anchor, the clamp carries that same 24 px correction over the rest of the
+    # stretch and lands the whole of it on the stroke.
+    #
+    # East of the Long Beach Bl junction rather than out where the sag is worst,
+    # because a pin further west is a terminus as far as trim_terminus can tell.
+    # At (1900,2752.2) it stands 24.7 px from the warp, inside the 35 px reach,
+    # with 99 px of shape beyond it, inside the 110 px tail — so the station
+    # approach is read as overshoot and cut off, and the line ends in mid-block
+    # on Artesia at x=1902 with 62% of the drawn corridor covered. A second pin
+    # at the corner itself is no help either: it takes the northbound workings
+    # round the turn and folds the southbound one into a V beside it, one pin
+    # having to serve both directions.
+    #
+    # The three full-length workings go from a median 4.3, 7.4 and 7.2 px off
+    # the drawn corridor (worst 22.6, 34.0, 34.0) to 1.2 (worst 16.3), and from
+    # 57% of it covered to 92%. It holds 4 px in any direction. What is left is
+    # the layover loop inside the station box, where the sheet draws no line to
+    # be on, and ~10 px of the Atlantic corner cut.
+    ("longbeach", "61"): [(1930, 2752.2)],
     # Metro 217's Eagle Rock end, on the drawn Colorado a little east of where
     # Broadway turns down onto it. The sheet's badges run out before the route
     # does: the easternmost "217" is printed at that turn, at (1752,1493), and
