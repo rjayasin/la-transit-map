@@ -220,6 +220,27 @@ python3 -m http.server 8741
     variants, since each of them is a candidate for the same word: the "BC"
     printed on Beach Cities' 102 across Redondo Beach was dragging its 109
     15 px off the PCH it runs on.
+  - Deciding that by distance holds only while the warp is nearer the truth
+    than the routes are to each other, and in Burbank it is not. Out there the
+    warp is 60-90 px out and turning with it — it puts BurbankBus's Pink Route
+    terminus at Downtown Burbank 81 px north of where the sheet draws it, its
+    Riverside Dr 48 px north and 50 px west — while the operator's two routes
+    are drawn a few blocks apart. So the distances came out backwards: of the
+    three "BU"s on the sheet the Pink Route was nearest to all three, including
+    the two printed on Burbank Bl and Buena Vista, streets it never touches.
+    Anchored to them it was fitted bodily onto the Orange Route's drawing —
+    down Buena Vista, out to Olive and back in a 130 px triangle over blank
+    page, then west along Burbank Bl and round the North Hollywood loop, 62% of
+    the *other* route's corridor covered and 12% of its own. Nothing on the
+    sheet can settle it, since the sheet's own answer to which route a "BU"
+    belongs to is "BurbankBus", so it is settled by hand (`SYMBOL_OWNERS`):
+    a route listed there takes exactly the words listed for it. With the two
+    lines given the words printed on them, the Pink Route needs no pin and no
+    hand-drawn corridor — it comes out on 100% of its own drawn line, a median
+    1.0 px off it, and the Orange Route, handed back the badge it had lost to
+    its neighbour, goes from 67% of its own corridor to 84%. Beach Cities is
+    not in the table and does not need to be: its two routes run a mile apart
+    at the nearest, further than the warp is wrong down there.
   - A color mask can only find a line the raster shows, and the sheet draws
     lines it doesn't. Those lines are read out of the PDF's vectors instead,
     where every route is a stroke in its agency's ink — no tolerance, no rival
@@ -551,6 +572,31 @@ python3 -m http.server 8741
     station approach off; east of the Long Beach Bl junction there is room for
     both. The three full-length workings go from a median 4.3, 7.4 and 7.2 px
     off the drawn corridor to 1.2, and from 57% of it covered to 92%.
+  - The same failure over a whole limb of five routes at once, with a control
+    running beside them. Foothill Transit's 493, 495, 498, 499 and 699 come in
+    from the San Gabriel Valley on the El Monte Busway, and the sheet draws
+    them as one evergreen line beside the grey busway ribbon from the Downtown
+    call-out's edge out past Cal State LA. Every badge they have is past the
+    far end of that: the five numbers are set in one run at Cal State LA and
+    printed nowhere west of it. Through here the warp stands *north* of the
+    artwork by a distance that changes along it — the corridor is drawn at
+    y=1919 and warped to y≈1878-1891, and at the badges' own x the error is
+    63 px — so the westernmost badge attached with a displacement of (0,+63),
+    the clamp carried that south over everything west of it, and by then the
+    drawn line had dropped away southwest. All five ran 30-40 px *past* their
+    own line, down the E Line's corridor through Pico/Aliso, Mariachi Plaza
+    and Soto and along Cesar Chavez: a median 32.7 to 36.2 px off the drawn
+    corridor, worst 76, with 34% of it covered. The Silver Streak is drawn
+    along the same corridor with the same warp under it and came out a median
+    1.8-2.4 px off, because the sheet prints an "SS" chip on this stretch and
+    the others get nothing — which is what says this is anchoring rather than
+    the warp. Three points fix it and one does not: pinned at the west end
+    alone the clamp closes but the interpolation to the badges runs straight
+    across the bend the corridor makes, and 167 px in the middle go 40 px
+    south instead. With the bend pinned as well, and the diagonal's midpoint to
+    hold it, the five go to a median 1.5-2.0 px off and 90-100% covered. The
+    Silver Streak takes the same three — same corridor, and its own chip is one
+    anchor over a 490 px stretch — and goes from 80-97% covered to 94-100%.
   - A pin is what a DASH loop out in the Valley needs, because a badge or two is
     all the sheet gives it and the warp there is both large and uneven — a
     median 41 px off the drawn Northridge loop and 94 at the far corner, wider
@@ -878,6 +924,20 @@ on stdout by trip count and drawn in different colors; the top two are usually
 the two directions of one corridor, so `--shape N` reads them one at a time.
 
 ### Finding bad paths without looking for them
+
+`drift_check.py` asks the question directly — how much of each route runs off
+the line the sheet draws for it — by measuring the stored shape against the
+drawing the build snapped it onto. Which means the two have to be the *same*
+drawing: a row measured against a tree the build didn't fit to is measuring the
+difference between two trees. The two agencies the sheet symbolises rather than
+numbers were the case where that went furthest wrong. They snap on their legend
+strokes, the check reached for a colour mask, and their seeds are colours
+`refine_color` cannot find enough of along the drawing to return a reading — so
+the tree came back `None` and every BurbankBus and Beach Cities row was dropped
+before it was scored. BurbankBus's Pink Route rode the Orange Route's drawn
+line for the whole of its length with no check on the map saying so. Measured
+on the strokes it snaps to, that route reads 96 px of 512 off its own line, and
+0 once fixed.
 
 `speed_check.py` works the other way round: it scans every stop-to-stop segment
 for vehicles moving faster than a bus can, which is how a bad path shows itself
