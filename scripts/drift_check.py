@@ -135,11 +135,21 @@ def tree_for(system, label, cache, rail_trees):
         out = ((rail_trees or {}).get(rid), "mask" if rid else "-")
     else:
         feed = next((f for f, n in B.FEED_NAMES.items() if n == system), None)
-        if feed in B.INK_SNAP:
+        if feed in B.INK_SNAP or feed in B.SYMBOL_FEEDS:
             # Snapped on the sheet's strokes, so measured on them: Montebello's
             # mask misses the thin third of its own drawing and holds the grey
             # street lettering instead, which is what put the 50 on Whittier Bl
             # across Pico Rivera reading zero drift the whole way.
+            #
+            # The two agencies the sheet symbolises snap on those strokes as
+            # well, and until they were named here neither was measured at all:
+            # their seeds are what SYMBOL_FEEDS says they are — colours that
+            # refine_color cannot find enough of along the drawing to return a
+            # reading — so `cols` came back empty, the tree was None, and every
+            # BurbankBus and Beach Cities row was dropped from the ranking
+            # before it was scored. BurbankBus's Pink Route rode the Orange
+            # Route's drawn line for the whole of its length and no check on
+            # the map said so.
             out = (B.ink_tree([B.LEGEND_INK[feed]]), "ink")
         else:
             cols = agency_mask_colors(system)

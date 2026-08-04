@@ -959,6 +959,43 @@ LEGEND_SEEDS = {
 # exactly this.
 SYMBOL_FEEDS = {"beachcities", "burbank"}
 
+# Which route each of those symbols stands for, where the sheet's own answer is
+# "the operator" and the routes cannot be told apart any other way.
+#
+# One code for the whole agency means every one of its words is a candidate
+# anchor for every one of its routes, and `branch_anchors` is what divides them
+# up: a word speaks for whichever variant passes nearest it. That reading holds
+# while the warp is nearer the truth than the routes are to each other, and in
+# Burbank it is not. Out here the warp is 60-90 px out and turning with it — it
+# puts the Pink Route's Downtown Burbank terminus 81 px north of where the sheet
+# draws it, its Riverside Dr 48 px north and 50 px west — while the two routes
+# are drawn a few blocks apart. So the distances came out backwards: of the three
+# "BU"s on the sheet, the Pink Route was nearest to all three, and the Orange
+# Route was left with the one it happened to win outright, 31.6 px against 48.5.
+#
+# The two it should not have had are the "BU" printed under Burbank Bl and the
+# one on Buena Vista — the Orange Route's own streets, which the Pink Route
+# never touches. Anchored to them, the Pink Route was fitted bodily onto the
+# Orange Route's drawing: down Buena Vista, out to Olive and back up in a
+# 130 px triangle over blank page, then west along Burbank Bl and round the
+# North Hollywood loop — 62% of the Orange Route's drawn corridor covered by
+# the wrong route, and 12% of its own.
+#
+# Nothing on the sheet can settle this, so it is settled by hand. A route listed
+# here takes exactly the words listed for it and nothing else; a route of the
+# same agency left out of the table is divided up by `branch_anchors` as before.
+# Both BurbankBus routes are here, which makes the division complete: with the
+# words handed to the lines they are printed on, the Pink Route needs no pin and
+# no hand-drawn corridor — it comes out on 100% of its own drawn line, a median
+# 1.0 px off it. Beach Cities is not here and does not need to be: its two
+# routes run a mile apart at the nearest, further than the warp is wrong down
+# there, and `branch_anchors` divides its "BC"s correctly on its own.
+SYMBOL_OWNERS = {
+    ("burbank", "3162"): [(1425.4, 1431.8)],                    # Pink Route
+    ("burbank", "3163"): [(1368.0, 1369.2), (1407.0, 1303.2)],  # Orange Route
+}
+SYMBOL_OWNER_NEAR = 6.0   # px a listed point may stand from the word it names
+
 # Each agency's line as the sheet's own legend swatch strokes it, straight off
 # the PDF. Where an agency's seed can't be refined against the artwork these
 # say where its ink is, so the reading can be taken on the drawn line itself.
@@ -1840,6 +1877,52 @@ PINNED_ANCHORS = {
     # northbound one stays at 0; of the drawn corridor itself they cover 44%
     # against 92%. It holds 4 px in any direction.
     ("longbeach", "111"): [(2146, 2880)],
+    # Long Beach Transit 61's Artesia end, on the drawn Artesia Bl a little east
+    # of where the 51 curves off it down Long Beach Bl. The route comes up
+    # Atlantic, turns west along Artesia — the stops say so the whole way,
+    # Artesia at Butler, Long Beach Bl, Harbor and Santa Fe — and finishes at
+    # Artesia (A Line) Station. The sheet draws exactly that: one stroke at
+    # y=2752.2 running from the Atlantic corner west to x=1849, where the
+    # station box is.
+    #
+    # None of that stretch was anchored. The northernmost "61" is printed at
+    # (1993.5,2770.1), on Atlantic below the corner, and there is no badge west
+    # of it at all — 140 px of drawn corridor and the terminus with nothing on
+    # them. Past the last anchor the interpolation clamps to that anchor's own
+    # displacement, and through here the warp stands a near-uniform 24 px south
+    # of the artwork (it lays Artesia at y≈2777), so the corridor arrived ~18 px
+    # low with the snap left to find its own way back.
+    #
+    # What it found was the 51. That line's curve off Artesia down Long Beach Bl
+    # reaches y=2766..2790 between x=1924 and 1949 — across the warp's own
+    # Artesia — so the shape caught it, came off the drawn line at x=1949, and
+    # ran 80 px west at y≈2774 over blank page, through the letters of
+    # "VICTORIA", before hooking up to the station from below. The northbound
+    # workings finished at (1849,2786), 44 px south of the station they are drawn
+    # into. drift_check ranked the route second in its system for it: 112 px of
+    # 820 off the ink, worst 36.9 at (1844,2783).
+    #
+    # One pin is all it takes, the warp's error here being a straight shift
+    # rather than a rotation: with a point on the drawn Artesia as the last
+    # anchor, the clamp carries that same 24 px correction over the rest of the
+    # stretch and lands the whole of it on the stroke.
+    #
+    # East of the Long Beach Bl junction rather than out where the sag is worst,
+    # because a pin further west is a terminus as far as trim_terminus can tell.
+    # At (1900,2752.2) it stands 24.7 px from the warp, inside the 35 px reach,
+    # with 99 px of shape beyond it, inside the 110 px tail — so the station
+    # approach is read as overshoot and cut off, and the line ends in mid-block
+    # on Artesia at x=1902 with 62% of the drawn corridor covered. A second pin
+    # at the corner itself is no help either: it takes the northbound workings
+    # round the turn and folds the southbound one into a V beside it, one pin
+    # having to serve both directions.
+    #
+    # The three full-length workings go from a median 4.3, 7.4 and 7.2 px off
+    # the drawn corridor (worst 22.6, 34.0, 34.0) to 1.2 (worst 16.3), and from
+    # 57% of it covered to 92%. It holds 4 px in any direction. What is left is
+    # the layover loop inside the station box, where the sheet draws no line to
+    # be on, and ~10 px of the Atlantic corner cut.
+    ("longbeach", "61"): [(1930, 2752.2)],
     # Metro 217's Eagle Rock end, on the drawn Colorado a little east of where
     # Broadway turns down onto it. The sheet's badges run out before the route
     # does: the easternmost "217" is printed at that turn, at (1752,1493), and
@@ -1875,6 +1958,49 @@ PINNED_ANCHORS = {
     # eastbound one to a median 13 px off the corridor: one pin has to serve
     # both directions, and here it cannot.
     ("gtfs_bus", "217"): [(1802, 1499)],
+    # Foothill Transit's five downtown expresses and the Silver Streak with
+    # them, on the drawn busway corridor through East LA: its two ends and the
+    # middle of the diagonal between them.
+    #
+    # The 493, 495, 498, 499 and 699 all come in from the San Gabriel Valley on
+    # the El Monte Busway, and the sheet draws them as one evergreen line beside
+    # the grey busway ribbon — along y=1919.2 from the call-out's edge at
+    # x=1811 east to x=1878, up a diagonal to (2022.8,1860.2), and straight east
+    # from there. Every badge they have is past the far end of it: the sheet
+    # sets the five numbers in one run at Cal State LA, "493" at (2266,1866)
+    # through "699" at (2319,1866), and prints none of them west of that.
+    #
+    # Through here the warp stands *north* of the artwork and by a distance that
+    # changes along it: it lays the corridor at y≈1878-1891 where the sheet
+    # draws it at 1919, and at the badges' own x it is 63 px north. So the
+    # westernmost badge attaches with a displacement of (0,+63), the clamp
+    # carries that south over everything west of it, and by then the drawn line
+    # has dropped away southwest — leaving the five routes 30-40 px *past* it,
+    # down the E Line's corridor through Pico/Aliso, Mariachi Plaza and Soto and
+    # along Cesar Chavez. A median 32.7 to 36.2 px off their own drawn line,
+    # worst 76, with 34% of it covered.
+    #
+    # The Silver Streak is the control, and says this is anchoring rather than
+    # the warp: it is drawn along the same corridor with the same warp under it,
+    # the sheet prints an "SS" chip at (1845.6,1921.0) on this stretch, and on
+    # that one anchor it came out a median 1.8-2.4 px off with 81-97% covered.
+    #
+    # Three points and not one, because one only closes the clamp. Pinned at the
+    # west end alone, the stretch from there to the badges is interpolated
+    # straight and cuts the bend the corridor makes at (2022.8,1860.2): the west
+    # comes right and 167 px in the middle go 40 px south of the line instead,
+    # 67% covered. With the bend pinned too, and the diagonal's midpoint to hold
+    # it, the five routes go to a median 1.5-1.8 px off and 90-100% covered.
+    # The Silver Streak takes the same three — it is the same corridor, and its
+    # own chip is one anchor over a 490 px stretch — and goes from 80-97%
+    # covered to 94-100%, its two long workings from a p90 of 19.0 px off the
+    # line to 4.2. They hold 4 px in any direction.
+    ("foothill", "20493"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2)],
+    ("foothill", "10495"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2)],
+    ("foothill", "20498"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2)],
+    ("foothill", "10499"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2)],
+    ("foothill", "10699"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2)],
+    ("foothill", "20707"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2)],
     # The two Valley DASH loops MAP_LABELS has just named, which the sheet
     # badges once and twice respectively — enough to say which olive is theirs,
     # nowhere near enough to lay a loop on it. Out here the warp is at its
@@ -4779,9 +4905,19 @@ def main():
                 # nearest Foothill stroke is most of the county away, further
                 # than any cap here can reach.
                 tree = line_ink = ink_tree([LEGEND_INK[feed]])
-                anc = branch_anchors(
-                    route_anchors(toks, tree, near=BADGE_NEAR_INK),
-                    sid, label_sids[rmeta[rid][0] if rid in rmeta else rid], kd_for)
+                anc = route_anchors(toks, tree, near=BADGE_NEAR_INK)
+                owned = SYMBOL_OWNERS.get((feed, rid))
+                if owned is None:
+                    anc = branch_anchors(
+                        anc, sid,
+                        label_sids[rmeta[rid][0] if rid in rmeta else rid], kd_for)
+                else:
+                    # Named by hand, so `branch_anchors` has nothing left to
+                    # decide — see SYMBOL_OWNERS, which exists because the
+                    # distances it decides by are the ones that went wrong.
+                    anc = [p for p in anc
+                           if min(math.hypot(p[0] - q[0], p[1] - q[1])
+                                  for q in owned) <= SYMBOL_OWNER_NEAR]
                 anchored += bool(anc)
                 if tree is not None:
                     can_refit = True
