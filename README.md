@@ -23,6 +23,10 @@ python3 -m http.server 8741
 
 ## How it works
 
+The background is Metro's printed map; the vehicles are GTFS schedules warped
+onto it. Everything below the browser is offline build tooling that runs once
+and emits `schedule.json`.
+
 - **Background** — a 4096px `map.png` plus a WebP tile pyramid
   (`tiles/{2,4,8}/`, 512px tiles ≈ up to 700 dpi of the 47″ sheet), rendered
   from the PDF vectors. Tiles cascade in as you zoom, and zoom is capped at the
@@ -31,870 +35,41 @@ python3 -m http.server 8741
   as `schedule.json` (~7 MB): **26,371 trips on 327 routes**, as route
   colors/labels, shape polylines in map pixels, per-stop distance along each
   shape, and stop arrival times. Trips crossing midnight are duplicated at
-  −24 h so owl service appears at the start of the day. A trip begins at its
-  origin's *departure* time, not its arrival: a bus staged at a terminal
-  through its recovery time isn't in service yet, and drawing it there pooled
-  Foothill's fleet — which times some origins up to two hours early — into
-  motionless clusters at Pomona, Montclair and El Monte.
+  −24 h so owl service appears at the start of the day.
 - **Georeferencing** — the map is only quasi-geographic, so a lat/lon→pixel
   transform is fitted rather than assumed: color-mask the drawn rail lines,
   then ICP-align GTFS rail shapes to them (affine init → 2nd-order polynomial
   warp, median error ~11 px). Downtown is drawn as a rotated call-out panel and
   gets its own transform.
 - **Line snapping** — the warp alone leaves vehicles beside the artwork, so
-  every shape is then pulled onto its system's *drawn* line.
-  - Each system's lines are masked by color. Rail colors are read off the tile
-    pyramid, where the printed ink is faithful; bus colors are seeded from the
-    legend swatches and refined against pixels along the routes. Refining asks
-    the warp to be on the line already, though, and where it isn't the seed
-    stands as the sheet's legend strokes it, read back off the artwork *at
-    those strokes*. Beach Cities Transit is why: its seed was a pale gray-green
-    that is nothing on the page, the refinement drifted it to a flat gray, and
-    the mask came back as street art and lettering with both of its routes
-    snapped to whatever ran nearest. The sheet gives it the same evergreen it
-    gives Foothill Transit, which the legend says outright and 60 km of map
-    make harmless.
-  - A drifted seed can also come back plausible and still be the wrong half of
-    the line. Long Beach Transit is strokes of (98,38,53) over a cream page, and
-    the shoulder where the two meet reads (137,92,91); refining along a warp
-    that is mostly *beside* the line settles on the shoulder, and a tolerance
-    round the shoulder takes in the shoulder and nothing else — the core of a
-    thick line is 47 away and out, and a line the sheet draws *thin* is a
-    single-pixel core of (112,60,70) between two pale blends and has no pixel
-    inside the mask anywhere along its length. So the routes drawn thin had
-    nothing to snap to at all: the 22 down Clark Av stands 10 px off its own
-    line while the nearest thing in the mask is 44 px away, on the lettering.
-    Naming the stroke itself as a second seed puts the ink in the mask. Across
-    the agency, measured as the share of path standing over 12 px from any
-    LBT ink, 4.83% to 4.32%.
-  - Metro, LADOT and Montebello snap to the sheet's *vectors* rather than to
-    that mask — see below; the mask still finds their badges, which are chips
-    filled with the line color rather than strokes of it. Montebello is there
-    because a second seed is no answer to *its* thin lines: they have no core to
-    name.
-  - The snap displacement is smoothed along the shape, so whole stretches move
-    onto the same street instead of individual points grabbing different
-    parallels, with a short-window pass afterwards to take up the slack at
-    junctions.
-  - Place labels dim the artwork beneath them rather than hiding it, so the
-    faded ink is recovered by reading a pixel as line color blended over the
-    page — otherwise a broken line loses the snap to whatever parallel street
-    stays continuous.
-  - A whole agency shares one drawn color, so shapes are also pinned by
-    *anchors*: the numbered route badges printed on the map, extracted from the
-    PDF. Between consecutive badges the drawn line is walked (a coarse lattice
-    and a shortest path) and sampled into intermediate anchors, so the
-    correction follows the drawn corridor rather than a chord across it.
-  - A walk is believed only when it comes out about as long as the shape says
-    that stretch is, since the drawn lines are one connected web and a walk
-    cutting a corner the route really turns comes back conspicuously short. But
-    on the first pass the shape saying so is the warp, and where the warp is bad
-    enough to need the walk it is too bad to judge it — so the anchor fit re-runs
-    while it keeps learning something the last pass didn't have: a badge it
-    couldn't reach, *or* a corridor it couldn't believe. Metro 240 comes down
-    Reseda and turns east along Ventura with the warp 94 px north of the corner,
-    which puts the badge above the turn nearest a warp point already past it:
-    the arc between that badge and the next reads 219 px against the drawn
-    corridor's 299, the walk round the corner is thrown out as a detour, and the
-    chord across it is what the snap then followed. Both badges were in reach the
-    whole time, so a pass counting only badges stopped there. Once the fit has
-    put the shape on them the same arc reads 234 px and the corner comes back —
-    as does Metro 246's turn off Pacific onto Paseo del Mar in San Pedro, and 47
-    other routes'.
-  - "Something the last pass didn't have" has to count the *kind* of walk, not
-    just how many. A corridor whose length the shape can't yet vouch for isn't
-    thrown away: it goes in through the aligned-walk fallback below, one node
-    where a believed walk would lay several. Both bumped the same counter, so a
-    pass that turned a fallback into a believed walk looked like standing
-    still, the loop stopped, and the better fit it had just computed was
-    discarded. Metro 246's turn off Pacific Coast Hwy onto Figueroa is that
-    case exactly: the first pass reads 26 px of shape between the two badges
-    against the drawn corridor's 87 — three times out of band — and puts the
-    corner in as one aligned node; the second reads 71 px, believes the walk
-    and lays three nodes round the turn. Nine walks both times, so the corner
-    stayed a smooth 23 px arc cut across a square turn. Counting believed walks
-    apart is the whole fix, and it is what lets the corner through.
-  - Route numbers collide across agencies, so a candidate badge is kept only
-    when its own chip color is best explained by this agency's — measured
-    against every *other* agency's drawn colors, but never against this
-    agency's own. That distinction matters: the color a shape snaps to is
-    refined off the drawn lines and drifts from the legend seed it started at
-    (Foothill's came out a dozen px away), and the seed is still in the rival
-    palette, so left in it the seed sits closer to the agency's own chip than
-    the refined color does and rejects it as foreign. Foothill's Silver Streak
-    lost 16 of its 18 "SS" badges that way and, unpinned, its busway warp sat
-    up on Valley Blvd; folding the seeds into the own-color set fixes it.
-  - The same gate cost Long Beach Transit every badge it has. Its chips are
-    easy enough to *find* — the same maroon as its lines, sitting inside its
-    own mask — but they are that maroon saturated, the legend's ink, read off
-    466 badges as (126,33,58) with a couple of px of spread, while its lines
-    are the same ink laid thin over a cream page and refine to a washed
-    (134,98,101). Those are 66 apart, further than the chip stands from Metro's
-    Rapid red, so the gate answered "Metro" every time and the whole network
-    snapped unanchored. Naming the chip color (`BADGE_FILLS`) puts it in the
-    agency's own set. Route 8 is what it cost: the sheet badges it "8" four
-    times along the 223rd St line the feed names it after, the warp puts it a
-    block south — near enough to Sepulveda for the mask to take it there, and
-    out across Carson, where nothing is drawn between the two, near enough to
-    nothing at all — and the path left the drawn line at Main St and ran a
-    diagonal over blank page under the word CARSON, ending 54 px from the
-    westernmost "8". It now runs 223rd through all four badges and ends 4 px
-    from that one. Across the agency, measured against one fixed mask, twelve
-    routes improve and one (the 51) loses two px on a short stretch.
-  - Which is a measurement worth a warning of its own: `drift_check` refines
-    the mask color off the *stored* shapes, so a change that moves shapes onto
-    their lines also moves the yardstick — Long Beach refines to (136,96,96)
-    from the old shapes and (132,86,89) from the new, and its before/after
-    totals are not comparable. Compare two shapes against one tree, refined the
-    way the build refines it: off the warps.
-  - A badge belongs to the point of the shape nearest it, which asks the warp
-    to be closer to the truth than the streets are to each other. On a route
-    that runs out and back on parallel streets it isn't: GTrans 2 loops north
-    on Normandie and Vermont and south on Western, drawn 30 and 56 px apart,
-    and the warp puts all three 25-40 px east of their ink, so every
-    northbound badge came out nearest the southbound leg and the fit dragged
-    each leg across the loop onto the other's street. Two badges a street
-    apart claiming the same stretch is that failure showing, and the badges
-    are then re-read against the shape slid bodily onto them — the warp's
-    error varies slowly enough that one vector covers every leg. The slide is
-    charged for its length and refused unless it clears most of the residual,
-    so it only decides which badge speaks for which leg.
-  - "The point nearest it" is also one point, and a route that runs the same
-    drawn corridor twice passes the badge twice — so the badge pins every pass
-    it makes. Foothill 861 loops out of Duarte up Highland Av, east along Royal
-    Oaks Dr and round Encanto Pkwy, and comes home the same way; the sheet
-    prints one "861" on Royal Oaks at the Highland corner and it went to the
-    outbound pass. The return then had nothing between the Encanto chip and the
-    one at Duarte & Buena Vista — one 262 px span, and the corridor walk crossed
-    it by dropping down Las Lomas Rd onto Foothill's own 187 along Huntington Dr
-    and running west on that: 209 px against the drawn corridor's 250-odd, a
-    ratio of 0.80 and inside the band by a hair. The return leg rode Huntington
-    for 130 px, a block south of the Royal Oaks it is drawn along, and read as
-    no drift at all, the 187's ink being the same evergreen. A second pass
-    counts only where the shape comes back within half a line width of the
-    distance the nearest one stands at, having left the badge in between, and
-    running the other way — which is what doubling along one drawn line means.
-    Two legs on *parallel* streets are a street apart at the badge and stay one
-    leg's, which is the case above; both northbound is Montebello 20 up
-    Greenwood Av and Montebello Bl, and the heading test is what tells them
-    apart.
-  - Metrolink carries no badge anywhere on the sheet, and its lines share one
-    ink and one crosshatched livery, so where two run parallel the artwork
-    alone cannot say which is which: through Vernon the Orange County and
-    Riverside lines are drawn 26 px apart on the same heading, near enough that
-    the warp put the OC's schedule closer to the Riverside track than to its
-    own, and the snap left it there — under the "VERNON" label, on the line the
-    sheet labels "RIVERSIDE LINE". But the sheet *does* say which is which,
-    and in the words GTFS names the route with: it writes each railroad's name
-    along it, repeated down its length, and metrolink's route_id is "Orange
-    County Line". Those names anchor the way a numbered route's badges do,
-    within 6-9 px of their own track. The 91/Perris Valley borrows the Orange
-    County Line's name, sharing its track for the whole of its length here and
-    drawn as that one line; the Inland Empire-Orange County line borrows
-    nothing, coming no nearer than 467 px to any label on the sheet.
-  - A name is written a handful of times and nowhere else, though, so a line can
-    run a long way before its first one — and where the sheet needs a name to
-    tell two tracks apart, that head is the stretch with nothing to tell it.
-    The Riverside Line's own first "RIVERSIDE LINE" is 392 px into a 4,010 px
-    shape; before it the interpolation has nothing to interpolate between and
-    clamps, so the whole head carried that one anchor's own (-2.5,+21). Right
-    where the label is, and wrong upstream of it: the warp already runs within
-    6 px of its own track through Vernon, and 21 px down lands it midway
-    between the two, 9 px from each. The line then rode the Orange County track
-    for 90 px — the same swap the names exist to prevent, in the other
-    direction — and neither check could see it, one crosshatched livery meaning
-    a line on its neighbour's track is on ink of the right colour. A pin on the
-    drawn track east of the split gives the head something of its own; both
-    workings go from a median 14 px off it to under a pixel, and from 39% of
-    the stretch covered to 100%.
-  - A route's badges cover the whole route, but a shape is one *variant* of
-    it, so where a route forks, the badges on one fork are still inside the
-    gate of a variant taking the other and drag it bodily across. Metro 487's
-    Rosemead Blvd workings were pulled 143 px west onto the San Gabriel
-    branch. A badge is printed on one line, so it goes to whichever variant
-    passes nearest it: a shape keeps a badge while it is about as near as the
-    nearest variant gets, and loses it when another explains it far better.
-    On the shared trunk every variant is equally close and they all keep it.
-    Where the sheet designates a whole *agency* — see below — that comparison
-    has to range over every route the symbol covers rather than one route's
-    variants, since each of them is a candidate for the same word: the "BC"
-    printed on Beach Cities' 102 across Redondo Beach was dragging its 109
-    15 px off the PCH it runs on.
-  - Deciding that by distance holds only while the warp is nearer the truth
-    than the routes are to each other, and in Burbank it is not. Out there the
-    warp is 60-90 px out and turning with it — it puts BurbankBus's Pink Route
-    terminus at Downtown Burbank 81 px north of where the sheet draws it, its
-    Riverside Dr 48 px north and 50 px west — while the operator's two routes
-    are drawn a few blocks apart. So the distances came out backwards: of the
-    three "BU"s on the sheet the Pink Route was nearest to all three, including
-    the two printed on Burbank Bl and Buena Vista, streets it never touches.
-    Anchored to them it was fitted bodily onto the Orange Route's drawing —
-    down Buena Vista, out to Olive and back in a 130 px triangle over blank
-    page, then west along Burbank Bl and round the North Hollywood loop, 62% of
-    the *other* route's corridor covered and 12% of its own. Nothing on the
-    sheet can settle it, since the sheet's own answer to which route a "BU"
-    belongs to is "BurbankBus", so it is settled by hand (`SYMBOL_OWNERS`):
-    a route listed there takes exactly the words listed for it. With the two
-    lines given the words printed on them, the Pink Route needs no pin and no
-    hand-drawn corridor — it comes out on 100% of its own drawn line, a median
-    1.0 px off it, and the Orange Route, handed back the badge it had lost to
-    its neighbour, goes from 67% of its own corridor to 84%. Beach Cities is
-    not in the table and does not need to be: its two routes run a mile apart
-    at the nearest, further than the warp is wrong down there.
-  - A color mask can only find a line the raster shows, and the sheet draws
-    lines it doesn't. Those lines are read out of the PDF's vectors instead,
-    where every route is a stroke in its agency's ink — no tolerance, no rival
-    colors, nothing to recover from a rendering. Six networks need it:
-    - **Metrolink** rides the crosshatched railroad, inked in the same gray the
-      sheet uses for place labels and minor street art, so masking that color
-      selects most of the page.
-    - **The operators the sheet symbolises by agency** rather than by route:
-      Beach Cities Transit and BurbankBus. The sheet prints no route number for
-      either — one "BC" or "BU" beside every line the operator runs, and that
-      is all it says — and it sets those codes as plain text alongside the line
-      rather than on a chip. So the mask's presence test, the agency's own
-      pixels *under* the word, finds a few antialiased glyph strokes and
-      rejects them: both agencies snapped with no anchors at all, a median 15
-      and 45 px off their own drawn lines. The strokes answer both halves —
-      they are where the line is, and distance to them is a test a word
-      standing *beside* a line can pass — and take both down to a median 1 px.
-    - **LADOT** is the same story in olive: its mask comes back 278k pixels,
-      mostly label glyphs, and every LADOT route snapped to the nearest word.
-    - **Montebello Bus Lines**, where the mask holds the *thick* half of the
-      agency and the lettering, and misses the rest. The corridors two or three
-      of its routes share are drawn thick and mask solidly; the stretches one
-      route runs alone are drawn thin, and at 4096 px a thin sage line is a
-      blend with the page reading (183,194,162) and paler. 35% of the agency's
-      strokes have no mask pixel on them, while "PICO RIVERA", "WASHINGTON",
-      "PASSONS" and "BROADWAY" all come back as Montebello ink, the gray
-      lettering blending into range from the other side. So the 50 down
-      Washington Bl had a mask with its own line missing and the words beside it
-      present, and the badge-to-badge walk went where the drawing pointed: from
-      the "50" at Washington & Montebello Bl the lettering bridges north onto
-      the thick 10/60 corridor along Whittier Bl, which runs unbroken to
-      Whittier — 338 px that way against 304 of drawn Washington. The shorter
-      way won, so the 50 rode Whittier Bl across Pico Rivera and dropped back
-      down to its badge at Mar Vista as a 165° cusp; west of there the same hole
-      sent the Grande Vista jog — Soto up to Olympic, east, and down Grande
-      Vista to Washington, a compact dog-leg on the sheet — 158 px round Metro's
-      orange Olympic Bl instead of the 76 the sheet draws it in. Long Beach's
-      answer does not carry over: LBT's thin lines have a dark core to name as a
-      second seed, and Montebello's have none — the missed readings smear from
-      (183,194,162) to (221,224,199) with no cluster in them, and a seed pale
-      enough to cover the strokes takes the page with it, 167k mask pixels to
-      977k. Every one of the 37 Montebello shapes moves onto the vectors, and
-      seven of the eight routes improve on `drift_check` — which measures the
-      agency on those same strokes now: the 50 goes from 27% of its arc standing
-      over 12 px off its own ink to 0, the 90 40% to 3, the 30 27% to 0, the 70
-      24% to 9, the 10 17% to 1, the 20 7% to 3. The eighth is the 60, whose
-      drifting arc is 212 px either way: its northern loop up to Whittier
-      Narrows runs over page the sheet draws it no line on, and all that moves
-      is how much of that counts as beyond the drawing rather than off it.
-    - **Part-time services** are drawn as thin dashed lines, and at 4096 px
-      those dashes blend into the page or vanish under a heavier line alongside
-      — Metro 233 through the Sepulveda Pass is dashed orange laid against the
-      761's red ribbon, and none of it reaches the raster at all.
-    - **The G Line busway** has the opposite problem: its ribbon is on the
-      raster clearly enough, but so is everything the raster confuses with it.
-      Its orange is hotter than the streets' on the sheet and all but identical
-      to theirs in map.png, so its mask is read off the tile pyramid, where the
-      two stay 57 apart. That keeps whole parallel streets out, and still lets
-      in the orange badge chips printed alongside, whose antialiased fringe
-      blends to within tolerance of the ribbon: single stray pixels under the
-      "154" and "237" chips bent the line 40 px north of Burbank Blvd, and the
-      chips around De Soto dragged a Canoga working diagonally across three
-      blocks of blank page. The mask also stops dead where the sheet ghosts the
-      busway inside its "See G Line detour inset" call-out, and the line sagged
-      off it onto the dashed alignment below. The ink has one stroke per drawn
-      line, no chips at all, and draws the ghosted stretch in the same ink as
-      the rest.
-  - Where two liveries share one ink they are two stroke styles of it, so the
-    dash pattern tells them apart: the railroad's centreline under its dashed
-    ticks (the ticks stick out sideways and would only pull a shape off the
-    line), and LADOT's solid DASH against its dashed Commuter Express, which
-    keeps either from being dragged onto the other's streets. Which style a
-    route is drawn in is not its *name* to say, though. Dashes mark part-time
-    service, which is what a Commuter Express usually is and a DASH never is,
-    so the name predicts the style — and predicts it wrongly for the one
-    Commuter Express that runs all day: the 142 is drawn solid, like a DASH,
-    and looking for it among the dashes found nothing at all, the nearest one
-    being a median 292 px away. So the name proposes a livery and the printed
-    badges settle it. Every other Commuter Express has all of its badges on the
-    dashed strokes; the 142 has all four of its on the solid ones.
-  - A DASH is named rather than numbered, so nothing in the feed says what the
-    sheet badges it. Its designation is compressed out of the name — LADOT's
-    "Wilmington Clockwise" comes out "WC" — and the sheet prints no such thing:
-    it badges that loop "WM" and, four characters being four characters, the
-    Watts loop came out "WC" as well. So two DASHes ran under one designation
-    the sheet prints for neither, and with no badge to their name neither had
-    an anchor. Both wandered off the loop the sheet draws them as: Wilmington
-    stood over 12 px off its own ink for 37% of its length, cutting the chord
-    across the Anaheim/Figueroa corner and sewing between neighbouring blocks,
-    and Watts crossed three blocks of the grid diagonally between Manchester
-    and 103rd. Reading the two codes off the artwork (`MAP_LABELS`, as for the
-    operators the sheet symbolises by agency) both names the vehicles something
-    a rider can find and pins the loops: 37% off its ink to 2%, and Watts to
-    a median 0.9 px. Only a designation read off the sheet that way anchors a
-    DASH — a compressed one is a guess, and a guess that lands on a code the
-    sheet does print is worse than one that lands on nothing: "Southeast
-    Clockwise" comes out "SC", which the sheet prints twenty-nine times, the
-    nearest of them 326 px from the Southeast loop. Seven more read off the
-    sheet the same way: Boyle Heights is badged "BE" and not the "BH" that name
-    compresses to, El Sereno/City Terrace is "SC" (the first token being short
-    enough to keep, those buses carried an "El" the sheet prints only in EL
-    SEGUNDO and EL MONTE), Southeast is "SE" — which has to come with El
-    Sereno's, or the two of them would share one designation — and the two
-    Valley loops are "NR" and "VS". Northridge is the ordinary case, an
-    initialism ("NOR") the sheet prints nowhere. Van Nuys/Studio City is the
-    sharp one: its first token is four characters, so nothing is compressed at
-    all and the buses ran badged "Van", which the sheet *does* print — three
-    times, in "Van Nuys" the district and "Van Nuys Bl" the street, and never as
-    a route. It never appeared as an orphan while being the more misleading of
-    the two, because a rider who goes looking for "Van" on the map finds it.
-  - Two capitals is also the shape of half the words on the sheet, so a DASH
-    designation is taken on its *chip* rather than merely near the ink. Where a
-    Commuter Express number is set as plain text beside its line and distance is
-    all there is to go on, a DASH is printed on a flat olive chip — and the
-    sheet writes "SC AV" as a street label 97 px from the El Sereno loop, inside
-    the anchor gate and 4 px from the olive the Lincoln Heights DASH passes on.
-    It dragged the shape 200 px west. The chip colour and the teal the sheet
-    letters streets in are 172 apart, so reading the colour under the word
-    settles it. Where the sheet ends a loop
-    short of where the feed runs it — Wilmington's carries on four blocks south
-    of the "C St" the schematic stops at, over page the sheet draws no line on
-    — those blocks now fold onto the end of the drawn loop instead of trailing
-    off it.
-  - A mask smears a line across its casing, its badges and the fringe of
-    whatever is drawn beside it, so a shape can sit on the mask while its own
-    line is a good way off — 233 was resting against the 761 ribbon 25 px west
-    of its ink. Snapping to a centreline therefore keeps the full coarse-to-
-    fine ladder even once anchored, rather than the two tight passes the mask
-    settles for.
-  - The sheet writes a Commuter Express number as plain text beside its line
-    rather than on a chip, so those anchors are taken by distance to the ink
-    instead of by the agency's color under the word.
-  - Shapes whose lines aren't drawn at all (minor routes, the gray-drawn
-    agencies) keep the warp. So does any stretch crossing the Downtown
-    call-out: the panel replaces 200 px of every route with a ghosted
-    schematic, so there is nothing there to reach for, and interpolating a
-    correction across it piled 534's downtown end onto the 409's Figueroa.
-  - Snapping only moves a point sideways, and it pads the smoothing at the
-    ends, so a rail line finishes wherever the warp left it rather than where
-    the artwork stops — 70 px short of the E line's Atlantic, 24 px past the B
-    line's North Hollywood and out into blank page. Both ends of every rail
-    line are therefore squared up with the drawn line: an overshoot is cut back
-    to the ink, an end left short is walked on along its own ink (and through
-    the platform markers interrupting it) until the drawn line stops, and the
-    end then stands in the middle of the platform it finished at. A walk that
-    has to turn away from the line's heading, or that gets too far, is one
-    where the track carries on rather than ending, and is dropped; a *long* run
-    off the ink is the Downtown call-out, where nothing is drawn for 200 px and
-    the warp is all there is, and is left alone.
-  - A busway is pinned by the station names printed beside its ribbon rather
-    than by badges standing on it, since the sheet gives the G Line no badge at
-    all. The names run out where the stations do, though, and the J Line's last
-    one is Harbor Gateway: the 700 px the 950 carries on past it into San Pedro
-    had nothing pinning it — which is exactly the stretch where the sheet stops
-    running straight. It takes the busway off the 110 where the freeway ends,
-    west along Channel, back east along Ocean and south down Pacific to the
-    22nd St loop, and the warp drew the chord across all of it. A snap cannot
-    invent a switchback: every point of that chord is already sitting on some
-    part of the thing it cuts across, so there is nothing to pull it anywhere.
-    Only a walk between two anchors recovers a corridor, and there were no two
-    anchors to walk between. The sheet prints a "950" at the loop and another
-    where the 950 leaves the 910 at Harbor Gateway, and those two bracket it —
-    p90 12.9 px off the drawn busway to 4.4, and the sharpest turn on the route
-    from a 126° hairpin to nothing. Numbers only: the G Line's designation is a
-    letter, and the sole "G" the sheet sets is the one in "See G Line detour
-    inset", a caption standing 4 px from the ribbon it captions. Metro also
-    leaves `route_short_name` empty on both busways and writes the numbers into
-    the long name, so "950" has to be handed to the J Line by hand — its
-    vehicles are badged "910", the working most of them are.
-  - The G Line busway is squared the same way, being drawn the same way: its
-    own ribbon, ending at a platform. It needs it more than rail does, because
-    out in the Valley the warp's 50 px error runs *along* the busway as much as
-    across it, which a sideways snap cannot answer for — every end of every
-    working landed somewhere other than its terminus, 47 px short of North
-    Hollywood or (before the ink) 50 px past it and away down the B line's red
-    toward Universal City. The squared line is then resampled back to the point
-    count it came in with, so it stays index-aligned with the warp and the
-    stops still carry over rather than being re-projected. With both lines now
-    running platform to platform, that pins the ends exactly and leaves every
-    station between them a median 10 px from its drawn platform, down from 42.
-    Handing those stops to the platform matcher rail uses was worse, not
-    better: the warp lags by half the distance between G Line stations, so the
-    alignment minimizing total offset is the one putting every station on the
-    platform *before* its own, and that is the one it found.
-  - A snapped line is finally *despiked* and *unfolded*. Both take out the same
-    scar, at two scales: the line running out along a piece of ink and straight
-    back down it, a hairpin the artwork never makes. Despiking straightens the
-    slivers, where the dart is a dozen px. Unfolding takes out the long ones —
-    where the GTFS detours off the line the sheet draws (a bus round a transit
-    centre, a jog through an office park, a terminal loop the schematic ends in
-    a stub), the detour has no ink of its own and the snapper crushes it onto
-    the ink beside it, laying tens of px of route back over itself. The run is
-    replaced by the straight line between the points either side, which don't
-    move; a fold at an *end* instead keeps whichever leg reaches the terminus,
-    so the vehicle starts at its drawn end and drives in rather than stopping
-    short of it.
-  - Three things hold those passes back from the doubling-back a route really
-    makes. A square street corner turns without returning and a circuit round a
-    block keeps its two arms apart, so neither reads as a fold. The *warp* is
-    consulted over the same stretch — where the route itself runs out and back
-    down one street, the retracing is the route's and stays. And a fold that is
-    the only thing reaching one of the route's printed badges is a detour the
-    sheet draws, so it stays too — Metro 601's run down to the badge on Burbank
-    Blvd doubles back exactly the way the snapper's folds do.
-  - A third pass, *undetouring*, answers the failure none of that can see. A
-    mask holds a whole agency's lines and cannot tell one of them from another,
-    so where the sheet paints a label or a crossing line over a route's own ink
-    the nearest ink for that stretch is a *sibling route*, and the smoothed
-    displacement walks the path onto it and back. The 61-point smoothing makes
-    that a gentle bulge with no sharp turn in it, so despiking and unfolding
-    have nothing to charge and `path_check` scores it a flat zero — Foothill 493
-    was visibly off its line at zero. What does see it is the warp: `base` and
-    `full` are the same points before and after snapping, so a stretch leaving
-    the warp far and returning to it is the snapper having found ink the warp
-    says is not this route's. Measured against the *sustained* part of the
-    correction, since a shape the badges have rightly carried bodily onto its
-    street never returns to the warp at all.
-  - What holds *that* back is the drawing itself. The excursion and the
-    flattening that would replace it are each measured against what the route is
-    drawn in — the PDF's strokes where a route has them, its agency's colour
-    mask where it doesn't — and a flattening standing further off the drawing
-    than the excursion does is not a flattening but the removal of the line.
-    Comparing the two a good way out along the run rather than at the median is
-    what makes a holed mask usable for this: a label knocks out a short piece of
-    a run and the drawing resumes either side of it, while a corner cut across
-    blank page is off the drawing for as long as the corner lasts. Big Blue Bus
-    14's turn from Centinela onto Bluff Creek was being flattened into the chord
-    across it, and Metro 180's step from Broadway onto Colorado before it.
-  - Where the sheet prints no badge over a stretch that needs one, a point on
-    the drawn line is placed by hand (`PINNED_ANCHORS`) and serves as a badge
-    does. Three reasons it comes to that: a shared transit hub prints each of
-    its routes once in the municipal gray, so Metro 2's chip at the UCLA gateway
-    is Big Blue Bus's and the colour gate rightly refuses it; the badge-to-
-    badge corridor walk needs the mask to be continuous, which it is not where
-    Culver CityBus's olive crosses BBB 14's gray by the Culver City Transit
-    Center; and the badges can simply run out before the route does. Metro
-    217's last "217" is printed where Broadway turns down onto Colorado in
-    Glendale, 90 px short of the terminus at Colorado & Eagledale, and through
-    here the warp stands 40 px north of the artwork — which is exactly where
-    the sheet draws the 501 along the Ventura Fwy, in Metro's own orange and 2
-    px from the tail. The end of the route snapped onto the freeway and ran
-    east along it. It cost the corner as well: the walk that recovers Brand and
-    Broadway lands the line beside a tail still up on the 134, so it comes down
-    onto Broadway, darts at the turn and doubles back — 452 deg of hairpin
-    against the chord's zero, so the aligned fit was refused and the chord
-    across the blocks is what shipped. A pin on the drawn Colorado settles
-    both, a median 20 px off the drawn corridor to 2. A pin near an end of a
-    shape also cuts the overshoot back to itself, for the schematic that ends a
-    route at its hub while the GTFS runs on to a layover the map omits — BBB 14
-    carried on past the transit centre and snapped onto the railroad crosshatch
-    down the 405.
-  - A pin also answers the case where both badges *are* printed and it is the
-    drawn web between them that misleads. Long Beach Transit 92 comes down
-    Bellflower Bl, and the sheet takes it east along Beach Dr, south past Cal
-    State Long Beach and west along 7th St — a 265 px staple round three sides
-    of the campus, bracketed by the "92" on Bellflower and the middle chip of
-    the 91/92/93 stack on 7th. Pacific Coast Hwy's diagonal merges into
-    Bellflower just above the Beach corner, though, so the walk can come down
-    Bellflower, cross onto PCH where the two meet and run straight to 7th: 153
-    px, and the length band that catches a walk cutting a corner the route
-    really turns comes within a hair of catching this one — the warp's own arc
-    reads 214, a ratio of 0.72 against the 0.75 floor. Refused as a shortcut,
-    the walk goes in through the aligned-walk fallback instead, both courses
-    running south down the page, and that is self-confirming: with the shape
-    pulled onto PCH the next pass measures the arc at 171, reads 0.90 and
-    believes the walk outright. Both directions ran diagonally over blank page
-    between Bellflower and 7th, with 39% and 38% of the drawn staple covered.
-    One point on the drawn campus east side splits the stretch so each half is
-    walked along the staple itself: 97% and 99% covered, a median 3.4 and 8.8
-    px off the drawn corridor down to 2.6 and 2.8. Where the pin stands matters
-    more than usual, because a pin only closes the shortcuts that lie beyond
-    it — up on Beach Dr the stretch below it still cuts back across the campus
-    and coverage comes out 54%/52%, so it goes low on the east side, a few px
-    above the corner onto 7th. The 91, the 93 and the 94 are drawn along the
-    same staple and cut the same corner for the same reason, so the one point
-    serves all four: 23/33/32% covered to 74/90/74 on the 91, 26/13/25 to
-    83/97/83 on the 93, 41/46/30/41 to 83/84/41/83 on the 94. The 41, 46, 171
-    and 175 run through the campus in the feed too and are not pinned — the
-    sheet draws none of them past the "41 45 46" chips on Pacific Coast Hwy,
-    so there is no staple of theirs to pin them to.
-  - The other way a walk finds a corridor that isn't there is by climbing the
-    sheet's own route chips. A chip is filled with the legend's saturated
-    maroon, nothing like the mask colour — but its antialiased border blends
-    through that colour on its way to the page, so every chip is a ring of mask
-    pixels, and the sheet stacks them in columns. Long Beach Transit 131 is
-    drawn straight down Redondo Av and round onto 2nd St, ~100 px between the
-    "131" chip on Redondo and the one on 2nd; the walk came back 92 px going
-    east along 4th St and south down Ximeno Av instead, and won on length. The
-    rungs are what let it: the "111"/"112" and "121"/"131" chips are printed in
-    one column at x=2161 and bridge the 24 px between where the drawn Ximeno
-    stops and 2nd St, while the "131" chip on Redondo bridges the 4 px from
-    Redondo across to 4th. Both corridors are drawn, so the length band has
-    nothing to separate them by; a pin on Redondo between the two badges splits
-    the stretch so neither half reaches the ladder. 27% of the drawn corridor
-    covered to 100%, a median 15.3 px off it to 1.8.
-  - A walk will climb the sheet's *place names* too, where an agency's ink is
-    close enough to the grey they are set in. Torrance Transit 6 comes east
-    along Carson St, north up Madrona Av and Prairie Av and east along 190th St
-    to Crenshaw Bl, where it drops into the Mary K Giordano Regional Transit
-    Center and comes back; the sheet draws all of it, and both workings instead
-    ran a diagonal across the blank block between Madrona and Crenshaw, 40-50
-    px off the corridor, with the westbound one carrying on into a knot of
-    zigzags and 35 px of blank page along y=2845. The 340 px of route from the
-    Prairie corner to the transit centre and back were crushed onto five pixels
-    of path at (1425.5,2853), so the line never went near the marker it serves.
-    The badges bracketing the fault are 110 px apart with nothing between them,
-    and the walk that should recover the corridor — 166 px up Madrona and east
-    along 190th — comes back 122 px straight across it, believed at a ratio of
-    0.89. What it walks on is "TORRANCE", set right across the block the
-    diagonal crosses: 376 mask pixels stand inside the triangle between the two
-    badges, on those letters and on "Regional Transit Center" below them. One
-    pin on the drawn 190th splits the span so the corridor is walked up Madrona
-    and interpolated round the corner, and a second on the drawn Vermont Av
-    holds what re-fitting does to the far end of the route — out at Harbor
-    Gateway the sheet draws two periwinkle ways through the junction, and the
-    westbound working had taken the wrong one before this change and took a
-    third, up on the busway, after it. Of the 208 px of drawn corridor between
-    Carson and Crenshaw the two workings go from 25% and 32% covered to 100%,
-    from a median 12.2 and 16.5 px off it to 1.0 and 1.1, and the Harbor
-    Gateway stretch from 74% and 70% to 74% and 74%.
-  - The length band's far edge does the same damage from the other side, and
-    it shows up as a fault in one direction only. Long Beach Transit 111 is
-    drawn down Lakewood Bl between the "111" at the top of the 111/112/192
-    stack and the one printed on Lakewood a block further south; the corridor
-    between them walks 109 px, and the southbound working's arc across it reads
-    79.5 — 1.37, over the 1.35 ceiling. So the walk went in through the
-    aligned-walk fallback, which lays one node where a believed walk lays
-    three, and what the fit interpolated between the badges was the chord: a
-    staircase down across the "LAKEWOOD" label and over three blocks of blank
-    page. The northbound workings read the same stretch as 113.5 against 148.3,
-    inside the band, and come down Lakewood correctly. A pin halfway leaves
-    each half short enough that the straight interpolation *is* the corridor —
-    the two southbound workings go from 6% of their length standing off LBT ink
-    to 3%, and from 44% of the drawn corridor covered to 92%.
-  - Where the badges run out at a corner, what is left unanchored is a whole
-    limb of the route. Long Beach Transit 61 comes up Atlantic Av, turns west
-    along Artesia Bl and finishes at Artesia (A Line) Station, and the
-    northernmost "61" on the sheet is printed on Atlantic *below* that corner —
-    so the 140 px of drawn Artesia and the terminus at the end of it had no
-    anchor between them. Past the last one the interpolation clamps to its
-    displacement, and through here the warp stands a near-uniform 24 px south of
-    the artwork, which left the corridor arriving 18 px low with the snap to
-    find its own way back. What it found was the neighbour: the 51's curve off
-    Artesia down Long Beach Bl crosses the warp's own Artesia, so the shape
-    caught it, came off the drawn line and ran 80 px west over blank page
-    through the letters of "VICTORIA" before hooking up to the station from
-    below — the northbound workings finishing 44 px short of it, in the open.
-    One pin on the drawn Artesia is enough, the error being a straight shift
-    rather than a rotation: with a point on the artwork as the last anchor the
-    clamp carries that same correction over the rest of the limb. Where it
-    stands is decided by the trim, not by the fault — out where the sag is worst
-    the pin has only 99 px of shape beyond it, inside `TERMINUS_TAIL`, so
-    `trim_terminus` reads it as a terminus the shape overruns and cuts the
-    station approach off; east of the Long Beach Bl junction there is room for
-    both. The three full-length workings go from a median 4.3, 7.4 and 7.2 px
-    off the drawn corridor to 1.2, and from 57% of it covered to 92%.
-  - The same failure over a whole limb of five routes at once, with a control
-    running beside them. Foothill Transit's 493, 495, 498, 499 and 699 come in
-    from the San Gabriel Valley on the El Monte Busway, and the sheet draws
-    them as one evergreen line beside the grey busway ribbon from the Downtown
-    call-out's edge out past Cal State LA. Every badge they have is past the
-    far end of that: the five numbers are set in one run at Cal State LA and
-    printed nowhere west of it. Through here the warp stands *north* of the
-    artwork by a distance that changes along it — the corridor is drawn at
-    y=1919 and warped to y≈1878-1891, and at the badges' own x the error is
-    63 px — so the westernmost badge attached with a displacement of (0,+63),
-    the clamp carried that south over everything west of it, and by then the
-    drawn line had dropped away southwest. All five ran 30-40 px *past* their
-    own line, down the E Line's corridor through Pico/Aliso, Mariachi Plaza
-    and Soto and along Cesar Chavez: a median 32.7 to 36.2 px off the drawn
-    corridor, worst 76, with 34% of it covered. The Silver Streak is drawn
-    along the same corridor with the same warp under it and came out a median
-    1.8-2.4 px off, because the sheet prints an "SS" chip on this stretch and
-    the others get nothing — which is what says this is anchoring rather than
-    the warp. Three points fix it and one does not: pinned at the west end
-    alone the clamp closes but the interpolation to the badges runs straight
-    across the bend the corridor makes, and 167 px in the middle go 40 px
-    south instead. With the bend pinned as well, and the diagonal's midpoint to
-    hold it, the five go to a median 1.5-2.0 px off and 90-100% covered. The
-    Silver Streak takes the same three — same corridor, and its own chip is one
-    anchor over a 490 px stretch — and goes from 80-97% covered to 94-100%.
-  - A pin is what a DASH loop out in the Valley needs, because a badge or two is
-    all the sheet gives it and the warp there is both large and uneven — a
-    median 41 px off the drawn Northridge loop and 94 at the far corner, wider
-    than the blocks the loop is drawn around, so each leg went to whichever
-    olive it landed nearest. Measured as the share of its own drawn loop a shape
-    runs within 8 px of, Northridge covered 26% and the two Van Nuys/Studio City
-    workings 61% each. Three pins take Van Nuys/Studio City to 100%, a median
-    half a pixel off its ink; two take Northridge to 88%. The missing 12% is the
-    stub where that loop leaves Nordhoff at Corbin, drops a block south and
-    comes back along Parthenia, and nothing can pin it: the drawn Corbin stands
-    7 px from the *warp's Wilbur* leg, the last leg of the circuit, so a pin
-    there reads as a terminus and trims 66 px off the end of the loop instead of
-    anchoring it — and moved far enough east to clear that, it attaches to the
-    warp's Reseda leg half a loop away. LADOT was also a network
-    `PINNED_ANCHORS` could not reach at all, its branch never adding them to the
-    anchor list; that was a gap rather than a policy, and it is closed — as is
-    the same gap in Metrolink's branch, which the Riverside Line needed.
-  - One pin cannot always do both jobs, and where it can't the terminus is
-    named in *warp* px for the trim alone (`TRIM_TERMINI`). Torrance 5 is the
-    case: the sheet ends it at Pacific Coast Hwy & Crenshaw, the GTFS runs 1.2
-    km further up Crenshaw Bl to a layover, and the warp holds that junction 58
-    px south of where the sheet draws it. Distance is not what defeats a pin on
-    the drawing there — the trim cuts to the *nearest* point of the shape, and
-    the layover's own start point lands 26 px from the drawn corner, nearer to
-    it than the terminus is. Every point of the drawn corridor answers the same
-    way, so the terminus is given where the warp puts it.
-  - Where not even a pin can be placed, the corridor itself is drawn by hand
-    (`OVERRIDE_PATHS`) and spliced into the snapped shape. It takes several
-    failures at once to come to that, and ten cases have them: Metro 761's
-    corner from Sunset into UCLA; Metro 501's North Hollywood end, below; Metro
-    251's Eagle Rock end, below; Montebello 20's Whittier Bl stub, below; LADOT
-    142 through San Pedro, below; Long Beach Transit 1 and 2 round the corners
-    of Carson, below; Torrance Transit 6's Carson St leg, below; Torrance 5's
-    south end, where the "5" printed on the drawn PCH is 43 px from the warp's
-    *Arlington* leg and 65 from the PCH leg it is printed on, so the fit pulls a
-    point 130 px into the route down onto it and leaves the terminus to snap
-    onto the grey the sheet draws the streets themselves in; and Montebello 10
-    down Atlantic, where the sheet
-    draws a street vertical that really slants southwest. That lands the
-    warp's Whittier junction 68 px west of the drawn one and turns a corner
-    into a dog-leg; the dog-leg inflates the arc between the two "10" badges
-    bracketing the stretch to 211 px against the drawn corridor's 145, so the
-    walk between them is thrown out as a shortcut and the re-fit can't rescue
-    it — the badges pin the ends and the interpolation between them keeps the
-    arc, so the ratio reads the same on every pass. Nor can a pin: a point on
-    the drawn Atlantic is *nearer the warp's Whittier leg* than its Atlantic
-    one, so it speaks for the wrong stretch of the shape. What was left was the
-    chord between the badges, 65 px off the line at its worst, down to 6th and
-    Fraser and back up a piece of Whittier the route never runs.
-  - Metro 501's North Hollywood end is the one where a pin has nowhere to
-    stand at all. The sheet brings the route in off the 134, round the corner
-    at Lankershim and up the Lankershim corridor into the station; the stored
-    path left the drawn line a block short of that corner, ran west across
-    blank page and stopped 55 px out in the open on the 549's thin orange
-    beside the busway — a line ending nowhere, which is the one thing a
-    terminus must not look like. The warp is why nothing can be pinned: the
-    501 leaves North Hollywood down Lankershim, turns east and serves Olive
-    and Alameda in Burbank before it reaches the freeway, and the warp lays
-    that Burbank leg straight over where the sheet draws Lankershim. Every
-    point of the drawn corridor — the station, the corner, anywhere between —
-    is nearer the warp's Burbank leg, a hundred px further into the route,
-    than it is to the warp's own Lankershim, so a pin anchors the middle of
-    the route and leaves the end where it was. The corridor is two straight
-    runs and a corner and the sheet draws it plainly, so it is drawn by hand,
-    ending 12 px past where the ink stops so the vehicle finishes on the
-    station marker rather than at the edge of the box the sheet draws round
-    it. Over the whole route that is p90 7.2 px off the drawn line to 2.7.
-  - Metro 251's Eagle Rock end is the one where the badges bracket the fault
-    without reaching into it. The route comes up Eagle Rock Bl, turns west
-    along Colorado and finishes at Colorado & Eagledale where Colorado meets
-    Broadway by Eagle Rock Plaza; the stored path instead climbed off the plaza
-    onto the Ventura Fwy, ran 67 px east along the 501's orange, came down onto
-    Colorado a block past Eagle Rock Bl and doubled back west to the corner it
-    should have turned at — the northbound workings making the same excursion
-    lower and smaller, out along the 81's Yosemite Dr and back. It is the 217's
-    failure one street west and the same freeway: through here the warp stands
-    ~80 px east and ~25 px north of the artwork, and what is drawn where it
-    lays Colorado is the 501, 2 px away and in Metro's own orange. Neither
-    check sees it for that reason — the excursion is ink of the right colour,
-    so `drift_check` scores the route 1.4%, and it is smooth, so `path_check`
-    scores it zero. The sheet prints three "251"s here, and both plaza chips
-    attach to the same point of the warp 24 px into the shape while the next
-    anchor is 216 px of arc further on, down Eagle Rock Bl: everything between
-    is a straight interpolation between two displacements 74 px apart, across a
-    corner the warp puts 80 px east of the drawn one. No walk can recover it
-    either — the two chips bracketing that corner are 38 px apart on the sheet,
-    under the 60 px floor a corridor walk needs. And no pin can be placed
-    between them, for Montebello 10's reason: the drawn corner stands 43 px
-    from the warp's layover leg and 86 px from the warp's own corner, so a
-    point there speaks for the wrong stretch, and pins on the stub, at the
-    corner and on Colorado east of it all attach to that same point and leave
-    the freeway run where it was. Two streets and a corner, so the corridor is
-    drawn by hand. The layover loop the southbound workings run out to Verdugo
-    Rd is not in it: the sheet draws that as the line *above* Colorado, and
-    carrying the corridor round it would finish the northbound working at the
-    junction rather than at the terminus, so both directions share the one
-    stretch of Colorado and the loop plays as a crawl along it while the bus
-    lays over. Over the last 200 px of the route the southbound workings go
-    from a median 22.6 px off the drawn corridor (worst 67.7) to 0.7, the
-    northbound ones from 1.3 (worst 26.2) to 1.0, and the corridor is covered
-    100% either way.
-  - Montebello 20's Whittier Bl stub is the one that doubles back. The route
-    comes down Montebello Bl, turns west along Whittier, runs out to Garfield Av
-    and comes straight back — the stop list ends the westward run at Garfield &
-    Whittier and picks up again heading east — and the sheet draws that as one
-    line, Whittier being the 10's corridor and shared. What shipped was a wedge:
-    the two legs ran either side of the drawn Whittier, up to 17.7 px off it
-    southbound and 24.3 northbound, with the fold 14 px short of the drawn
-    Garfield corner as a 155° cusp; 21 px of the northbound run stood off every
-    Montebello stroke on the sheet, a rectangle over blank page. Three failures
-    at once. The feed's own shapes are part of it — the southbound return from
-    Garfield is a single straight chord rather than a traced street, and the
-    northbound ones jump from Greenwood & Carmelita to Garfield & Whittier, run
-    south down Garfield and east along a street the route never touches, come
-    back, and jump again before finally running east; that spurious loop is the
-    rectangle. The sheet stretches the Montebello Bl junction south, so the
-    warp's Whittier is *rotated* against the drawn one — 31 px out at one end of
-    the stub and 7 at the other — and no one correction fits both. And the stub
-    is 170 px of arc out and back against a 244 px smoothing window, so the two
-    legs are averaged into each other and into the legs either side, and neither
-    can land while the other pulls. A pin reaches both legs — a badge pins every
-    pass a shape makes at it — and still cannot close it: pinned mid-stub, one
-    direction runs 12 px past the drawn Garfield corner and the other stops 3 px
-    short, trading the wedge for an overshoot. So the corridor is drawn by hand,
-    out and back along the drawn Whittier, which is also what lets one path
-    serve both directions: the run's net displacement is nil, so the path has to
-    close on itself and the orientation test is a no-op. Over the stub the four
-    workings go from a median 2.9 px (southbound) and 9.4 px (northbound) off
-    the drawn corridor to 0.9, from 74% and 66% of it covered to 100%, and the
-    route's drift from 3.2% of its length to none. `path_check` ranks it worse
-    for it — 268 to 933 — and that is the trade rather than a regression: the
-    retrace is exact now, so the fold at Garfield is a true 180° where before it
-    was a 155° cusp *beside* the line. It is the DASH Wilmington case; the sheet
-    draws the stub, so the doubling back is the artwork's.
-  - The 142's San Pedro end is the failure a *bodily* slide cannot answer for.
-    The slide assumes the warp's error "varies slowly enough that one vector
-    covers every leg"; over this route it does not — 78 px south of the drawn
-    7th and Gaffey at one end of 350 px of shape, and dead on at the Long Beach
-    end of it. The slide it settles for is a compromise, and the two directions
-    of the one route land either side of the length bound: 44 px westbound and
-    allowed, 49 px eastbound and refused by one. Unfitted, the badges cross —
-    the waterfront chip at the foot of Harbor is nearest the *7th St* run of
-    the warp rather than the shape's own start — and the eastbound working kept
-    a 60 px bulge across the corner. Widening the bound is not the answer: it
-    admits the 142 and rescues Torrance R3 (961 to 219 on `path_check`), and it
-    puts a fresh cusp into four routes that had none.
-  - Long Beach Transit 1 and 2 are one fault rather than two: both turn at Del
-    Amo & Avalon in Carson, both are badged either side of that junction and
-    nowhere inside it, and both are short enough that a pin near it reads as a
-    terminus. The 1 comes west along Del Amo Bl, north up Avalon Bl and east
-    along Victoria St to Cal State Dominguez Hills, and the sheet draws it as
-    one line — Avalon at x=1687.5 between Victoria at y=2778.5 and Del Amo at
-    y=2881.5. What shipped cut both corners: a diagonal from the Cal State end
-    across Dignity Health Sports Park onto Avalon, and a second across the Del
-    Amo junction, with a dip below the line at SouthBay Pavilion and a bulge
-    above it under the "DEL AMO" label. Through here the warp is out by more
-    than the streets are apart and turning with it — Victoria 36 px, Avalon 16,
-    Del Amo 32 — so the drawn corners stand 40 and 28 px from the warp's own,
-    and four machines fail at once. The badges bracketing the lower corner are
-    41 px apart, under `TRACE_SPAN`'s 60 px floor, so no walk is attempted and
-    the chord interpolates it. The chip above Del Amo then speaks for the wrong
-    stretch, Montebello 10's failure again: 38 px from the warp's *Avalon* leg
-    against 41 from its own Del Amo one. The walk that *is* attempted, across
-    the upper corner, comes back 73 px against the drawn corridor's 95 and is
-    believed at a ratio of 1.03 — it walks the lettering, "Sports Park" knocking
-    a 10 px hole in the drawn Avalon's mask while the glyph strokes of "Health"
-    and "Park" read as this agency's washed line colour and trail diagonally
-    from the hole to the chip, every cell of the diagonal 1-5 px from one of
-    them. And a pin cannot be placed: the route is 355 px long, so a pin on the
-    drawn lower corner sits 96 px of shape from the Cal State end, inside
-    `trim_terminus`'s 110 px tail, and takes Victoria and the top of Avalon off
-    the route along with the corner. The 2 is the same junction from the other
-    side — Cal State, Victoria, Central Av, Del Amo, Avalon, 223rd St — with its
-    two badges 55 px apart, its Del Amo chip attaching to the warp's *Central*
-    leg (29 px against 33), and its whole Del Amo run missing the drawn line
-    altogether: it drops to the warp's own y=2913 and rides the 405 west, which
-    the sheet dashes in (115,35,50) against this agency's (104,48,58) and so
-    inside its mask. That is `drift_check`'s blind spot exactly — ink of the
-    right colour, 12 px of 400 scored — and `path_check` sees neither route at
-    all, both scoring a flat zero, because a cut corner is smooth. Both
-    corridors are drawn by hand; all four workings go from 67-74% of their drawn
-    corridor covered to 100%, and from a median 1.4-3.6 px off it (worst 15-27)
-    to 0.4-1.0 (worst 3.6).
-  - Torrance Transit 6's Carson St leg is what is left when the pins above have
-    done their work. They recover everything from Madrona Av north, and they
-    cannot recover this, because down here the warp lies across itself: the "6"
-    printed on the drawn Madrona 10 px above the Carson crossing has the warp's
-    *Madrona* leg passing 4 px from it — 64 px up the leg from the corner, the
-    warp standing 54 px south of the drawn Carson — so the chip anchors that
-    point with no displacement at all and drags the corner it is printed above
-    15 px south of the street, out along the row of badge chips below it. A pin
-    is Montebello 10's case again: the warp's Madrona leg runs straight over
-    where the sheet draws Carson St, so a point on the drawn Carson stands 15 px
-    from that leg against 55 from the warp's own Carson at mid-block, and 44
-    against 52 at the Hawthorne Bl terminus. Every point of the street answers
-    the same way, speaking for the leg the bus comes back down rather than the
-    one it arrives on. Two streets and a corner, so the corridor is drawn by
-    hand, from the terminus east to Madrona and up it as far as the snap can be
-    rejoined — with the pins, 100% of the Carson-to-Crenshaw corridor covered
-    against 25% and 32% before, a median 1.0 and 1.1 px off it.
-  - Nothing is taken on faith. Every candidate is scored on the stored,
-    rounded geometry the animation actually plays — by the very measure
-    `scripts/path_check.py` ranks on, plus what its excursions cost — and the
-    best wins, the snapper's own shape taking ties, and anything ranking worse
-    on the hairpin measure than the snapper's own shape thrown out before it is
-    scored at all. So no shape comes out worse than it went in. Together they
-    settle 393 shapes and take two thirds off the fleet's total hairpin
-    turning, with every rail line still at zero.
+  every shape is then pulled onto its system's *drawn* line. Each system's
+  lines are found either by color-masking the raster or, where a color mask
+  can't separate them from the page, by reading the PDF's own strokes. Shapes
+  are pinned to the route badges the sheet prints, the drawn line is walked
+  between consecutive badges so corrections follow the drawn corridor rather
+  than a chord across it, and the whole fit re-runs while each pass learns
+  something the last one didn't have. Cleanup passes then take out the
+  artifacts snapping introduces — hairpins, folds, and excursions onto a
+  neighbouring route's ink. Every candidate is scored against the drawing and
+  the snapper's own shape takes ties, so no shape comes out worse than it went
+  in.
 - **Rail platforms** — where a train halts is the white marker the sheet draws,
-  not the warped stop, and matching each stop to its nearest one double-books
-  platforms wherever the warp lags the artwork by more than the stops are
-  apart. The platforms along a line *are* its stop sequence, so the two are
-  aligned in order instead — one to one, and however far the warp has slid.
-  Stops whose platform isn't drawn, which is most of downtown under the
-  call-out panel, fall in the gaps and keep the warp.
-- **Downtown inset** — a route reaching downtown is mirrored into the call-out
-  panel, and which stops belong to which mirrored run is decided by comparing
-  distances along the main shape. Both sides of that comparison go through one
-  measure, because two callers measuring differently is a mismatch that only
-  shows when the snap moves: the runs used to be placed by projecting onto the
-  snapped shape while the stops were carried over from the warp, and a
-  Metrolink shape shifting 28 px inside the call-out — where nothing is drawn
-  and the geometry is the warp's own noise — was enough to put Union Station
-  outside its own run and drop every Metrolink line out of the panel.
-  The panel is also where a rail line's snap matters most, since it is the one
-  place the sheet redraws downtown at a legible size, and three things had all
-  five downtown lines wandering off the ribbons drawn for them:
-  - It was masked on `map.png` while rail everywhere else is masked on the tile
-    pyramid, and the panel is drawn small enough on the 4096 px reduction for
-    that to matter. map.png renders the E Line's printed (254,186,18) as
-    (233,181,74), which is 60.0 away — exactly the rail tolerance, so `< 60`
-    matched not one pixel of it and the E kept its raw warp from 7th/Metro
-    Center to Little Tokyo, cutting across the blocks it is drawn along. On the
-    pyramid the same gold sits 0.0 from its own color.
-  - A station's label plate carries a chip per line, filled with that line's
-    own color, and in the magnified panel it is a solid disc of it a few tens
-    of px off the ribbon. Both the B and the D dived into their own chips on
-    the "7th St/Metro Center" plate and came back out. A drawn line is longer
-    than a chip is wide whichever way it runs, so a mask component that fits
-    inside a chip's footprint in both axes is not a line.
-  - The panel's own legend box was declared 26 px taller and 35 px wider than
-    it is, and what that swallowed was live artwork: the A Line's run east
-    along Washington Blvd, and the San Pedro platform it ends at. With them cut
-    out of the mask the whole south-east end of the A piled up on the last blue
-    pixel west of the box, and what the panel drew was a line running
-    diagonally across the legend.
-
-  A mask of one route's color also gets to reach further and to ignore where
-  the mask is *allowed* to be blank — see `sole` in `snap_coherent`: a point
-  the sheet drew nothing under has no line of its own to find, but on a
-  one-line mask there is no neighbour to be dragged onto either. Together
-  these take all four downtown rail lines from a median 0.2-10.5 px off their
-  drawn ribbons, with a fifth to a half of each standing more than 12 px off,
-  to a median 0.2 and under a tenth. The K Line is not in the panel at all;
-  the sheet stops it well short of downtown.
-  The panel's vehicles are as tappable as the map's: the mirrored placement is
-  one function the renderer and the path inspector both go through, so a tap
-  tests the pixel a vehicle was actually drawn at. It used to test only the
-  main-map position, which for a vehicle inside the panel is somewhere else
-  entirely, so every tap in the call-out landed on nothing. Inside the frame
-  the panel's own sprites are offered first, since they are drawn last and
-  clipped to it — a tap on blank panel clears the selection rather than picking
-  something hidden underneath.
-- **Rendering** (`index.html`, vanilla canvas) — each vehicle is a labeled
-  circle in the color the map draws its line in, so every sprite matches the
-  artwork it rides on. Where a feed's lines are read out of the PDF that color
-  is the ink itself rather than a reading of the artwork, because the reading
-  is taken along the *warp*: LADOT's is a median 20 px off its drawn line, so
-  most of what it sampled was the page, and both liveries came out a pale khaki
-  against the dark olive the sheet prints. Trains pull away, run, and brake to a stand at each
-  station, inside the scheduled time; buses keep their speed through the
-  kerbside stops the map doesn't mark. Rail draws above buses, vehicles off the drawn map are hidden, and the day loops
+  not the warped stop. The platforms along a line *are* its stop sequence, so
+  the two are aligned in order rather than by nearest-match, which would
+  double-book platforms wherever the warp lags.
+- **Downtown inset** — the sheet redraws downtown as a rotated call-out panel,
+  so routes reaching it are mirrored into the panel and snapped there
+  separately. Its vehicles are tappable through the same placement function the
+  renderer draws them with.
+- **Rendering** (`index.html` + `app.js`, vanilla canvas) — each vehicle is a
+  labeled circle in the color the map draws its line in. Trains pull away, run,
+  and brake to a stand at each station within the scheduled time; buses keep
+  their speed through the kerbside stops the map doesn't mark. Rail draws above
+  buses, vehicles off the drawn map are hidden, and the day loops
   midnight→midnight.
+
+Where the artwork can't settle something on its own, it's named by hand in a
+table in `build_data.py`. See `implementation_notes.md`.
 
 ## Source files
 
@@ -902,61 +77,37 @@ All the Python is offline build tooling — nothing runs in the browser. The
 pipeline order is `georef.py` → `georef_inset.py` → `build_data.py`;
 `make_tiles.py` is independent.
 
-- `scripts/build_data.py` — builds `schedule.json`: picks a service date per
-  feed, warps and snaps every shape, projects stops onto them, and emits the
-  routes / shapes / patterns / trips plus the Downtown inset geometry.
-- `scripts/georef.py` — fits the main lat/lon→pixel transform, and owns the
-  map constants the rest of the pipeline shares (drawn rail colors, mask
-  tolerances, excluded regions).
-- `scripts/georef_inset.py` — the same fit for the Downtown call-out panel,
-  whose rotated grid needs its own transform, plus that panel's geometry.
-- `scripts/make_tiles.py` — rasterizes the background tile pyramid from the map
-  PDF. Only needs rerunning if the PDF changes.
-- `scripts/debug_line.py` — draws one route's stored path over the map, for
-  checking a line against the artwork it should be riding.
-- `scripts/speed_check.py` — ranks the vehicles that move implausibly fast,
-  which is how a bad path usually shows itself in the animation.
-- `scripts/orphan_check.py` — lists vehicles labelled with a designation the
-  map never prints, which a rider has no way to look up.
-- `scripts/path_check.py` — ranks routes by how un-straight their drawn path
-  is, worst first, and locates each kink. The build gates its own cleanup
-  passes on this same score, so a route still high in the ranking is one the
-  snapper put on the wrong ink rather than one it merely roughed up.
-- `scripts/freeze_log.py` — serves the map *and* records what the page reports
-  about itself, so a freeze leaves evidence outside the tab that froze.
-- `scripts/freeze_report.py` — reads that recording back and says where the page
-  stopped.
-- `index.html` — markup, styles, and a bootstrapper. Deliberately constant: it
-  is the one URL that cannot carry a version, so instead nothing in it changes
-  between deploys, and a cached copy is byte-identical to a fresh one. It asks
-  `version.json` which build is live and loads the client from that URL.
-- `app.js` — the client: loader, canvas renderer, and controls. Fetched at
-  `app.js?v=<sha>`, so it is content-addressed and a stale page can never be
-  served in place of a current one.
-- `scripts/stall_test.mjs` — `node scripts/stall_test.mjs`. Lifts the visible
-  clock and the stall watchdog out of `index.html` and drives them under a fake
-  clock, so the one thing that has to be right about a freeze report — that a
-  backgrounded tab never reads as a stall, and a stalled page always does — is
-  checked rather than assumed.
-- `scripts/stamp_build.mjs` — run by the deploy workflow, not by hand. Rewrites
-  `index.html`'s `__BUILD__` / `__V_*__` placeholders with the build id and the
-  data files' content hashes.
-- `scripts/deploy_test.mjs` — `node scripts/deploy_test.mjs`. Stamps a copy into
-  a temp directory, serves it, and checks in a real browser that the page reports
-  its build, asks for its data by content hash, notices a newer build, and offers
-  a reload instead of taking one.
-- `scripts/live_stall_test.mjs` — `node scripts/live_stall_test.mjs`, with the
-  map served on :8741. The same watchdog in a real browser: kills `rAF` with the
-  page visible and checks the stall is caught, the verdict names the page rather
-  than the browser, the tab strip warns, and the re-arm brings the loop back
-  without a reload.
-- `scripts/inset_tap_test.mjs` — `node scripts/inset_tap_test.mjs`, same setup.
-  Taps a vehicle mirrored into the Downtown call-out and checks the path
-  inspector answers with one drawn *there*, that the main map still answers a
-  tap the way it did, and that blank panel clears the selection instead of
-  picking whatever sits under the frame. The renderer and the picker place a
-  mirrored vehicle with one function, and this is what says they agree at the
-  pixel the tap lands on.
+| File | What it does |
+|---|---|
+| `scripts/build_data.py` | Builds `schedule.json`: picks a service date per feed, warps and snaps every shape, projects stops onto them, emits routes / shapes / patterns / trips plus the inset geometry |
+| `scripts/georef.py` | Fits the main lat/lon→pixel transform; owns the map constants the pipeline shares (drawn rail colors, mask tolerances, excluded regions) |
+| `scripts/georef_inset.py` | The same fit for the Downtown call-out panel, plus that panel's geometry |
+| `scripts/make_tiles.py` | Rasterizes the background tile pyramid from the map PDF. Only rerun if the PDF changes |
+| `index.html` | Markup, styles, and a bootstrapper. Asks `version.json` which build is live and loads the client from that URL |
+| `app.js` | The client: loader, canvas renderer, controls. Fetched at `app.js?v=<sha>` |
+| `scripts/stamp_build.mjs` | Run by the deploy workflow. Rewrites `index.html`'s `__BUILD__` / `__V_*__` placeholders with the build id and data content hashes |
+
+Checks — each answers a different way for a path to be wrong:
+
+| File | Asks |
+|---|---|
+| `scripts/debug_line.py` | What does one route's stored path look like over the artwork? |
+| `scripts/drift_check.py` | How much of each route runs off the line the sheet draws for it? |
+| `scripts/path_check.py` | Which routes have the least straight paths, and where are the kinks? |
+| `scripts/speed_check.py` | Which vehicles move implausibly fast? (how a bad path shows in the animation) |
+| `scripts/orphan_check.py` | Which vehicles carry a label the map never prints, so a rider can't look them up? |
+| `scripts/ink_gap_check.py` | Where does an agency's mask have holes in its own drawn lines? |
+| `scripts/freeze_log.py`, `freeze_report.py` | Where did the page stop? (serve-and-record, then read back) |
+
+Browser tests, all `node scripts/<name>.mjs`; the last two need the map served
+on :8741.
+
+| File | Checks |
+|---|---|
+| `stall_test.mjs` | Under a fake clock: a backgrounded tab never reads as a stall, a stalled page always does |
+| `deploy_test.mjs` | A stamped copy reports its build, asks for data by content hash, notices a newer build, and offers a reload instead of taking one |
+| `live_stall_test.mjs` | The watchdog in a real browser: kills `rAF`, checks the stall is caught, the verdict names the page, the tab strip warns, and the re-arm restores the loop |
+| `inset_tap_test.mjs` | A tap on a vehicle in the Downtown panel selects the one drawn *there*; blank panel clears the selection |
 
 ## Rebuild data
 
@@ -968,120 +119,59 @@ cd data/gtfs && for z in *.zip; do unzip -o "$z" -d "${z%.zip}"; done && cd ../.
 .venv/bin/python scripts/make_tiles.py  # only if the map PDF changes
 ```
 
-- The color masks depend only on the artwork and the code that reads it, so
-  they are memoized under `scratch/mask-cache/`, keyed by a digest that
-  invalidates itself when either changes. A rebuild is **~30 s** warm against
-  **~80 s** cold; delete the directory to force a cold one.
-- The build is deterministic — the same inputs give a byte-identical
-  `schedule.json`, so diffing two runs shows exactly what a change did.
+Color masks are memoized under `scratch/mask-cache/`; a rebuild is ~30 s warm
+against ~80 s cold. The build is deterministic, so diffing two runs shows
+exactly what a change did.
 
 ## Checking a line against the artwork
 
 `debug_line.py` answers "why is this bus off its street?". It writes
-`scratch/debug_<system>_<line>.png`, cropped to the route, drawn on the
+`scratch/debug_<system>_<line>.png`, cropped to the route and drawn on the
 high-resolution tiles so badges and labels under the line stay legible. A route
-reaching downtown is drawn on both the main map and the call-out panel, and the
-two are snapped independently, so it writes `..._inset.png` as well.
+reaching downtown also gets a `..._inset.png`.
 
 ```sh
 .venv/bin/python scripts/debug_line.py 720                     # Metro Bus 720
 .venv/bin/python scripts/debug_line.py 2 --system "Big Blue"   # shared number
-.venv/bin/python scripts/debug_line.py 720 --no-stops           # just the path
+.venv/bin/python scripts/debug_line.py 720 --no-stops          # just the path
 .venv/bin/python scripts/debug_line.py 720 --shape 0           # one variant only
 .venv/bin/python scripts/debug_line.py 720 --inset             # only the panel
 ```
 
-Where each vehicle halts is marked by default and, for a rail line, the
-platforms the map draws — the white shapes with black strokes — are outlined
-around them, so the two can be read against each other. `--no-stops` leaves
-just the path.
-
 Paths come straight out of `schedule.json`, so what you see is what the
-animation plays back. A label shared across systems prompts for which one to
-draw (`--system` skips it); one shared *within* a system is drawn as the map
-draws it, all of them together — the sheet's "437" is LADOT's Marina del Rey
-and Playa Vista workings alike. Each route has several shape variants, listed
-on stdout by trip count and drawn in different colors; the top two are usually
-the two directions of one corridor, so `--shape N` reads them one at a time.
-
-### Finding bad paths without looking for them
-
-`drift_check.py` asks the question directly — how much of each route runs off
-the line the sheet draws for it — by measuring the stored shape against the
-drawing the build snapped it onto. Which means the two have to be the *same*
-drawing: a row measured against a tree the build didn't fit to is measuring the
-difference between two trees. The two agencies the sheet symbolises rather than
-numbers were the case where that went furthest wrong. They snap on their legend
-strokes, the check reached for a colour mask, and their seeds are colours
-`refine_color` cannot find enough of along the drawing to return a reading — so
-the tree came back `None` and every BurbankBus and Beach Cities row was dropped
-before it was scored. BurbankBus's Pink Route rode the Orange Route's drawn
-line for the whole of its length with no check on the map saying so. Measured
-on the strokes it snaps to, that route reads 96 px of 512 off its own line, and
-0 once fixed.
-
-`speed_check.py` works the other way round: it scans every stop-to-stop segment
-for vehicles moving faster than a bus can, which is how a bad path shows itself
-in the animation.
+animation plays back. Each route has several shape variants, listed on stdout
+by trip count and drawn in different colors; the top two are usually the two
+directions of one corridor, so `--shape N` reads them one at a time.
 
 ```sh
 .venv/bin/python scripts/speed_check.py              # worst 25 over 120 km/h
 .venv/bin/python scripts/speed_check.py --over 300   # only the egregious ones
 .venv/bin/python scripts/speed_check.py --inset      # inside the Downtown panel
 .venv/bin/python scripts/speed_check.py --csv        # every hit, machine-readable
+
+.venv/bin/python scripts/orphan_check.py                 # every orphan, busiest first
+.venv/bin/python scripts/orphan_check.py --mislabelled   # only the fixable ones
 ```
 
-Speed is measured against the timetable the client actually animates,
-de-tying included, so minute-quantized GTFS times don't register as teleports.
-Each row carries a **detour** ratio — path length between the two stops over
+`speed_check` rows carry a **detour** ratio — path length between two stops over
 the straight line between them — which separates the two causes: well above 1
 means the shape wanders and the vehicle sprints to keep the schedule (a pathing
 error), while ~1 means it really does travel that far and the feed is worth a
-look. Rows are grouped per shape segment, since one bad shape shows up on every
-trip that runs it, and each route prints its `debug_line.py` command.
+look.
 
-### Vehicles you can't look up
-
-`orphan_check.py` compares each vehicle's label against every word the map
-prints, and reports the ones a rider could never find.
-
-```sh
-.venv/bin/python scripts/orphan_check.py                 # every orphan, busiest first
-.venv/bin/python scripts/orphan_check.py --mislabelled   # only the fixable ones
-.venv/bin/python scripts/orphan_check.py --min-trips 20
-```
-
-It separates the two causes. Most orphans are honest — the agency's lines
-aren't drawn, or the route is too minor to badge. The interesting ones are
-*mislabelled*: the map does designate the route, just not as we do, so the
-badge is sitting right there to copy.
-
-It reports only the first kind for an agency the sheet designates *by
-operator*, though, and that is the case worth knowing about: it looks for a
-badge matching the route's own designation, and there isn't one to find —
-Beach Cities' 109 and 102 are both "BC" on the sheet, BurbankBus's two routes
-are both "BU", and neither number is printed anywhere. Both now carry the
-symbol the sheet prints (`MAP_LABELS`), which is also what gives them anchors.
-
-A named route is the same blind spot for a different reason: it searches
-`route_short_name`, and a DASH's is prose, so "Wilmington Clockwise" offers no
-token the sheet could be printing. Its badge is there all the same — "WM", four
-times along the loop — and it took looking at the artwork to find it. The
-report will call a DASH honestly unnamed either way; a lone LADOT orphan with
-lines drawn under it is worth a crop of the tiles before believing it.
+`orphan_check` separates honest orphans (the agency's lines aren't drawn, or the
+route is too minor to badge) from *mislabelled* ones, where the map designates
+the route but not the way the feed does.
 
 ## Catching a freeze
 
-The tab has frozen hard enough that only closing it helps — which also throws
-away the console, the devtools pane, and every snapshot that would have said
-why.
+The tab can freeze hard enough that only closing it helps — which also throws
+away the console and every snapshot that would have said why. So the page
+records its own liveness.
 
-### The page watches itself
-
-Nothing to turn on. The render loop only runs while the document is visible, so
-the page keeps a clock that only advances while it is, and `stalledVisibleMs` is
-how long it has been visible without drawing. That is the whole diagnosis in one
-number, and it is the one to read first:
+Nothing to turn on. `stalledVisibleMs` — how long the page has been visible
+without drawing — is the whole diagnosis in one number, and the one to read
+first:
 
 | `stalledVisibleMs` | what it means |
 | --- | --- |
@@ -1090,92 +180,36 @@ number, and it is the one to read first:
 | near zero, `rafGapMax` large | it stalled and recovered between snapshots |
 | near zero, `slowFrames` climbing | a different failure — the main thread, not the loop |
 
-It matters that this is not `document.hidden`. Three freezes were reported with
-snapshots that could not tell a dead loop from a backgrounded tab, and the third
-came back `hidden: true` — which is what you get for going to the browser to read
-the snapshot, since a window behind another window is reported hidden. A flag the
-observer trips by observing cannot settle anything. Time spent visible can: a tab
-hidden for an hour adds none of it.
+A locked, minimized, or fully covered window reproduces the freeze signature
+exactly (`fps: 0`, `sinceFrameMs` climbing into the minutes). Rule that out
+first — `stalledVisibleMs` does it for you, since a hidden tab adds none of it.
 
-**A locked screen reproduces the freeze signature exactly** — `fps: 0` with
-`sinceFrameMs` climbing into the minutes — and so does a minimized or fully
-covered window. Measured: 215 s of it, with `stalledVisibleMs` at 0 the whole
-way and the loop back at 60 fps the moment the screen unlocked. Rule that out
-first; `stalledVisibleMs` does it for you.
-
-Four seconds of it trips a watchdog that takes a full snapshot, shouts on the
-console, and writes both — plus the previous 30 seconds of cheap liveness
-samples — to `localStorage`. Closing the tab is the only cure anyone has found
-and it takes the console with it, so the record has to outlive the tab:
+Four seconds of stall trips a watchdog that snapshots to `localStorage`, so the
+record outlives the tab. The page says at load that a record exists.
 
 ```js
-transitFreeze()      // in the console after reopening: the snapshot at the
-                     // stall, the run-up to it, and the verdict below
+transitFreeze()      // the snapshot at the stall, the run-up, and the verdict
 transitFreeze(1)     // the run before that one
 ```
 
-The page also says at load that a record exists, with its date and its verdict,
-so it doesn't take knowing to ask — the session after a freeze is exactly when
-nobody is thinking about the console.
-
-Each run keeps its own record: the first stall of a *session* is the one held,
-because it has the healthy-to-stalled transition in front of it, and later stalls
-in that session only bump the count. A new run supersedes an older record rather
-than adding to it, stepping the old one back to `transitFreeze(1)` first.
-
-`null` after a freeze is itself a finding — the watchdog's own timer didn't fire,
-so the main thread was wedged rather than the loop starved, and the black box
-below is the tool for that.
-
-### Whose fault it was: `renderTick`
-
-`stalledVisibleMs` says the page is visible and not drawing. It does not say
-whether that is because the browser stopped calling this page, or because the
-browser stopped drawing anything at all. Those need opposite fixes and the
-snapshot could not tell them apart.
-
-`document.timeline.currentTime` can. It is the timestamp `requestAnimationFrame`
-callbacks are handed, set once per frame and unmoving between them, so reading it
-from a *timer* asks the browser directly whether it is still producing frames —
-and nothing the page does can advance it or hold it back. It is reported as
-`renderTick`, and a tick after any stall the watchdog writes the verdict:
+`verdict.browserRendering` says which of the two failures it was — read from
+`document.timeline.currentTime`, which only the browser can advance:
 
 | `verdict.browserRendering` | what stopped | what helps |
 | --- | --- | --- |
 | `true` | the browser is rendering; this page's rAF registration is gone | the watchdog re-arms it once a second, and it comes back on its own |
 | `false` | the browser stopped updating the rendering for a visible document | nothing from in here. Reopen the tab; a reload keeps the same process |
 
-A second, independent read on the same question comes free: `winW`/`winH` against
-`cvW`/`cvH`. Resize steps and animation-frame callbacks are dispatched by the same
-"update the rendering" pass, so a canvas still cut for a window that has since
-changed size means that pass stopped — the resize event was never delivered. The
-watchdog reconciles the two once a second, so a dropped resize heals instead of
-leaving the drawing buffer permanently the wrong size for the CSS box.
-
-While stalled the page also renames itself `⚠ frozen — …`. The tab strip is
-painted by the browser, not by this document, so it is the one channel still
-working when the rendering pass is what stopped — an overlay would sit in the
-same dead pass as the canvas.
-
-### The black box (`?trace`)
-
-Everything above reports from inside the page, which is the one place that stops
-reporting when the page is what fails. So the page can also report on itself from
-a *second thread* and ship the record out of the process as it goes.
+`null` after a freeze is itself a finding — the watchdog's own timer didn't
+fire, so the main thread was wedged rather than the loop starved. That is what
+the black box is for: under `?trace=1` the page hands snapshots to a Worker,
+which reports from off the main thread and cannot be suppressed by it.
 
 ```sh
 .venv/bin/python scripts/freeze_log.py           # serve on :8741 and record
 # open http://localhost:8741/index.html?trace=1 and reproduce the freeze
 .venv/bin/python scripts/freeze_report.py        # read back where it stopped
 ```
-
-`freeze_log.py` is a drop-in for the README's `http.server`, so nothing else
-about running the map changes. Under `?trace=1` the page hands a snapshot to a
-Worker twice a second; the Worker posts them back and, when they stop arriving,
-says so once a second with the last one attached. A frozen main thread cannot
-suppress that, because the Worker is not on it.
-
-The report answers the question the old console logs could not:
 
 | what it says | what it means |
 | --- | --- |
@@ -1185,45 +219,21 @@ The report answers the question the old console logs could not:
 | `tickLateMs` and `workerLateMs` climb together | the whole process is starved, so memory pressure or the OS |
 | `driftMs` jumps | the tab was suspended, not wedged — a different problem entirely |
 
-`peakTileMB`, `imageMB` and `canvases` are there to catch the memory story, and
-`heapMB` plus `measureUserAgentSpecificMemory()` the JavaScript one. Read those
-two together rather than trusting either: the UA measurement reported 27.8 MB on
-a page holding 102 MB of decoded images, because canvas backing stores and image
-surfaces are outside its scope. If the tab dies while it stays flat, the memory
-is somewhere the page cannot see.
-
-If nothing is listening on `/_trace` the records still accumulate in
-`localStorage`, so `transitTrace()` in the console after reopening the tab
-returns the tail of them anyway.
-
 ## Known limitations
 
 - **Missing systems** — Glendale Beeline (download blocked), OCTA / AVTA /
-  Santa Clarita / Simi Valley (essentially off-map), Amtrak, and the community
-  shuttles in the map's legend with no public GTFS. **Norwalk Transit** is
-  missing for a stranger reason: the Mobility Database entry catalogued as
-  `us-california-norwalk-transit-system-nts` is Norwalk Transit *District*,
-  Connecticut — America/New_York, a 203 phone number, routes to SoNo Station
-  and Greenwich. Its shapes warp to around (-10000, 320000), so all 531 of its
-  trips animated a quarter of a million px off the sheet, and the feed is gone
-  until a Californian one turns up.
-- **Stale feeds** — Torrance Transit's newest public GTFS is from Jan 2024;
-  Culver City / Montebello / GTrans calendars end just before the target date.
-  Those systems animate their busiest covered Wednesday instead.
-- **Metrolink, Metro bus and LADOT** snap to lines read out of the PDF vectors,
-  so they sit on the drawn line: a median 1.0, 0.9 and 1.1 px off it. One
-  exception keeps the warp — Metrolink's Inland Empire-Orange County line, most
-  of whose length has no railroad drawn near it.
+  Santa Clarita / Simi Valley (essentially off-map), Norwalk Transit (no
+  Californian feed published), Amtrak, and the community shuttles in the map's
+  legend with no public GTFS.
+- **Stale feeds** — some municipal calendars end before the target service
+  date; those systems animate their busiest covered Wednesday instead.
 - **Schematic corners** — the map distorts the far San Fernando Valley and the
   far east, where buses can drift off their drawn streets.
-- **Off the sheet entirely** — with Norwalk gone, the only route `speed_check`
-  still flags as off-map is Metrolink's 91/Perris Valley, whose run out to
-  Riverside and Perris reaches x≈5600 against a 4096 px sheet. That is honest:
-  the map stops before the line does, and those trains are hidden at the edge
-  rather than drawn somewhere they aren't.
-- **Downtown** is a ghosted call-out box on the source map; vehicles pass over
-  it on the main map on the warp alone, since nothing is drawn under the panel
-  to snap to, and are mirrored into the panel.
+- **Off the sheet** — one Metrolink line runs east past the edge of the map.
+  Those trains are hidden at the edge rather than drawn somewhere they aren't.
+- **Downtown** is a ghosted call-out box on the source map; vehicles cross it on
+  the main map on the warp alone, since nothing is drawn under the panel to snap
+  to, and are mirrored into the panel.
 
 ## Data sources
 
