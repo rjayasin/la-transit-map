@@ -1923,6 +1923,70 @@ PINNED_ANCHORS = {
     # the layover loop inside the station box, where the sheet draws no line to
     # be on, and ~10 px of the Atlantic corner cut.
     ("longbeach", "61"): [(1930, 2752.2)],
+    # Torrance Transit 6, twice: on the drawn 190th St a little east of the
+    # corner it turns from Prairie Av, and on the drawn Vermont Av below the
+    # Harbor Gateway Transit Center.
+    #
+    # The route comes east along Carson St, north up Madrona Av and Prairie Av,
+    # east along 190th to Crenshaw Bl, down Crenshaw into the Mary K Giordano
+    # Regional Transit Center and back, and on east — the stop list names every
+    # one of those corners, and the sheet draws them: Carson at y=2941, the
+    # Madrona/Prairie corridor at x=1368.5, 190th at y=2821.5, Crenshaw at
+    # x=1425.5 with the transit centre's marker on it at y=2889.
+    #
+    # None of that shipped. Both workings left the drawn Madrona a block north
+    # of Carson and ran a diagonal across blank page to Crenshaw at y=2860-2870,
+    # 40-50 px off the corridor at its worst, and the westbound one carried on
+    # into a knot of zigzags over the "Mary K. Giordano Regional Transit Center"
+    # lettering before running 35 px west along y=2845, where the sheet draws
+    # nothing at all, and finishing 30 px southwest of its terminus. Of the 208
+    # px of drawn corridor between Carson and Crenshaw the two covered 25% and
+    # 32%, standing a median 12.2 and 16.5 px off it.
+    #
+    # The whole 190th run and the transit-centre spur were crushed with it: 340
+    # px of warp arc — every point from the Prairie corner east to Crenshaw,
+    # down to the transit centre and back — mapped onto five pixels of path at
+    # (1425.5,2853), so the route never went near the marker it serves.
+    #
+    # Two things do it. Through here the warp stands 41 px south of the drawn
+    # 190th and 54 px south of the drawn Carson, so the drawn corners are 40 and
+    # 28 px from the warp's own; and the badges bracketing the fault are the "6"
+    # on Madrona at (1369,2931) and the "6" under the "10" on Crenshaw at
+    # (1426,2836), 110 px apart with nothing between them. The walk between them
+    # ought to recover the corridor — up Madrona and east along 190th, 166 px of
+    # drawn line — and instead it cuts the corner: 122 px straight across, at a
+    # ratio of 0.89 against the warp's own arc, so it is believed outright. What
+    # it walks on is the lettering. The sheet's grey place names read as this
+    # agency's periwinkle, and "TORRANCE" is set right across the block the
+    # diagonal crosses: 376 mask pixels stand inside the triangle between the
+    # two badges, on the letters of "TORRANCE" at y=2859-2869 and of "Regional
+    # Transit Center" below them. It is Montebello 50's failure in periwinkle.
+    #
+    # A pin on the drawn 190th is what the walk needs, and one is enough: it
+    # splits the span so that Madrona-to-pin is walked along the drawn Madrona
+    # and pin-to-Crenshaw is 56 px apart, under TRACE_SPAN's floor, and
+    # interpolated straight round the corner. It goes east of the corner rather
+    # than on it, both because the corner itself is a curve and because
+    # `trim_terminus` measures 40 px to the warp there against 35 px of reach.
+    #
+    # The second pin is not for the corner but for what re-fitting the shape
+    # does to the far end of it. Out at Harbor Gateway the route leaves 190th
+    # for Vermont Av, calls at the transit centre and comes back down to
+    # Victoria St, and the sheet draws two periwinkle ways through that junction
+    # — the transit centre's own, at y=2766, and the Figueroa branch at y=2805.
+    # The westbound working took the wrong one before this change and, with the
+    # corner pinned and the fit re-run, took a third way that is on neither,
+    # climbing to y=2744 along the busway. A point on the drawn Vermont below
+    # the marker holds it: measured against the 202 px of drawn corridor from
+    # 190th through the transit centre to Victoria, the two workings go from 74%
+    # and 70% of it covered to 74% and 74%, and the westbound one from a median
+    # 3.8 px off it to 2.9.
+    #
+    # Both pins hold 4 px in any direction — the Carson-to-Crenshaw corridor
+    # stays at 100% covered and Harbor Gateway within a point of 74% — and
+    # neither is near enough to an end of a 1,065 px route for the trim to
+    # reach.
+    ("torrance", "6"): [(1378, 2822), (1575, 2785)],
     # Metro 217's Eagle Rock end, on the drawn Colorado a little east of where
     # Broadway turns down onto it. The sheet's badges run out before the route
     # does: the easternmost "217" is printed at that turn, at (1752,1493), and
@@ -2426,6 +2490,154 @@ OVERRIDE_PATHS = {
              # out past the corner would have to seam to both at once. Along
              # PCH they agree — at the box's edge one sits at x=1436 and the
              # other at x=1430.
+    },
+    # Long Beach Transit 1 and 2 round the corners of Carson, and they are one
+    # fault rather than two: both routes turn at Del Amo & Avalon, both are
+    # badged either side of that junction and nowhere in it, and both are short
+    # enough that a pin anywhere near it reads as a terminus.
+    #
+    # The 1 runs Del Amo Station west along Del Amo Bl, north up Avalon Bl and
+    # east along Victoria St to Cal State Dominguez Hills — the stop list says
+    # so corner by corner (Del Amo & Avalon, Avalon & 189th, Victoria & Avalon)
+    # and the sheet draws exactly that, one line down Avalon at x=1687.5 between
+    # Victoria at y=2778.5 and Del Amo at y=2881.5. What shipped cut both
+    # corners: a diagonal from the Victoria terminus across Dignity Health
+    # Sports Park to Avalon at y=2812, and a second from Avalon at y=2858
+    # across to the "1" chip beside Del Amo, with a 6 px dip below the drawn
+    # line at SouthBay Pavilion and an 8 px bulge above it under the "DEL AMO"
+    # label. Neither check sees any of it — 4 px of 292 on drift_check, a flat
+    # zero on path_check — because a cut corner is smooth and never further from
+    # the agency's ink than half a block.
+    #
+    # Through here the warp is out by more than the streets are apart, and
+    # turning with it: it lays Victoria at y=2814 against the drawn 2778.5,
+    # Avalon at x=1671 against 1687.5, and Del Amo at y=2913 against 2881.5, so
+    # the two drawn corners stand 40 and 28 px from the warp's own. Four things
+    # follow, and each is a machine that would ordinarily recover the corridor:
+    #   - The badges bracket the lower corner without reaching into it. The "1"
+    #     beside Avalon at (1682,2842) and the "1" above Del Amo at (1710,2873)
+    #     are 41 px apart, under TRACE_SPAN's 60 px floor, so no walk is
+    #     attempted between them and what interpolates the corner is the chord.
+    #   - The Del Amo chip then attaches to the wrong stretch, Montebello 10's
+    #     failure again: it stands 38 px from the warp's *Avalon* leg and 41
+    #     from the warp's own Del Amo one, so the fit hands a point still north
+    #     of the corner a displacement of (+37,-10) and drags the shape
+    #     diagonally across the junction to reach it.
+    #   - The walk that *is* attempted, between the Victoria chip at (1715,2782)
+    #     and the Avalon one, comes back cutting the corner too — 73 px against
+    #     the drawn corridor's 95, and believed at a ratio of 1.03 because the
+    #     warp's own arc across the corner is 71. What it walks on is the
+    #     lettering: "Sports Park" knocks a 10 px hole in the drawn Avalon's
+    #     mask between y=2798 and 2808, and the glyph strokes of "Health" and
+    #     "Park" read as this agency's washed line colour — (1691,2799),
+    #     (1694,2801), (1700,2799), (1706,2796) — a trail running diagonally
+    #     from the hole to the chip. Every cell of the walk's diagonal sits 1-5
+    #     px from one of them. Montebello 50's failure, in maroon.
+    #   - And a pin cannot be placed, because the route is 355 px long and
+    #     `trim_terminus` cuts to any pin with under 110 px of shape beyond it.
+    #     A pin on the drawn lower corner stands 16 px from the warp's Avalon
+    #     leg, 96 px of shape from the Cal State end: it fixes the corner and
+    #     takes Victoria and the top of Avalon off the route with it. Every
+    #     point of the drawn Avalon between the two corners answers the same
+    #     way, and above the lower corner there is no warp but Victoria's to
+    #     attach to at all — the warp's own corner is 36 px south of the drawn
+    #     one, so the drawn Avalon above y=2815 has nothing of its own.
+    #
+    # The 2 is the same junction from the other side. It runs Cal State west
+    # along Victoria, south down Central Av, west along Del Amo and south down
+    # Avalon to 223rd St, and its two badges either side of the Del Amo run —
+    # the "2" on Central at (1749,2842) and the "2" stacked under the 1's chip
+    # at (1710,2881) — are 55 px apart, under the same floor. So there is no
+    # walk there either, and the Del Amo chip attaches to the warp's *Central*
+    # leg (29 px) rather than its own Del Amo one (33 px): the shape leaves
+    # Central at y=2846 and runs diagonally to it. Below that the drawn Del Amo
+    # is missed altogether — the path drops to the warp's own y=2913 and runs
+    # west along it, 32 px south of the line the sheet draws, because what is
+    # drawn down there is the 405, dashed in (115,35,50) against this agency's
+    # (104,48,58) and squarely inside its mask. That is drift_check's blind spot
+    # exactly: ink of the right colour, so the route scores 12 px of 400.
+    # `trim_terminus` rules a pin out the same way — a pin on the drawn Central
+    # corner is 65 px of shape from the Cal State end and cuts Victoria and the
+    # top of Central off the route, taking its coverage of the corridor from
+    # 67% to 42%.
+    #
+    # So both corridors are drawn by hand. Each box brackets the warp where it
+    # lands the shape rather than where the ink is, and each direction enters it
+    # exactly once. The 1's box runs from the Cal State terminus (inside it, as
+    # Metro 501's is) east along the warp's Del Amo to x=1790, far enough to
+    # cover the label bulge; the 2's stops at the warp's y=2916, a little past
+    # the Avalon corner, because below that the snap's own parameterisation runs
+    # away from the warp's — 30 px of warp covers the whole 90 px of drawn
+    # Avalon and the remaining 80 px is smeared west along 223rd — and a box
+    # reaching further would replace that stretch with corridor the shape has
+    # no arc left for. All four workings go from 67-74% of their drawn corridor
+    # covered to 100%, and from a median 1.4-3.6 px off it (worst 15-27) to
+    # 0.4-1.0 (worst 3.6).
+    ("longbeach", "1"): {
+        "box": (1655, 2800, 1790, 2925),
+        "path": [
+            (1716.0, 2779.0), (1708.0, 2778.7), (1700.0, 2778.6),
+            (1693.0, 2778.5), (1689.8, 2779.6), (1688.2, 2782.0),
+            (1687.6, 2786.0), (1687.5, 2800.0), (1687.5, 2820.0),
+            (1687.5, 2840.0), (1687.5, 2860.0), (1687.6, 2872.0),
+            (1688.2, 2877.0), (1690.0, 2880.2), (1693.5, 2881.3),
+            (1700.0, 2881.5), (1720.0, 2881.5), (1740.0, 2881.5),
+            (1765.0, 2881.5), (1791.0, 2881.2),
+        ],   # Victoria at Cal State -> Avalon -> Del Amo, out to where the snap
+             # is back on the drawn boulevard on its own. The east end is 1791
+             # rather than the 1794-1797 the two directions resume at, so
+             # neither of them steps backwards across the seam.
+    },
+    ("longbeach", "2"): {
+        "box": (1660, 2805, 1765, 2916),
+        "path": [
+            (1716.0, 2779.0), (1721.0, 2779.4), (1724.5, 2781.0),
+            (1726.5, 2783.2), (1734.0, 2783.5), (1742.0, 2783.5),
+            (1746.0, 2784.5), (1748.0, 2787.0), (1748.5, 2800.0),
+            (1748.5, 2820.0), (1748.5, 2840.0), (1748.5, 2860.0),
+            (1748.4, 2872.0), (1747.8, 2877.5), (1746.0, 2880.4),
+            (1742.5, 2881.4), (1730.0, 2881.5), (1710.0, 2881.5),
+            (1698.0, 2881.5), (1694.0, 2882.0), (1692.5, 2884.5),
+            (1692.5, 2900.0), (1692.5, 2925.0), (1692.5, 2948.0),
+        ],   # Victoria at Cal State -> Central -> Del Amo -> Avalon. The head
+             # takes the step the sheet draws in Victoria at x=1723, where the
+             # line drops from y=2778.5 to 2783.5; the tail stops at y=2948,
+             # where both directions pick the drawn Avalon up within a pixel and
+             # run it down to 223rd themselves.
+    },
+    # Torrance Transit 6's Carson St leg, from the terminus at Carson &
+    # Hawthorne east to Madrona Av and up it. The pins above (see
+    # PINNED_ANCHORS) recover everything from Madrona north — the corner onto
+    # 190th, the run east and the spur into the Mary K Giordano Regional
+    # Transit Center — and they cannot recover this, because down here the warp
+    # lies across itself.
+    #
+    # The sheet prints a "6" on the drawn Madrona at (1369,2931), 10 px above
+    # the Carson crossing, and the warp's *Madrona* leg passes 4 px from it —
+    # 64 px up the leg from the corner, the warp standing 54 px south of the
+    # drawn Carson. So the chip anchors that point with a displacement of
+    # nothing at all, and the corner it is printed above is dragged 15 px south
+    # of the drawn street, out along the row of badge chips below it.
+    #
+    # No pin can answer it, for Montebello 10's reason: the warp's Madrona leg
+    # runs straight over where the sheet draws Carson St. A point on the drawn
+    # Carson at x=1350 stands 15 px from that leg and 55 from the warp's own
+    # Carson; at the Hawthorne terminus itself, 44 against 52. Every point of
+    # the street answers the same way, so a pin here speaks for the leg the bus
+    # comes back down, not the one it arrives on.
+    #
+    # Two streets and a corner, so the corridor is drawn by hand. The box takes
+    # the warp's Carson leg and the bottom of Madrona; the path stops at
+    # y=2910.5, where both directions have the drawn Madrona within a pixel and
+    # carry it north themselves.
+    ("torrance", "6"): {
+        "box": (1320, 2950, 1400, 3010),
+        "path": [
+            (1321.0, 2941.0), (1335.0, 2941.0), (1350.0, 2941.0),
+            (1362.0, 2941.0), (1366.5, 2939.0), (1368.3, 2934.0),
+            (1368.5, 2925.0), (1368.5, 2910.5),
+        ],   # Carson St from the Hawthorne Bl terminus east to Madrona Av, and
+             # up Madrona as far as the snap can be rejoined.
     },
 }
 
