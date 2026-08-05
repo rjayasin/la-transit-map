@@ -625,14 +625,15 @@ python3 -m http.server 8741
     way, so the terminus is given where the warp puts it.
   - Where not even a pin can be placed, the corridor itself is drawn by hand
     (`OVERRIDE_PATHS`) and spliced into the snapped shape. It takes several
-    failures at once to come to that, and seven cases have them: Metro 761's
+    failures at once to come to that, and nine cases have them: Metro 761's
     corner from Sunset into UCLA; Metro 501's North Hollywood end, below; Metro
     251's Eagle Rock end, below; Montebello 20's Whittier Bl stub, below; LADOT
-    142 through San Pedro, below; Torrance 5's south end, where the "5" printed
-    on the drawn PCH is 43 px from the warp's *Arlington* leg and 65 from the
-    PCH leg it is printed on, so the fit pulls a point 130 px into the route
-    down onto it and leaves the terminus to snap onto the grey the sheet draws
-    the streets themselves in; and Montebello 10 down Atlantic, where the sheet
+    142 through San Pedro, below; Long Beach Transit 1 and 2 round the corners
+    of Carson, below; Torrance 5's south end, where the "5" printed on the drawn
+    PCH is 43 px from the warp's *Arlington* leg and 65 from the PCH leg it is
+    printed on, so the fit pulls a point 130 px into the route down onto it and
+    leaves the terminus to snap onto the grey the sheet draws the streets
+    themselves in; and Montebello 10 down Atlantic, where the sheet
     draws a street vertical that really slants southwest. That lands the
     warp's Whittier junction 68 px west of the drawn one and turns a corner
     into a dog-leg; the dog-leg inflates the arc between the two "10" badges
@@ -741,6 +742,43 @@ python3 -m http.server 8741
     a 60 px bulge across the corner. Widening the bound is not the answer: it
     admits the 142 and rescues Torrance R3 (961 to 219 on `path_check`), and it
     puts a fresh cusp into four routes that had none.
+  - Long Beach Transit 1 and 2 are one fault rather than two: both turn at Del
+    Amo & Avalon in Carson, both are badged either side of that junction and
+    nowhere inside it, and both are short enough that a pin near it reads as a
+    terminus. The 1 comes west along Del Amo Bl, north up Avalon Bl and east
+    along Victoria St to Cal State Dominguez Hills, and the sheet draws it as
+    one line — Avalon at x=1687.5 between Victoria at y=2778.5 and Del Amo at
+    y=2881.5. What shipped cut both corners: a diagonal from the Cal State end
+    across Dignity Health Sports Park onto Avalon, and a second across the Del
+    Amo junction, with a dip below the line at SouthBay Pavilion and a bulge
+    above it under the "DEL AMO" label. Through here the warp is out by more
+    than the streets are apart and turning with it — Victoria 36 px, Avalon 16,
+    Del Amo 32 — so the drawn corners stand 40 and 28 px from the warp's own,
+    and four machines fail at once. The badges bracketing the lower corner are
+    41 px apart, under `TRACE_SPAN`'s 60 px floor, so no walk is attempted and
+    the chord interpolates it. The chip above Del Amo then speaks for the wrong
+    stretch, Montebello 10's failure again: 38 px from the warp's *Avalon* leg
+    against 41 from its own Del Amo one. The walk that *is* attempted, across
+    the upper corner, comes back 73 px against the drawn corridor's 95 and is
+    believed at a ratio of 1.03 — it walks the lettering, "Sports Park" knocking
+    a 10 px hole in the drawn Avalon's mask while the glyph strokes of "Health"
+    and "Park" read as this agency's washed line colour and trail diagonally
+    from the hole to the chip, every cell of the diagonal 1-5 px from one of
+    them. And a pin cannot be placed: the route is 355 px long, so a pin on the
+    drawn lower corner sits 96 px of shape from the Cal State end, inside
+    `trim_terminus`'s 110 px tail, and takes Victoria and the top of Avalon off
+    the route along with the corner. The 2 is the same junction from the other
+    side — Cal State, Victoria, Central Av, Del Amo, Avalon, 223rd St — with its
+    two badges 55 px apart, its Del Amo chip attaching to the warp's *Central*
+    leg (29 px against 33), and its whole Del Amo run missing the drawn line
+    altogether: it drops to the warp's own y=2913 and rides the 405 west, which
+    the sheet dashes in (115,35,50) against this agency's (104,48,58) and so
+    inside its mask. That is `drift_check`'s blind spot exactly — ink of the
+    right colour, 12 px of 400 scored — and `path_check` sees neither route at
+    all, both scoring a flat zero, because a cut corner is smooth. Both
+    corridors are drawn by hand; all four workings go from 67-74% of their drawn
+    corridor covered to 100%, and from a median 1.4-3.6 px off it (worst 15-27)
+    to 0.4-1.0 (worst 3.6).
   - Nothing is taken on faith. Every candidate is scored on the stored,
     rounded geometry the animation actually plays — by the very measure
     `scripts/path_check.py` ranks on, plus what its excursions cost — and the

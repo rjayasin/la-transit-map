@@ -2427,6 +2427,120 @@ OVERRIDE_PATHS = {
              # PCH they agree — at the box's edge one sits at x=1436 and the
              # other at x=1430.
     },
+    # Long Beach Transit 1 and 2 round the corners of Carson, and they are one
+    # fault rather than two: both routes turn at Del Amo & Avalon, both are
+    # badged either side of that junction and nowhere in it, and both are short
+    # enough that a pin anywhere near it reads as a terminus.
+    #
+    # The 1 runs Del Amo Station west along Del Amo Bl, north up Avalon Bl and
+    # east along Victoria St to Cal State Dominguez Hills — the stop list says
+    # so corner by corner (Del Amo & Avalon, Avalon & 189th, Victoria & Avalon)
+    # and the sheet draws exactly that, one line down Avalon at x=1687.5 between
+    # Victoria at y=2778.5 and Del Amo at y=2881.5. What shipped cut both
+    # corners: a diagonal from the Victoria terminus across Dignity Health
+    # Sports Park to Avalon at y=2812, and a second from Avalon at y=2858
+    # across to the "1" chip beside Del Amo, with a 6 px dip below the drawn
+    # line at SouthBay Pavilion and an 8 px bulge above it under the "DEL AMO"
+    # label. Neither check sees any of it — 4 px of 292 on drift_check, a flat
+    # zero on path_check — because a cut corner is smooth and never further from
+    # the agency's ink than half a block.
+    #
+    # Through here the warp is out by more than the streets are apart, and
+    # turning with it: it lays Victoria at y=2814 against the drawn 2778.5,
+    # Avalon at x=1671 against 1687.5, and Del Amo at y=2913 against 2881.5, so
+    # the two drawn corners stand 40 and 28 px from the warp's own. Four things
+    # follow, and each is a machine that would ordinarily recover the corridor:
+    #   - The badges bracket the lower corner without reaching into it. The "1"
+    #     beside Avalon at (1682,2842) and the "1" above Del Amo at (1710,2873)
+    #     are 41 px apart, under TRACE_SPAN's 60 px floor, so no walk is
+    #     attempted between them and what interpolates the corner is the chord.
+    #   - The Del Amo chip then attaches to the wrong stretch, Montebello 10's
+    #     failure again: it stands 38 px from the warp's *Avalon* leg and 41
+    #     from the warp's own Del Amo one, so the fit hands a point still north
+    #     of the corner a displacement of (+37,-10) and drags the shape
+    #     diagonally across the junction to reach it.
+    #   - The walk that *is* attempted, between the Victoria chip at (1715,2782)
+    #     and the Avalon one, comes back cutting the corner too — 73 px against
+    #     the drawn corridor's 95, and believed at a ratio of 1.03 because the
+    #     warp's own arc across the corner is 71. What it walks on is the
+    #     lettering: "Sports Park" knocks a 10 px hole in the drawn Avalon's
+    #     mask between y=2798 and 2808, and the glyph strokes of "Health" and
+    #     "Park" read as this agency's washed line colour — (1691,2799),
+    #     (1694,2801), (1700,2799), (1706,2796) — a trail running diagonally
+    #     from the hole to the chip. Every cell of the walk's diagonal sits 1-5
+    #     px from one of them. Montebello 50's failure, in maroon.
+    #   - And a pin cannot be placed, because the route is 355 px long and
+    #     `trim_terminus` cuts to any pin with under 110 px of shape beyond it.
+    #     A pin on the drawn lower corner stands 16 px from the warp's Avalon
+    #     leg, 96 px of shape from the Cal State end: it fixes the corner and
+    #     takes Victoria and the top of Avalon off the route with it. Every
+    #     point of the drawn Avalon between the two corners answers the same
+    #     way, and above the lower corner there is no warp but Victoria's to
+    #     attach to at all — the warp's own corner is 36 px south of the drawn
+    #     one, so the drawn Avalon above y=2815 has nothing of its own.
+    #
+    # The 2 is the same junction from the other side. It runs Cal State west
+    # along Victoria, south down Central Av, west along Del Amo and south down
+    # Avalon to 223rd St, and its two badges either side of the Del Amo run —
+    # the "2" on Central at (1749,2842) and the "2" stacked under the 1's chip
+    # at (1710,2881) — are 55 px apart, under the same floor. So there is no
+    # walk there either, and the Del Amo chip attaches to the warp's *Central*
+    # leg (29 px) rather than its own Del Amo one (33 px): the shape leaves
+    # Central at y=2846 and runs diagonally to it. Below that the drawn Del Amo
+    # is missed altogether — the path drops to the warp's own y=2913 and runs
+    # west along it, 32 px south of the line the sheet draws, because what is
+    # drawn down there is the 405, dashed in (115,35,50) against this agency's
+    # (104,48,58) and squarely inside its mask. That is drift_check's blind spot
+    # exactly: ink of the right colour, so the route scores 12 px of 400.
+    # `trim_terminus` rules a pin out the same way — a pin on the drawn Central
+    # corner is 65 px of shape from the Cal State end and cuts Victoria and the
+    # top of Central off the route, taking its coverage of the corridor from
+    # 67% to 42%.
+    #
+    # So both corridors are drawn by hand. Each box brackets the warp where it
+    # lands the shape rather than where the ink is, and each direction enters it
+    # exactly once. The 1's box runs from the Cal State terminus (inside it, as
+    # Metro 501's is) east along the warp's Del Amo to x=1790, far enough to
+    # cover the label bulge; the 2's stops at the warp's y=2916, a little past
+    # the Avalon corner, because below that the snap's own parameterisation runs
+    # away from the warp's — 30 px of warp covers the whole 90 px of drawn
+    # Avalon and the remaining 80 px is smeared west along 223rd — and a box
+    # reaching further would replace that stretch with corridor the shape has
+    # no arc left for. All four workings go from 67-74% of their drawn corridor
+    # covered to 100%, and from a median 1.4-3.6 px off it (worst 15-27) to
+    # 0.4-1.0 (worst 3.6).
+    ("longbeach", "1"): {
+        "box": (1655, 2800, 1790, 2925),
+        "path": [
+            (1716.0, 2779.0), (1708.0, 2778.7), (1700.0, 2778.6),
+            (1693.0, 2778.5), (1689.8, 2779.6), (1688.2, 2782.0),
+            (1687.6, 2786.0), (1687.5, 2800.0), (1687.5, 2820.0),
+            (1687.5, 2840.0), (1687.5, 2860.0), (1687.6, 2872.0),
+            (1688.2, 2877.0), (1690.0, 2880.2), (1693.5, 2881.3),
+            (1700.0, 2881.5), (1720.0, 2881.5), (1740.0, 2881.5),
+            (1765.0, 2881.5), (1791.0, 2881.2),
+        ],   # Victoria at Cal State -> Avalon -> Del Amo, out to where the snap
+             # is back on the drawn boulevard on its own. The east end is 1791
+             # rather than the 1794-1797 the two directions resume at, so
+             # neither of them steps backwards across the seam.
+    },
+    ("longbeach", "2"): {
+        "box": (1660, 2805, 1765, 2916),
+        "path": [
+            (1716.0, 2779.0), (1721.0, 2779.4), (1724.5, 2781.0),
+            (1726.5, 2783.2), (1734.0, 2783.5), (1742.0, 2783.5),
+            (1746.0, 2784.5), (1748.0, 2787.0), (1748.5, 2800.0),
+            (1748.5, 2820.0), (1748.5, 2840.0), (1748.5, 2860.0),
+            (1748.4, 2872.0), (1747.8, 2877.5), (1746.0, 2880.4),
+            (1742.5, 2881.4), (1730.0, 2881.5), (1710.0, 2881.5),
+            (1698.0, 2881.5), (1694.0, 2882.0), (1692.5, 2884.5),
+            (1692.5, 2900.0), (1692.5, 2925.0), (1692.5, 2948.0),
+        ],   # Victoria at Cal State -> Central -> Del Amo -> Avalon. The head
+             # takes the step the sheet draws in Victoria at x=1723, where the
+             # line drops from y=2778.5 to 2783.5; the tail stops at y=2948,
+             # where both directions pick the drawn Avalon up within a pixel and
+             # run it down to 223rd themselves.
+    },
 }
 
 
