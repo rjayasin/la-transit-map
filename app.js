@@ -1,16 +1,12 @@
 "use strict";
 // ---- which build this is ----
 // Replaced at deploy time by scripts/stamp_build.mjs; left as the placeholder
-// when the file is served straight from a checkout, which is how a dev copy
-// tells itself apart from a published one.
+// when served from a checkout, which is how a dev copy tells itself apart.
 //
-// Pages serves every file with Cache-Control: max-age=600 and offers no way to
-// change it, so a stale index.html is possible for ten minutes after any deploy
-// and a tab left open is stale for as long as it stays open. Neither is fixable
-// in the headers. What is fixable is not being able to *tell*: the build id
-// travels in every snapshot, so a freeze record names the exact code that
-// produced it, and the data files carry it in their URLs, so a cached page can
-// never pair with a newer schedule.json than the one it was built against.
+// Pages serves everything with a fixed 10-minute max-age, so a stale index.html
+// is unavoidable. What the build id fixes is not being able to *tell*: it
+// travels in every freeze snapshot, and the data files carry it in their URLs,
+// so a cached page can never pair with a newer schedule.json than its own.
 const BUILD = "__BUILD__";
 const V_SCHEDULE = "__V_SCHEDULE__", V_MAP = "__V_MAP__", V_TILES = "__V_TILES__";
 const DEPLOYED = !BUILD.startsWith("__");     // false in a working copy
@@ -20,24 +16,13 @@ let staleBuild = null;
 
 const cv = document.getElementById("c"), ctx = cv.getContext("2d");
 // A canvas past a certain size stops being accelerated and falls back to
-// software, and it is a cliff rather than a slope. Measured on this page at a
-// fixed view, same window height, same everything else:
+// software — a cliff, not a slope. Measured here at a fixed view: 4096x1900
+// costs 0.5 ms a frame, 5120x1900 costs 9.7 ms, for 25% more pixels. A 2560 CSS
+// px window at DPR 2 lands the wrong side of it.
 //
-//     canvas 2560x1900   0.5 ms a frame
-//     canvas 4096x1900   0.5 ms a frame
-//     canvas 5120x1900   9.7 ms a frame     <- twenty times, for 25% more pixels
-//
-// The reporter's window in this investigation is 2560 CSS px wide, so at a
-// device-pixel ratio of 2 it lands at 5120 and has been paying that on every
-// frame of every session — the ~43 fps that looked like a large-window tax, and
-// nine tenths of the main thread's frame budget spent on a blit.
-//
-// So the backing store is capped and the ratio follows it: at 2560 CSS px that
-// is 1.6 rather than 2. Well above 1, and the tile pyramid supplies the detail
-// either way, so what it costs is a little sharpness on very wide windows.
-//
-// DPR is read at call time everywhere (transforms, sprite sizes, the tile level,
-// the zoom limit), so it can change with the window; it is no longer a constant.
+// So the backing store is capped and the ratio follows it, costing a little
+// sharpness on very wide windows. DPR is therefore read at call time everywhere
+// (transforms, sprite sizes, tile level, zoom limit) rather than being constant.
 const MAX_CANVAS_PX = 4096;
 let DPR = Math.min(devicePixelRatio || 1, 2);
 let W = 0, H = 0;
@@ -170,53 +155,20 @@ bumpBar();
 
 // ---- hi-res tile pyramid (pre-rendered from the PDF; levels 2x and 4x the base PNG) ----
 const TILE = 512;
-// Decoded tiles are this page's largest graphics allocation: 512x512x4 is 1 MB
-// apiece and the pyramid holds 5488 of them, so only a fraction is ever
-// resident. What matters is not only how many the cache holds but whether
-// letting one go actually gives the memory back.
+// Decoded tiles are this page's largest graphics allocation: 1 MB apiece, 5488
+// in the pyramid, so only a fraction is ever resident.
 //
-// It didn't. Tiles used to be <img> elements, and an <img> does not own its
-// decoded surface — it names one in the browser's image cache, which is keyed
-// by URL, lives in the content process, and is not tied to the document.
-// Dropping the element and clearing src releases a reference, nothing more: the
-// surface returns to a cache that decides for itself when to let go, and at
-// panning speed it never keeps up. A session that evicted 2359 tiles had handed
-// back 2.3 GB that way, on top of the 282 MB it was holding live, and froze
-// with a render loop that was still running clean — no slow frames, no
-// exceptions. It also explains the symptom that otherwise makes no sense:
-// reloading didn't help because those surfaces were never the document's to
-// free, and only closing the tab took the content process down with them.
+// They are ImageBitmaps rather than <img> elements because an <img> does not own
+// its decoded surface — it names one in the browser's image cache, which the
+// document cannot free. Dropping the element only releases a reference, so
+// evictions leaked until the content process died. close() frees the surface
+// then and there, so the live set is what the cache says it is.
 //
-// ImageBitmap is the one decoded image whose lifetime this page controls.
-// close() releases the surface then and there, so an eviction is a free and the
-// live set is what the cache says it is. Fetching the bytes here also means the
-// only thing left in a browser cache is the compressed WebP — 44 MB for the
-// entire pyramid, versus 4.1 GB if every tile in it were decoded at once.
-//
-// The budget still must never fall below one frame's working set. The cascade
-// can draw three levels at once, so a deep zoom on a wide display wants 200+
-// tiles in a single frame; a smaller budget evicts tiles that same frame is
-// still drawing, so every frame re-fetches hundreds of them and the ones that
-// haven't decoded don't paint at all. That is not a slow cache, it is one that
-// misses every time, and it reads as stutter. A fixed 160 did exactly this
-// against a measured demand of 215 — 800k evictions and visible juddering.
-//
-// So the budget follows demand rather than being guessed: twice the recent
-// peak, floored so a small viewport still caches usefully, and capped in the
-// megabytes the cap is actually protecting — the old ceiling of 640 tiles read
-// like a count and meant 640 MB. Eviction is least-recently-*used*.
-//
-// TILE_CEIL is now a cap that actually holds. It used to be overridden whenever
-// demand passed it — `max(capped, demand * 1.25)` — on the reasoning that a
-// budget under the working set is worse than a big one. That reasoning is
-// sound and the conclusion was still wrong: it meant the ceiling stopped
-// applying at exactly the zoom where memory was tightest. Measured on the
-// window that froze (2560x1331, DPR 2), demand peaked at 304 tiles and took the
-// budget to 380 MB; on a 3440-wide display it asks for 565 MB. The way out is
-// not to raise the cap or to clamp it and thrash, but to stop generating that
-// much demand — see levelsFor(), which drops a tier that doesn't fit. Demand is
-// bounded there, so the budget never has to choose between the cap and the
-// working set, and honouring the cap here costs nothing.
+// The budget must never fall below one frame's working set: the cascade can draw
+// three levels at once, and a budget under that evicts tiles the same frame is
+// still drawing, which reads as stutter rather than as a slow cache. So it
+// follows demand — twice the recent peak, floored, capped. levelsFor() bounds
+// demand under the cap, so the two never have to fight.
 const TILE_FLOOR = 192;        // tiles; a small viewport still caches usefully
 const TILE_CEIL = 256;         // tiles, and 1 MB each: the live-memory ceiling
 const TILE_HEADROOM = 1.25;    // budget over working set; a frame must never
@@ -253,46 +205,22 @@ function evictTiles(budget) {
   }
 }
 
-// A tile that failed used to stay failed for as long as the view held it, and
-// that is far more expensive than the missing square it looks like. levelReady()
-// is all-or-nothing, so one stuck tile makes its level permanently un-ready, and
-// two things follow every single recompose: tilesCover() stays false, so the
-// 17-megapixel base PNG is redrawn underneath — scaled by DPR*view.k, which is
-// 7.3x at the zoom this froze at — and drawTiles() never collapses to the finest
-// tier, so all three levels are drawn instead of one. None of that shows up as a
-// slow frame, because canvas draws are recorded on the main thread and
-// rasterized off it: the loop stays fast and clean while the compositor wears
-// it, which is exactly the signature these freezes report (frameErrors 0,
-// slowFrames 0, fps 0). And it cannot heal, because getTile() re-inserts the
-// tile on every access, making the broken one the *most* recently used tile in
-// the cache and so the last thing eviction would ever reach.
-//
-// So a failure is retried, with a delay and a small ceiling on attempts — which
-// was the whole point of not retrying, and is kept: a genuinely missing file
-// gives up after TILE_TRIES and cannot become a fetch storm.
+// A permanently failed tile costs far more than the missing square it looks
+// like: levelReady() is all-or-nothing, so one stuck tile keeps its level
+// un-ready forever, and every frame then redraws the base PNG underneath and
+// draws all three tile levels instead of one. It never shows as a slow frame,
+// since the cost lands on the compositor. Hence a bounded retry — a genuinely
+// missing file still gives up rather than becoming a fetch storm.
 const TILE_RETRY_MS = 4000;    // before a failed tile is asked for again
 const TILE_TRIES = 3;          // attempts before it is left alone for good
 
-// Nothing is fetched for a view that is still moving.
-//
-// A zoom gesture walks through every level on the way, and each stop of it asks
-// for a full screen of tiles it will have left before they arrive. Measured on
-// the freeze of 2026-07-28 13:21: 26 seconds of hard zooming, k swinging between
-// 0.15 and 4 over and over, produced **1237 decodes and 1322 evictions** — about
-// fifty ImageBitmaps a second created and fifty closed, none of which was on
-// screen long enough to be seen. The tile budget bounds what is *resident* and
-// says nothing about that: the cache sat at ~230 of 256 the whole time and every
-// snapshot read healthy.
-//
-// A tile asked for mid-gesture is waste twice over, so the ask is simply
-// deferred: the view is drawn from whatever is already cached — which is what
-// the coarse levels are for, they back-fill exactly this — and the moment it
-// holds still the tiles for where it actually landed are fetched. This is how a
-// map app behaves anyway; it is only visible as slightly softer artwork during
-// the gesture itself.
-//
-// TILE_SETTLE_MS is under a frame at 60 Hz times ten, so a deliberate slow zoom
-// still streams continuously and only a flung one is held back.
+// Nothing is fetched for a view that is still moving. A zoom gesture walks
+// through every level, each stop asking for a screenful of tiles it will have
+// left before they arrive — measured at ~50 bitmaps created and closed per
+// second, none on screen long enough to be seen. The tile budget bounds what is
+// resident and says nothing about that churn. So the ask is deferred and the
+// view drawn from what is cached, which is what the coarse levels are for.
+// TILE_SETTLE_MS holds back a flung gesture without interrupting a slow one.
 const TILE_SETTLE_MS = 140;
 let viewMovedAt = 0, viewSeen = "";
 let tilesMayLoad = true;      // set once a frame, from the view's own stillness
@@ -408,25 +336,13 @@ function levelCost(level) {
 // The cascade to draw for a given sharpness: every level up to the one that is
 // sharp enough, coarsest first, so coarser tiles back-fill while finer ones load.
 //
-// Two things bound it, and both exist because the naive rule — take the finest
-// level that isn't too soft — is what ran the tab out of graphics memory.
-//
-// Level L supplies L device px per map px, and costs 4x the level below it. The
-// old test, `level / 2 >= want`, reached for the finer tier the instant the
-// coarser one fell short by *any* margin: at want = 4.02 it paid 4x the tiles
-// and 4x the fill for a 0.5% gain in sharpness nobody can see. SHARP_ENOUGH
-// says don't trade up for less than a tenth, which is still under what reads as
-// soft when the tile is upscaled to fit.
-//
-// The switch-on is also where a tier is most expensive: it engages while the
-// viewport is at its widest in map px, so the first frame that wants level 8
-// wants ~250 of it. That cost is 4*W*H*DPR^2/TILE^2 whichever tier it is, so it
-// scales with the window and no fixed cascade is safe on every display — 304
-// tiles on the 2560x1331 window that froze, 452 on a 3440-wide one. So a tier
-// that doesn't fit the memory ceiling is simply not used, and the view stays on
-// the tier below until zooming further in shrinks the footprint enough to
-// afford it. The result is a slightly softer picture for a few tenths of zoom
-// on a large window, instead of 500+ MB of live tiles and a dead compositor.
+// A level costs 4x the one below it, so both bounds here exist to stop the naive
+// rule — take the finest level that isn't too soft — from exhausting graphics
+// memory. SHARP_ENOUGH refuses to trade up for less than a tenth of sharpness.
+// And a tier is most expensive at the moment it engages, while the viewport is
+// still at its widest, at a cost that scales with the window: a tier that
+// doesn't fit the memory ceiling is skipped until zooming in shrinks its
+// footprint. Costs a little sharpness on a large window for a few tenths of zoom.
 const SHARP_ENOUGH = 0.9;      // accept a tier within this fraction of sharp
 function levelsFor(want) {
   const levels = [];
@@ -486,51 +402,29 @@ function drawTiles(g) {
 }
 
 // ---- background compositing ----
-// The background — base PNG plus tile pyramid — changes only when the view moves
-// or a tile finishes loading. Vehicles move every frame, so the canvas is
-// repainted 60 times a second, and recomposing 200+ scaled tile draws (plus a
-// 4096x4139 base image) inside each of those repaints is what makes a large
-// window stutter. It is fill cost, not cache cost: the same zoom is smooth in a
-// smaller window purely because there is less to fill, which is exactly the
-// shape of the measurements — 209 tiles drawn against 143, at one zoom, with no
-// evictions on either side.
-//
-// The pyramid also oversamples hardest right here. Levels go 2x, 4x, 8x, so at
-// view.k*DPR = 2.2 level 2 is a hair too soft and level 4 — nearly double what
-// is needed — gets drawn instead, downscaled on the way. That is inherent to a
-// power-of-2 pyramid; what is not inherent is paying for it every frame.
-//
-// So compose into an offscreen canvas and blit that. A still view then pays for
-// the background once instead of 60 times a second, and panning costs one extra
-// full-canvas blit on top of work it was doing anyway.
+// The background changes only when the view moves or a tile finishes loading,
+// but vehicles move every frame — so recomposing 200+ scaled tile draws inside
+// every repaint is what makes a large window stutter. It is fill cost, not cache
+// cost. So compose into an offscreen canvas and blit that: a still view pays for
+// the background once instead of 60 times a second.
 const bg = document.createElement("canvas");
 const bgCtx = bg.getContext("2d");
 let bgKey = "", bgDirty = true, bgComposes = 0;
-// What the last compose actually asked the compositor for. The base PNG is the
-// largest single draw this page makes and it is drawn whenever the tiles do not
-// yet cover — scaled by DPR*view.k, which at the deepest zoom is 8, putting a
-// 4096x4139 image on a 32768 px destination rect. Whether that was happening
-// when a freeze hit has been guessed at for five rounds and never recorded.
+// What the last compose asked the compositor for. The base PNG is the largest
+// single draw this page makes, drawn whenever the tiles don't yet cover, and at
+// the deepest zoom it lands on a 32768 px destination rect — worth recording in
+// a freeze snapshot.
 let baseDrawn = false, baseScale = 0;
 
-// Whether the browser took the canvases away.
+// Whether the browser took the canvases away. A 2D context is lost when the
+// process holding its surfaces goes (usually the GPU process), and the browser
+// says so with a main-thread event — which these freezes leave running, so this
+// either catches one outright or rules it out.
 //
-// Every freeze so far ends the same way: the page is visible, its timers run,
-// its input handlers run, and `document.timeline.currentTime` stops — the
-// browser has stopped updating the rendering for this document. That is the
-// browser's side of the line, and the page has had no way to say *why*. There
-// is one thing it can still be told: a 2D context is lost when the process
-// holding its surfaces goes away (the GPU process dying is the usual reason),
-// and the browser says so with an event, on the main thread, which every one of
-// these freezes has left running. If a freeze is a lost context, this catches
-// it outright; if `ctxLost` is still 0 in the next record, that is ruled out
-// for good rather than argued about.
-//
-// The event is not cancelled, so the browser restores the context on its own.
-// What it cannot restore is what was drawn: the composed background and every
-// sprite bitmap come back blank, so both caches are invalidated here. Without
-// that a survived loss would leave the map painting nothing over nothing, which
-// would look exactly like the freeze it just recovered from.
+// The event is not cancelled, so the browser restores the context itself. What
+// it cannot restore is what was drawn, so both caches are invalidated here;
+// otherwise a survived loss paints nothing over nothing and looks like the
+// freeze it just recovered from.
 let ctxLost = 0, ctxRestored = 0, ctxLostAt = 0;
 for (const c of [cv, bg]) {
   c.addEventListener("contextlost", () => {
@@ -608,29 +502,20 @@ function zoomAt(cx, cy, f) {
   view.k = Math.min(8 / DPR, Math.max(0.08, view.k * f));  // cap at deepest tile level's 1:1
   view.x = mx - cx / view.k; view.y = my - cy / view.k;
 }
-// Trackpad gestures follow Maps.app: a two-finger swipe pans, a pinch zooms
-// about the pointer. macOS keeps sending wheel events through the momentum
-// phase after the fingers lift, so panning off them glides to a stop on its
-// own — a hand-rolled easing would only fight the one the OS already applies.
+// Trackpad gestures follow Maps.app: two-finger swipe pans, pinch zooms about
+// the pointer. macOS keeps sending wheel events through the momentum phase, so
+// panning glides to a stop on its own — hand-rolled easing would fight the OS.
 //
-// A pinch arrives as a wheel event with ctrlKey set (Chrome, Firefox, Edge);
-// Safari sends its own gesture events instead, handled below, and no ctrl
-// wheel, so the two paths can't both fire. A real mouse wheel still zooms, as
-// it does in Maps.app — but telling one from a two-finger swipe takes a
-// different tell in each browser:
-//   - Firefox delivers a physical wheel in *line* units (deltaMode 1) and a
-//     trackpad in pixels, so the delta unit alone settles it.
-//   - Chrome and Safari deliver both in pixel units, and a mouse notch is not
-//     the coarse whole number it is elsewhere: macOS ramps the wheel with
-//     acceleration, so the first event of a scroll can be as small and
-//     fractional as any trackpad delta. What stays constant is the legacy
-//     wheelDeltaY — a physical notch steps in multiples of 120, where a
-//     trackpad reports arbitrary pixel-derived values.
-// The test is only applied to the first event of a gesture and then held for
-// the rest of it, because mid-swipe a hard flick can throw a delta as coarse
-// as any mouse notch, and a swipe that changed its mind halfway would be far
-// worse than one misread from the start. A pause ends the gesture; macOS runs
-// the momentum tail straight on from the fingers, well inside the gap.
+// A pinch arrives as a ctrlKey wheel event (Chrome, Firefox, Edge); Safari sends
+// gesture events instead, handled below, so the two paths can't both fire.
+// Telling a real mouse wheel from a two-finger swipe takes a different tell in
+// each browser: Firefox delivers a physical wheel in line units and a trackpad
+// in pixels, while Chrome and Safari use pixels for both and only the legacy
+// wheelDeltaY stays coarse (multiples of 120) for a physical notch.
+//
+// The test is applied to the first event of a gesture and held for the rest,
+// since a hard flick mid-swipe can throw a delta as coarse as a mouse notch, and
+// a gesture that changes its mind halfway is worse than one misread throughout.
 const WHEEL_NOTCH = 40;      // px of deltaY below which it can't be a mouse notch
 const WHEEL_GAP = 150;       // ms of quiet that ends a gesture
 let wheelMode = null, wheelAt = 0;
@@ -709,18 +594,10 @@ cv.addEventListener("touchcancel", endTouch);
 
 // ---- sprites ----
 // Drawn at exactly the size they will occupy in device pixels, so drawImage
-// copies 1:1 instead of resampling.
-//
-// A sprite rendered once at a fixed size and then scaled to fit is only clean
-// where that scale lands on a whole ratio. This one used to be a (R+2)*4 px
-// bitmap drawn at (R+2)*2*DPR*min(2.2, sqrt(k)) device px, which is 1:1 only at
-// k = 1 and k = 4; at every zoom in between the ratio is a fraction like
-// 46 -> 65.05, and as a vehicle translates sub-pixel the filter keeps
-// reshuffling which source pixels land on which screen pixels. That reads as
-// the sprite twitching rather than gliding, and it comes and goes with zoom —
-// smooth at the whole ratios, jittery between them. Rendering to the size
-// actually needed removes the resample entirely; motion stays sub-pixel, which
-// is what makes it look smooth.
+// copies 1:1 instead of resampling. A sprite scaled to fit is only clean where
+// the scale lands on a whole ratio; between those, sub-pixel motion keeps
+// reshuffling which source pixels land where, and the sprite twitches instead
+// of gliding.
 function drawSprite(g, route, px) {
   const rail = route.rail, R = rail ? 12 : 9.5, half = R + 2;
   const k = px / (half * 2);          // device px per map-unit of sprite
@@ -738,24 +615,12 @@ function drawSprite(g, route, px) {
 
 // One reused bitmap per route, resized in place when the size it needs changes.
 //
-// Keyed on the integer pixel size `spriteSize` rounds to — NOT on `view.k`.
-// Keying on `view.k` meant any change to that float dropped the whole set and
-// built a fresh <canvas> per visible route, even when the rounded size was
-// identical: a trackpad zoom's momentum tail nudges `view.k` every frame for a
-// second after the fingers lift, so a single gesture churned thousands of
-// canvas elements. Firefox frees canvas backing on GC, and a canvas looks tiny
-// to the JS heap while its buffer is large, so the buffers outran collection
-// until an allocation failed inside the render loop and killed it. The tab
-// froze, and the exhausted graphics memory lived in the content process, so a
-// reload didn't clear it but closing the tab did. (A failed allocation no
-// longer ends the loop — see the diagnostics below — but it is still the tile
-// cache and this one that decide whether the memory runs out at all.)
-//
-// Reusing the element and resizing only on a real size change (a cache hit
-// through the whole momentum tail, and through playback, where the size is
-// constant) frees the old buffer synchronously and caps the live canvases at
-// one per route. Rail and bus sizes coexist without thrashing
-// because each route keeps its own bitmap and checks its own size.
+// Keyed on the integer pixel size `spriteSize` rounds to — NOT on `view.k`. A
+// float key rebuilt every visible route's canvas on every frame of a zoom's
+// momentum tail; canvases look tiny to the JS heap while their buffers are
+// large, so the buffers outran GC until an allocation failed. Reusing the
+// element frees the old buffer synchronously and caps live canvases at one per
+// route.
 const spriteBmp = [];
 
 function spriteAt(i, px) {
@@ -1015,60 +880,34 @@ function handleTap(cx, cy) {
 }
 
 // ---- diagnostics ----
-// The render loop used to end at its first exception: requestAnimationFrame was
-// the last statement of frame(), so anything that threw before it — most
-// plausibly a failed allocation once graphics memory is tight — stopped the
-// simulation for good, with no message left behind. The next frame is now
-// scheduled whatever happens, so a bad frame is a dropped frame rather than the
-// end of the animation, and the reason is reported here.
+// The next frame is scheduled whatever happens, so a throwing frame is a dropped
+// frame rather than the end of the animation, and the reason is reported here.
+// This page's memory is almost entirely decoded images, so a failed allocation
+// is the likely cause; tiles dominate (see the cache above).
 //
-// What to look for when it does fire: this page's memory is almost entirely
-// decoded images. Tiles dominate (see the cache above), map.png holds ~65 MB,
-// and the sprite bitmaps are a rounding error beside them.
-//
-// A freeze also doesn't have to come through here at all. The one that
-// prompted this reported zero frame errors and zero slow frames, because the
-// loop really was fine — it was the content process underneath that had run
-// out of image surfaces, holding every tile the page thought it had evicted.
-// So the snapshot leads with fps and with live megabytes: a log still arriving
-// while fps reads 0 means the loop stopped, and one arriving at 60 over a
-// frozen picture means it didn't. resourceStats() is on window as
-// transitDebug() so the numbers can be read from the console at any time.
+// A freeze need not come through here at all — the loop can be fine while the
+// content process underneath has run out of image surfaces. So the snapshot
+// leads with fps and live megabytes: a log arriving while fps reads 0 means the
+// loop stopped, one arriving at 60 over a frozen picture means it didn't.
+// resourceStats() is exposed as transitDebug() for reading from the console.
 const DEBUG = qp.has("debug");
 const SLOW_FRAME_MS = 500;   // a frame this long is thrashing, not drawing
 let frameErrors = 0, slowFrames = 0, lastSlowLog = -1e9;
 let frames = 0, lastFrameAt = performance.now();
-// `fps: 0` has now been reported for two different failures and one non-failure,
-// and the snapshot could not tell them apart, because a stalled compositor and a
-// backgrounded tab produce the identical reading: rAF stops, timers keep firing.
-// Both were guessed at from the surrounding numbers instead of being stated. The
-// gap between rAF callbacks and the visibility of the document say it outright,
-// and neither costs anything, so both are kept always rather than only under
-// ?trace — where they existed already and were no use, the freeze never having
-// been caught under a flag someone had to set in advance.
+// A stalled compositor and a backgrounded tab both read as `fps: 0` — rAF stops,
+// timers keep firing — so the rAF gap and the document's visibility are tracked
+// always rather than under a ?trace flag someone must set in advance.
 let lastRafAt = 0, rafGapMax = 0;
 let visibleSince = performance.now(), hiddenInWindow = document.hidden;
-// Those flags were still not enough, and the third report is why: it came back
-// `hidden: true`, which the rule above reads as "no fault, the tab was
-// backgrounded" — and there is no way to tell from it whether the freeze was
-// missed or whether the freeze is *what happens* around a hide. Reading a
-// snapshot means going to the browser to read it, and on macOS a window that
-// ends up behind another is reported hidden, so the act of collecting the
-// evidence is one of the things that produces this reading. A flag that the
-// observer trips by observing cannot decide anything.
+// `document.hidden` cannot settle it: on macOS a window behind another window
+// reports hidden, so going to the browser to read a snapshot is itself one of
+// the things that produces the reading. A flag the observer trips by observing
+// decides nothing.
 //
-// It also disagreed with itself: `visibilityAgeMs` 50499 against `sinceFrameMs`
-// 39078, i.e. a frame 11 s after the tab was supposedly hidden. That gap dates
-// the last visibility *change*, and at load it dates the load instead, so it
-// answers a different question depending on what has happened — which is not a
-// number to reason from either.
-//
-// What can decide it is a clock that only advances while the document is
-// visible. rAF is called when the page is visible and not otherwise, so time
-// spent visible since the last frame is exactly "how long the page has been
-// asked to draw and hasn't". A tab hidden for an hour contributes nothing to it
-// and cannot fake a stall; a page that is visible and not drawing cannot hide
-// one. Everything below hangs off that instead of off document.hidden.
+// A clock that only advances while the document is visible can. rAF is called
+// when the page is visible and not otherwise, so visible time since the last
+// frame is exactly "how long the page has been asked to draw and hasn't". A tab
+// hidden for an hour contributes none of it. Everything below hangs off this.
 let visClock = 0;                                   // ms spent visible, banked
 let visSince = document.hidden ? 0 : performance.now();   // 0 while hidden
 let frameAtVis = 0;                                 // visibleMs() at the last frame
@@ -1079,23 +918,15 @@ function visibleMs() {
 }
 
 // The browser's own frame clock, and the one number that says whose fault a
-// stall is.
+// stall is. `document.timeline.currentTime` is set once per "update the
+// rendering" pass, so reading it from a *timer* asks the browser directly
+// whether it is still producing frames. Nothing this file does can move it.
 //
-// `document.timeline.currentTime` is the timestamp rAF callbacks are handed. It
-// is set once per "update the rendering" pass and does not move between them, so
-// reading it from a *timer* asks the browser directly: are you still producing
-// frames? It is not the page's bookkeeping — nothing this file does can advance
-// it or hold it back.
-//
-// Against `stalledVisibleMs` it splits the freeze in two, and the split is the
-// whole question:
-//
-//   climbing, while the page has no frames  — the browser is rendering and this
-//     page's rAF registration is gone. A page bug, and re-arming recovers it.
-//   frozen at the same value                — the browser stopped updating the
-//     rendering for a document that is visible and asking. Nothing the page
-//     draws can reach the screen, because the compositing pass is the one that
-//     stopped. Not fixable from in here; survivable, and reported as such.
+// Against `stalledVisibleMs` it splits the freeze in two:
+//   climbing, while the page has no frames — the browser is rendering and this
+//     page's rAF registration is gone. Re-arming recovers it.
+//   frozen — the browser stopped updating the rendering for a visible document.
+//     Nothing drawn here can reach the screen. Not fixable from in here.
 function renderTick() {
   const t = document.timeline && document.timeline.currentTime;
   return typeof t === "number" ? Math.round(t) : -1;
@@ -1124,17 +955,12 @@ let peakDecodeRate = 0, peakEvictRate = 0;
 // Reset with the rate baselines below, so these describe the window a snapshot
 // covers rather than the whole session.
 let frameCostSum = 0, frameCostN = 0, frameCostMax = 0;
-// And what the frame spent it on. One number said the canvas was too big for
-// the machine and the cap fixed it; the two freezes after the cap say the
-// number is not flat — it sits at 3-4 ms zoomed out and 10-16 ms past k≈3, and
-// both stalls happened at the top of that. A single average cannot say which
-// part of the frame grows, and the three candidates fail differently: the
-// compose is one huge draw of the base PNG or the tile cascade and only runs
-// when the view moves, the blit is the whole canvas every frame and scales with
-// its size, and the sprites are thousands of small draws whose *on-screen* size
-// grows as sqrt(k) — so at deep zoom each one covers five times the pixels it
-// does at k=1, over a fleet that also changes size with the simulated clock.
-// Timed separately, a rising cost names its own cause.
+// And what the frame spent it on. Frame cost is not flat — 3-4 ms zoomed out,
+// 10-16 ms past k≈3 — and a single average can't say which part grows. The three
+// candidates fail differently: the compose is one huge draw and only runs when
+// the view moves, the blit is the whole canvas every frame, and the sprites are
+// thousands of small draws whose on-screen size grows as sqrt(k). Timed
+// separately, a rising cost names its own cause.
 let costComposeSum = 0, costBlitSum = 0, costSpriteSum = 0, costComposeMax = 0;
 let frameComposeMs = 0, frameBlitMs = 0, spriteDraws = 0;
 
@@ -1146,33 +972,22 @@ function resourceStats() {
   const secs = statsAt ? (now - statsAt) / 1000 : 0;
   const rate = n => secs > 0 ? Math.round(n / secs) : 0;
   const s = {
-    // Read fps first. The render loop and this log run off separate clocks, so
-    // a log that keeps arriving while fps sits at 0 means frames stopped, and
-    // one arriving at 60 fps over a picture that isn't moving means they
-    // didn't — the frames are being drawn and something below the page is
-    // failing to put them on screen. The old log couldn't tell those apart:
-    // it reported no errors and no slow frames for both.
+    // Read fps first. This log and the render loop run off separate clocks, so a
+    // log still arriving while fps sits at 0 means frames stopped, and one at 60
+    // over a still picture means something below the page is failing to put them
+    // on screen.
     fps: rate(frames - statsFrames), sinceFrameMs: Math.round(now - lastFrameAt),
-    // Then read this one, and settle the question on it alone: milliseconds the
-    // document has spent *visible* since the last frame was drawn. rAF runs when
-    // the page is visible and not otherwise, so anything here beyond a frame or
-    // two is the loop failing to be called while the page was asking to draw —
-    // no interpretation, and nothing an observer can trip by observing. Seconds
-    // of it is the freeze; `sinceFrameMs` far larger than it is a backgrounded
-    // tab and no fault at all. STALL_VISIBLE_MS of it fires the watchdog below,
-    // which records the snapshot at the time rather than leaving it to be read
-    // afterwards. Zero until the first frame: the page spends its load visible
-    // and not drawing, which is not a stall but would read as the largest one
-    // in the session to anyone who took a snapshot during it.
+    // Then settle it on this alone: ms spent *visible* since the last frame.
+    // Anything beyond a frame or two is the loop failing to be called while the
+    // page was asking to draw. Seconds of it is the freeze; `sinceFrameMs` far
+    // larger is a backgrounded tab and no fault. Zero until the first frame,
+    // since the page spends its load visible and not drawing.
     stalledVisibleMs: frames ? Math.round(visibleMs() - frameAtVis) : 0,
     framesTotal: frames, stalls, firstStallAt,
-    // The rest is context for that number, not a substitute for it. rafGapMax is
-    // the longest gap between consecutive frames since the last snapshot, so it
-    // catches a stall the page recovered from, which the live figure above no
-    // longer shows; slowFrames is the other failure, a loop that ran but ran
-    // slowly. `hidden` and `hiddenSinceLast` say what the browser was doing to
-    // the loop on purpose, and visibilityAgeMs dates the last change — with the
-    // caveat that before the first change it dates the page load.
+    // Context for that number, not a substitute. rafGapMax catches a stall the
+    // page recovered from, which the live figure no longer shows; slowFrames is
+    // the other failure, a loop that ran but ran slowly. visibilityAgeMs dates
+    // the last change, or the page load if there hasn't been one.
     hidden: document.hidden, hiddenSinceLast: hiddenInWindow,
     visibilityAgeMs: Math.round(now - visibleSince),
     visibleMs: Math.round(visibleMs()),
@@ -1242,18 +1057,13 @@ function resourceStats() {
     // rather than wedged (see the canvas listeners and CLOCK_SKEW0).
     ctxLost, ctxRestored, ctxLostAt,
     driftMs: Math.round(Date.now() - performance.now() - CLOCK_SKEW0),
-    // Which copy of this file the tab is running. Twice now a freeze has been
-    // reported minutes after a fix went live and there was no way to tell from
-    // the record whether the frozen tab had it — a tab open since before the
-    // deploy keeps running the old script, and Pages serves this HTML with
-    // max-age=600, so even a reload can be served a stale copy for ten minutes.
-    // document.lastModified is the served file's Last-Modified, so it dates the
-    // code rather than the session, and costs nothing and no build step. `build`
-    // names it exactly, once the deploy has stamped one in.
+    // Which copy of this file the tab is running, so a freeze record names the
+    // code that produced it. docModified dates the served file rather than the
+    // session; `build` names it exactly once the deploy has stamped one in.
     build: BUILD, docModified: document.lastModified, staleBuild,
   };
-  // The one number that matters for a freeze, and now a true one: every decoded
-  // surface here is held by this page and released when the page releases it.
+  // A true figure, because every decoded surface counted here is held by this
+  // page and released when the page releases it.
   s.imageMB = +(s.tileMB + s.bgMB + s.mapMB + s.spriteMB + s.canvasMB).toFixed(1);
   if (s.decodesPerSec > peakDecodeRate) peakDecodeRate = s.decodesPerSec;
   if (s.evictsPerSec > peakEvictRate) peakEvictRate = s.evictsPerSec;
@@ -1313,21 +1123,13 @@ setInterval(() => {
 }, 10000);
 
 // ---- am I the current build? ----
-// A tab open across a deploy keeps running the script it loaded, for as long as
-// it stays open. That is ordinary browser behaviour and not a fault, but it cost
-// this investigation two rounds: a freeze was reported minutes after a fix went
-// live, twice, and both times the tab predated it — which took reading the shape
-// of the stored record to work out, after the fact.
+// A tab open across a deploy keeps running the script it loaded, so a freeze
+// reported after a fix ships may well be a freeze in the older code. Hence the
+// page asks: version.json carries the published build, the query string gets
+// past the CDN's ten-minute cache, and no-store keeps it out of the browser's.
 //
-// So the page asks. version.json carries the build the deploy published; the
-// query string is what gets past the CDN, which would otherwise answer from the
-// same ten-minute cache that made the page stale in the first place, and
-// no-store keeps it out of the browser's own.
-//
-// It never reloads by itself. This is a simulation someone watches for a long
-// time at a zoom and a clock they chose, and throwing that away to pick up a
-// change they haven't asked for would be worse than being a version behind. It
-// offers, in the bar, and says so on the console.
+// It never reloads by itself — this is a simulation someone watches at a zoom
+// and a clock they chose. It offers, in the bar, and says so on the console.
 const VERSION_POLL_MS = 300000;   // 5 min; a deploy is not an urgent event
 const updEl = document.getElementById("upd");
 updEl.addEventListener("click", () => location.reload());
@@ -1353,59 +1155,40 @@ addEventListener("visibilitychange", () => { if (!document.hidden) checkVersion(
 checkVersion();
 
 // ---- stall watchdog (always on) ----
-// Three freezes, three snapshots, and not one of them taken while the page was
-// failing: each was read off the console afterwards, by which time the numbers
-// describe the reading rather than the fault. The ?trace black box was built for
-// exactly this and has never been running when it happened, because it takes a
-// flag set in advance — and nobody sets a flag in advance for a bug that shows
-// up once a session. So the page watches itself, always, and writes down the
-// moment rather than waiting to be asked about it afterwards.
+// A snapshot read off the console afterwards describes the reading, not the
+// fault, and nobody sets a ?trace flag in advance for a bug that shows up once a
+// session. So the page watches itself, always, and records the moment.
 //
-// The condition is the visible clock above: the document visible and no frame
-// for STALL_VISIBLE_MS. There is no legitimate way to sit that long — a slow
-// frame is still a frame and shows up as slowFrames, a hidden tab does not
-// advance the clock, and a frame that threw still scheduled its successor.
+// The condition is the visible clock above: visible and no frame for
+// STALL_VISIBLE_MS. There is no legitimate way to sit that long — a slow frame
+// is still a frame, a hidden tab doesn't advance the clock, and a frame that
+// threw still scheduled its successor.
 //
-// The record goes to localStorage because the only cure anyone has found is
-// closing the tab, which throws away the console with it. transitFreeze() after
-// reopening reads it back. Written once, when the stall is detected, so nothing
-// touches storage on the hot path.
-//
-// What this cannot catch is the main thread wedged outright, since the timer
-// would be wedged with it — that is the ?trace worker's case, and it stays there.
-// Every freeze so far has had live timers and a dead loop, which is this one.
+// The record goes to localStorage because the only known cure is closing the
+// tab, which takes the console with it. Written once, at detection, so nothing
+// touches storage on the hot path. This cannot catch a main thread wedged
+// outright, since the timer would be wedged too — that is the ?trace worker's case.
 const STALL_VISIBLE_MS = 4000;   // visible, and not drawn, for this long
 const STALL_TICK_MS = 1000;      // so the record lands within a second of that
 const STALL_KEY = "transit.freeze";
 const STALL_PREV_KEY = "transit.freeze.prev";
 const STALL_RUNUP = 30;          // cheap liveness samples kept before the stall
 // Which run of the page wrote the record. "Keep the first stall of the session"
-// needs to know what the session is, and localStorage outlives it: the test used
-// to be "is there a record already", which is true in every later session on any
-// machine that has ever frozen. So the first freeze ever recorded was kept
-// forever, every freeze after it only bumped a counter on a snapshot of some
-// older run, and — worse, once there was something to amend — the verdict and
-// the recovery were dropped on the floor, because neither is written unless this
-// run owns the record. Caught the first time it mattered: the freeze on
-// 2026-07-28 12:12, two minutes after the verdict shipped, left a record from
-// 11:46 with nothing but `lastAt` changed.
+// needs to know what the session is, and localStorage outlives it — testing
+// "is there a record already" keeps the first freeze ever recorded forever and
+// drops every later run's verdict, since neither is written unless this run owns
+// the record.
 const STALL_SESSION = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 let stallRunup = [], inStall = false;   // stalls/firstStallAt live with the clock
 
-// What the page was being asked to do on the way in.
+// What the page was being asked to do on the way in — a ring of the input events
+// themselves, which says what no counter reflects: a resize, a display change,
+// the browser freezing or resuming the page.
 //
-// Every record so far describes the page's own state and none of them says what
-// the user was doing, which has left the run-up readable only by inference —
-// the two freezes on 2026-07-28 were both at or just off the deepest zoom, and
-// the only reason anyone knows that is that `k` happens to be sampled. A ring
-// of the events themselves says it directly, and says the ones no counter
-// reflects at all: a resize, a display change, the page being frozen or resumed
-// by the browser's own lifecycle.
-//
-// Runs of one kind are coalesced — a pinch is hundreds of wheel events and
-// would otherwise be the whole ring — so an entry is "wheel x214, from 41.2 s
-// to 43.9 s". Registered passively and in the capture phase, so nothing here
-// can change what the page's own handlers see.
+// Runs of one kind are coalesced, since a pinch is hundreds of wheel events and
+// would otherwise be the whole ring, so an entry reads "wheel x214, 41.2s-43.9s".
+// Registered passively and in the capture phase, so nothing here changes what the
+// page's own handlers see.
 const EVENT_KEEP = 24;
 const EVENT_JOIN = 1000;     // ms of quiet that ends a run of one kind
 const EVENT_STALL_MS = 1000; // not drawn for this long: whatever arrives now is
@@ -1634,27 +1417,16 @@ window.transitFreeze = (back = 0) => {
 
 // ---- black box (?trace) ----
 // Everything above reports from inside the page, which is the one place that
-// stops reporting when the page is what fails. The freeze takes the tab with
-// it — console gone, devtools gone, and closing the tab, the only cure, throws
-// the evidence away. Twice now the last thing we had was a snapshot that looked
-// healthy, which is not a diagnosis.
+// stops reporting when the page is what fails. So under ?trace the page keeps a
+// second record on a second thread and ships it out of the process as it goes.
+// A Worker has its own event loop, so it keeps running while the main thread is
+// wedged and still holds the last snapshot handed to it.
 //
-// So under ?trace the page keeps a second record, on a second thread, and ships
-// it out of the process as it goes. A Worker is the whole trick: it has its own
-// event loop, so it keeps running while the main thread is wedged, and it holds
-// the last snapshot the main thread managed to hand it. When the snapshots stop
-// arriving it says so, and keeps saying so, with that last state attached. That
-// turns "the tab froze and there's nothing" into "the main thread stopped at T,
-// and here is what it was doing at T minus half a second".
-//
-// It also tells apart the three failures that look identical from inside:
-//   - the main thread is blocked      — samples stop, the worker keeps posting
-//   - the main thread is fine and the compositor is not
-//                                     — samples continue, rafGapMax climbs
-//   - the content process is gone     — the posts stop too, and the last record
-//                                       in the file is the epitaph
-// A worker that goes quiet *with* the main thread is itself the finding: that
-// is the process dying, not a script hanging.
+// It tells apart the three failures that look identical from inside:
+//   - main thread blocked        — samples stop, the worker keeps posting
+//   - compositor stopped         — samples continue, rafGapMax climbs
+//   - content process gone       — the posts stop too, and the last record is
+//                                  the epitaph
 //
 // scripts/freeze_log.py receives the posts and writes them to
 // scratch/freeze-trace.jsonl; scripts/freeze_report.py reads them back. If
@@ -1847,14 +1619,12 @@ if (TRACE) {
     try { localStorage.setItem(TRACE_KEY, JSON.stringify(traceRing.slice(-TRACE_KEEP))); }
     catch (e) { /* quota or private mode; the POSTs are the real channel */ }
   }, 2000);
-  // A breakdown of what the tab is holding, by type — JavaScript, DOM, and
-  // which realm each belongs to. Chrome, and only when cross-origin-isolated,
-  // which is what freeze_log.py's headers are for. It is slow, so rarely.
+  // What the tab holds by type. Chrome only, and only when cross-origin-isolated
+  // — which is what freeze_log.py's headers are for. Slow, so rarely.
   //
-  // Read it next to imageMB rather than instead of it: it measured 27.8 MB on a
-  // page whose decoded images were 102 MB, because canvas backing stores and
-  // decoded image surfaces are not in its scope. That gap is the useful part —
-  // this number moving means the JS side is growing, and this number staying
+  // Read it next to imageMB, not instead of it: canvas backing stores and
+  // decoded image surfaces are outside its scope (27.8 MB reported for a page
+  // holding 102 MB of images). The gap is the useful part — this number staying
   // put while the tab dies says the memory is somewhere it cannot see.
   if (performance.measureUserAgentSpecificMemory) {
     setInterval(async () => {
@@ -1887,38 +1657,17 @@ window.transitTrace = () => {
   catch (e) { return []; }
 };
 
-// The next frame is scheduled first, before any of the work — so nothing in the
-// body of this function can end the loop, whether or not it is caught.
+// The next frame is scheduled first, before any of the work, so nothing in the
+// body of this function can end the loop — including the reporting that sits
+// outside the try, which allocates and so fails exactly when memory is short.
 //
-// It used to be scheduled last, outside the try, on the reasoning that keeping
-// it out of the try protected it. It didn't: traceFrame() and noteSlowFrame()
-// also sit outside the try, between the catch and the scheduling, and both
-// allocate — which is precisely what fails when the process is short of memory.
-// Either one throwing would have ended the animation while reporting
-// `frameErrors: 0`, making it indistinguishable from a freeze below the page.
-// Asking for the next frame up front costs nothing and removes the ambiguity.
-// Callbacks registered for the same frame are handed the same timestamp, so a
-// second one for a frame already drawn is dropped rather than drawn twice: that
-// is what makes the watchdog's re-arm safe, since two loops would double every
-// frame's work for the rest of the session as the price of a recovery that
-// already worked.
-//
-// Dropping the *draw* is right. Dropping the *registration* with it was not, and
-// that is what this used to do — `return` before the re-arm, on the assumption
-// that a repeated timestamp can only ever mean a surplus registration, so some
-// other one must still be live. Nothing guarantees that. A repeated timestamp
-// with only one request outstanding ends the animation on the spot: no error, no
-// slow frame, `frames` simply stops while the browser goes on rendering the
-// document perfectly well — and the watchdog four seconds later is the only
-// reason it ever comes back, which is exactly the shape of the 2026-07-29
-// session's seven stalls, every one of them recovering the tick after detection
-// with `framesSince: 59`, and its run-up showing `document.timeline` at most 18
-// ms stale at four of the five reads taken while not one frame was drawn (102 ms
-// at the fifth) — a refresh driver ticking at speed, for a page getting nothing.
-//
-// So the loop is now held by a count of outstanding requests rather than by the
-// timestamp: every path out of frame() leaves exactly one live, and a surplus
-// collapses back to one on the frame after it arrives.
+// Callbacks registered for the same frame share a timestamp, so a second one for
+// a frame already drawn is dropped rather than drawn twice; that is what makes
+// the watchdog's re-arm safe. But dropping the *registration* along with the draw
+// ends the animation whenever only one request was outstanding. So the loop is
+// held by a count of outstanding requests rather than by the timestamp: every
+// path out of frame() leaves exactly one live, and a surplus collapses back to
+// one on the frame after it arrives.
 let lastRafNow = -1, rafLive = 0, rafDupes = 0;
 function armFrame() {
   rafLive++;
@@ -1969,22 +1718,12 @@ function frame(now) {
   if (cost > SLOW_FRAME_MS) noteSlowFrame(cost, t0);
 }
 
-// The gap since the previous frame, in seconds, but never more than a beat.
-//
-// `now - lastFrame` is real elapsed time, and after a tab has been in the
-// background it is however long the tab was away — rAF stops there and the first
-// frame back carries the whole absence. At 400x that made a single frame advance
-// the simulation by hours, and one subtraction of a day doesn't bring a jump
-// like that back into range: the clock landed outside [0, 86400), no trip's
-// window contained it, and every vehicle on the map faded out for that frame.
-// It corrected itself on the next one, so what it left was a blink of an empty
-// map on returning to the tab — and, if that frame happened to be the last one
-// drawn, an empty map for as long as the tab stayed that way.
-//
-// Clamping is the right answer rather than wrapping properly, because there is
-// no sense in which the missed time should be played: nothing was drawn for it.
-// A frame that arrives late gets one frame's worth of clock and the animation
-// picks up where the eye left it.
+// The gap since the previous frame, in seconds, but never more than a beat: the
+// first frame after a backgrounded tab carries the whole absence, which at 400x
+// advances the simulation by hours and lands the clock outside [0, 86400) —
+// emptying the map for that frame. Clamping is right rather than wrapping
+// properly, since nothing was drawn for the missed time and there is no sense in
+// which it should be played.
 const MAX_STEP_SEC = 0.25;   // 4 fps; below this, real frame pacing is preserved
 
 function drawFrame(now) {
@@ -2054,21 +1793,12 @@ function drawFrame(now) {
   const s = spriteScale();
   const insetDraws = [];
   const step = dt / FADE_SEC;   // opacity change this frame (real time, not sim time)
-  // What the window can actually show, in map px.
-  //
-  // The cull below this is against the drawn *map*, which at any real zoom is
-  // nearly all of it: at k=4 a 2560 px window holds 0.8% of the sheet, so ~2,200
-  // of the 2,222 draws a frame were destination rectangles entirely off the
-  // canvas. Firefox charges for those and the split says so outright — the
-  // freeze on 2026-07-28 at 21:46 reports 13.8 ms of sprites against 0.0 for the
-  // compose and 0.0 for the blit, with the cost tracking the zoom the whole way
-  // up (3.7 ms at k=1.2, 16 ms at k=5). Chrome rejects them for about nothing,
-  // flat at 2.6 ms across every zoom, which is why five rounds of headless
-  // measurement never saw this.
-  //
-  // The margin is one sprite, so a vehicle straddling the edge still draws, and
-  // it is generous — sprites are ~28 map units across at s=1 and the ring the
-  // path inspector adds is wider still.
+  // What the window can actually show, in map px. Culling against the drawn map
+  // instead leaves nearly every sprite off-canvas at any real zoom (at k=4 a
+  // 2560 px window holds 0.8% of the sheet), and Firefox charges for those
+  // rejected draws where Chrome does not — which is why headless measurement
+  // missed it. The margin is one generous sprite, so a vehicle straddling the
+  // edge still draws.
   const vm = 24 * s;
   const vx0 = view.x - vm, vx1 = view.x + W / view.k + vm;
   const vy0 = view.y - vm, vy1 = view.y + H / view.k + vm;

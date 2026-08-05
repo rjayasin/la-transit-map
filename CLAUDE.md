@@ -30,3 +30,24 @@ user watching) should go through review rather than land directly:
 - **A merged PR is finished.** Never add commits on top of already-merged
   history, and never reuse or reopen a merged PR for follow-up work. Once a
   PR has merged, treat any follow-up as a fresh change.
+
+## Documentation and comments
+
+This repo has a habit of accreting a per-change engineering journal — every
+fixed route adding paragraphs to the README and blocks of comments to the code.
+Don't feed it.
+
+- **The README is for a reader, not a changelog.** It outlines how the project
+  works and how to run it. It carries **no route-specific content** — no named
+  routes, streets, per-route measurements, or before/after numbers. If a change
+  doesn't alter how the project works, the README doesn't change.
+- **Comment the mechanism, not the investigation.** Say what a constant or a
+  branch is for and what breaks without it, in a few lines. Leave out the
+  debugging story, the measurements taken along the way, and the routes that
+  prompted it — a named route in a comment should be a hand-tuned table entry
+  explaining itself, and one or two lines at that.
+- **A worked example is not documentation of a fix.** Prefer the general
+  statement of the failure over the instance that revealed it.
+- **`implementation_notes.md`** holds what someone needs to do further work:
+  the hand-tuned tables and when to reach for each, verification gotchas,
+  invariants. Keep it concise, and put new notes there rather than in the README.

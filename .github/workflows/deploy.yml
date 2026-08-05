@@ -1,12 +1,8 @@
 name: Deploy map
 
-# Pages used to build this repo straight off the branch, which meant the files
-# served were the files committed and there was nowhere to stamp anything. That
-# cost two rounds of the freeze investigation: a freeze was reported minutes
-# after a fix went live, twice, and the record could not say whether the tab had
-# the fix — it hadn't, both times, because a tab open since before the deploy
-# keeps running the script it loaded. Building through Actions gives a step
-# between the commit and the bytes, which is where the build id goes.
+# Built through Actions rather than served straight off the branch: that gives a
+# step between the commit and the published bytes, which is where the build id
+# gets stamped in. Serving the committed files leaves nowhere to put one.
 on:
   push:
     branches: [main]

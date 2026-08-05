@@ -121,11 +121,9 @@ def tree_for(system, label, cache, rail_trees):
         # Two stroke styles of one olive: DASH solid, Commuter Express dashed,
         # and a route measured against the wrong one is measured against another
         # network entirely. schedule.json doesn't carry the distinction, so it is
-        # read back out of the feed the same way build_data reads it. Guessing
-        # from the designation — numbered is Commuter Express, named is DASH —
-        # is right 47 labels out of 48 and wrong about the one Commuter Express
-        # that isn't numbered: "CE Union Station/Bunker Hill Shuttle", which the
-        # sheet labels "USH" and the guess would measure against DASH's network.
+        # read back out of the feed the way build_data reads it — guessing from
+        # the designation is wrong for the one Commuter Express that isn't
+        # numbered.
         out = (B.ink_tree(B.LADOT_INK, dashed=not ladot_is_dash().get(label, True)),
                "ink")
     elif system == "Metrolink":
@@ -136,20 +134,12 @@ def tree_for(system, label, cache, rail_trees):
     else:
         feed = next((f for f, n in B.FEED_NAMES.items() if n == system), None)
         if feed in B.INK_SNAP or feed in B.SYMBOL_FEEDS:
-            # Snapped on the sheet's strokes, so measured on them: Montebello's
-            # mask misses the thin third of its own drawing and holds the grey
-            # street lettering instead, which is what put the 50 on Whittier Bl
-            # across Pico Rivera reading zero drift the whole way.
-            #
-            # The two agencies the sheet symbolises snap on those strokes as
-            # well, and until they were named here neither was measured at all:
-            # their seeds are what SYMBOL_FEEDS says they are — colours that
-            # refine_color cannot find enough of along the drawing to return a
-            # reading — so `cols` came back empty, the tree was None, and every
-            # BurbankBus and Beach Cities row was dropped from the ranking
-            # before it was scored. BurbankBus's Pink Route rode the Orange
-            # Route's drawn line for the whole of its length and no check on
-            # the map said so.
+            # Snapped on the sheet's strokes, so measured on them. A mask is no
+            # use for these agencies: it misses the thin parts of the drawing
+            # and holds the grey street lettering instead, and the two agencies
+            # the sheet symbolises have seeds refine_color cannot find enough of
+            # along the drawing to return a reading at all — so the tree came
+            # back None and their rows were dropped before they were scored.
             out = (B.ink_tree([B.LEGEND_INK[feed]]), "ink")
         else:
             cols = agency_mask_colors(system)
