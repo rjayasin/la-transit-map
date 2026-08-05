@@ -131,12 +131,15 @@ high-resolution tiles so badges and labels under the line stay legible. A route
 reaching downtown also gets a `..._inset.png`.
 
 ```sh
-.venv/bin/python scripts/debug_line.py 720                     # Metro Bus 720
-.venv/bin/python scripts/debug_line.py 2 --system "Big Blue"   # shared number
-.venv/bin/python scripts/debug_line.py 720 --no-stops          # just the path
-.venv/bin/python scripts/debug_line.py 720 --shape 0           # one variant only
-.venv/bin/python scripts/debug_line.py 720 --inset             # only the panel
+.venv/bin/python scripts/debug_line.py <line>
+.venv/bin/python scripts/debug_line.py <line> --system <name>   # shared number
+.venv/bin/python scripts/debug_line.py <line> --no-stops        # just the path
+.venv/bin/python scripts/debug_line.py <line> --shape N         # one variant only
+.venv/bin/python scripts/debug_line.py <line> --inset           # only the panel
 ```
+
+A label shared across systems prompts for which one to draw; `--system` skips
+the prompt.
 
 Paths come straight out of `schedule.json`, so what you see is what the
 animation plays back. Each route has several shape variants, listed on stdout
@@ -229,8 +232,9 @@ which reports from off the main thread and cannot be suppressed by it.
   date; those systems animate their busiest covered Wednesday instead.
 - **Schematic corners** — the map distorts the far San Fernando Valley and the
   far east, where buses can drift off their drawn streets.
-- **Off the sheet** — one Metrolink line runs east past the edge of the map.
-  Those trains are hidden at the edge rather than drawn somewhere they aren't.
+- **Off the sheet** — a few outer-suburban workings run past the edge of the
+  printed map. They are hidden at the edge rather than drawn somewhere they
+  aren't.
 - **Downtown** is a ghosted call-out box on the source map; vehicles cross it on
   the main map on the warp alone, since nothing is drawn under the panel to snap
   to, and are mirrored into the panel.
