@@ -1,18 +1,14 @@
 // Rewrite app.js's build placeholders at deploy time.
 //
-// Pages serves everything with Cache-Control: max-age=600 and gives no way to
-// change it, so a stale index.html is always possible for up to ten minutes and
-// a tab left open is stale indefinitely. Neither is fixable in the headers. What
-// is fixable is the page not *knowing*: it now carries the id of the build it
-// came from, so a snapshot names its code exactly, and it can ask version.json
-// whether it is the current one. index.html is deliberately not stamped — it is
-// the one URL that cannot be versioned, so it is kept constant instead.
+// Pages serves everything with a fixed 10-minute max-age, so a stale page is
+// unavoidable; what the build id fixes is the page not *knowing*. index.html is
+// deliberately not stamped — it is the one URL that cannot be versioned, so it
+// is kept constant instead.
 //
-// The data files get the build's content identity in a query string, matching
-// the pattern the site repo uses: a cached index.html can then never pair with a
-// newer schedule.json, because the URL it asks for is the one it was built with.
-// Tiles are keyed on the last commit that touched tiles/, so a code-only deploy
-// doesn't make every client re-download 5488 images.
+// The data files carry the build's content identity in a query string, so a
+// cached index.html can never pair with a newer schedule.json. Tiles are keyed
+// on the last commit that touched tiles/, so a code-only deploy doesn't make
+// every client re-download 5488 images.
 //
 //     node scripts/stamp_build.mjs "<build id>" "<tiles rev>"
 import fs from "node:fs";

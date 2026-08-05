@@ -74,20 +74,14 @@
 </div>
 <script>
 // Bootstrapper. This file is the one URL that cannot be versioned — it is the
-// address people visit — and Pages serves it with Cache-Control: max-age=600 and
-// no way to change that. So it is made not to matter: nothing here changes
-// between deploys, which means a copy ten minutes stale is byte-identical to a
-// fresh one.
+// address people visit — so it is made not to matter: nothing here changes
+// between deploys, and a stale copy is byte-identical to a fresh one.
 //
-// The client itself moves to app.js, asked for by the build that is live right
-// now. version.json is tiny and fetched past both caches — a query string the
-// CDN has never seen, and no-store for the browser's own — so the answer is
-// always current, and the URL it produces is content-addressed and can be cached
-// as hard as anything else.
-//
-// Note that versioning app.js alone would have made this worse rather than
-// better: a stale index.html would go on asking for the stale hash, faithfully
-// and forever. It only works because what asks the question is constant.
+// The client moves to app.js, asked for by the build that is live right now.
+// version.json is fetched past both caches, so the URL it produces is
+// content-addressed and can be cached hard. Versioning app.js alone would be
+// worse than nothing: a stale index.html would ask for the stale hash forever.
+// It only works because what asks the question is constant.
 (async () => {
   let v = "";
   try {
