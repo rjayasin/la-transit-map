@@ -1607,6 +1607,11 @@ PINNED_ANCHORS = {
     ("longbeach", "92"): [(2288, 3262)],
     ("longbeach", "93"): [(2288, 3262)],
     ("longbeach", "94"): [(2288, 3262)],
+    # Routes sharing a street are drawn as ribbons a dozen px apart, which the
+    # walk's lattice reads as one corridor: at a corner it rides whichever
+    # ribbon runs shortest and rejoins further on. A pin on the corner itself
+    # is the shortcut's own end, so neither half of the span reaches it.
+    ("gtfs_bus", "55"): [(1746.5, 2120)],
     # The sheet stacks its route chips in columns, and a chip's antialiased
     # border is a ring of mask pixels — so a column of them is a ladder the walk
     # can climb between two corridors the length band cannot separate.
