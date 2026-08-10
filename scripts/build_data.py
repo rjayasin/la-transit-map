@@ -1629,12 +1629,19 @@ PINNED_ANCHORS = {
     # end of it, so the clamp carries a single displacement over the whole run.
     # Three points each: both ends and the bend between them — pinning one end
     # alone runs the interpolation straight across the bend.
-    ("foothill", "20493"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2)],
     ("foothill", "10495"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2)],
     ("foothill", "20498"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2)],
     ("foothill", "10499"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2)],
     ("foothill", "10699"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2)],
     ("foothill", "20707"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2)],
+    # Those three, and two more out along the freeway. A freeway express is
+    # drawn dashed, and a dash reads too pale at 4096 px for the colour mask to
+    # hold any of it — so a stretch with no badge on it has neither ink to snap
+    # to nor a walk to trace, and the fit interpolates the chord across
+    # whatever the line curves through. Points on the drawn line are all there
+    # is to bend it back.
+    ("foothill", "20493"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2),
+                            (2699.5, 2045.3), (2788.5, 2101.0)],
     # A line name is written a handful of times and nowhere else, so a railroad
     # can run a long way before its first one — and where the sheet needs a name
     # to tell two tracks apart, that head is the stretch with nothing to tell it.
