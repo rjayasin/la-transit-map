@@ -1,5 +1,7 @@
 name: Trigger site deploy
 
+# Repo-agnostic: copy as-is into any repo the site's sitemap links to, and add the SITE_DEPLOY_TOKEN secret there.
+
 on:
   push:
     branches: [main]
@@ -8,10 +10,11 @@ jobs:
   dispatch:
     runs-on: ubuntu-latest
     steps:
-      # SITE_DEPLOY_TOKEN is a fine-grained PAT with contents:write on
-      # rjayasin/rjayasin.github.io; the default GITHUB_TOKEN can't reach
-      # other repos.
+      # A fine-grained PAT with contents:write on the site repo; the default GITHUB_TOKEN can't reach other repos.
       - name: Dispatch to rjayasin.github.io
         env:
           GH_TOKEN: ${{ secrets.SITE_DEPLOY_TOKEN }}
-        run: gh api repos/rjayasin/rjayasin.github.io/dispatches -f event_type=la-transit-map-push
+        run: |
+          gh api repos/rjayasin/rjayasin.github.io/dispatches \
+            -f event_type=sitemap-update \
+            -f "client_payload[repo]=$GITHUB_REPOSITORY"
