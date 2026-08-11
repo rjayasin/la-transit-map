@@ -2983,7 +2983,7 @@ def solid_pixels(tree):
 
 def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
                   anchor_gate=120.0, min_frac=0.5, tail=(10.0, 11), region="main",
-                  speckled=True, sole=False):
+                  speckled=True, sole=False, blind=()):
     """Snap a warped polyline onto a drawn-line mask. The displacement field is
     smoothed along the line so whole stretches move to the same drawn street
     instead of individual points grabbing different parallels. Returns None if
@@ -3095,6 +3095,9 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
         # points keep the warp, and the smoothing below ramps the correction
         # down to them.
         cov = maskable(P, region)
+        for bx0, by0, bx1, by1 in blind:
+            cov &= ~((P[:, 0] >= bx0) & (P[:, 0] <= bx1)
+                     & (P[:, 1] >= by0) & (P[:, 1] <= by1))
         ok = (d < cap) & (cov | sole)
         if ci == 0:
             # "mostly undrawn" is judged only over the stretch a mask could
@@ -3585,8 +3588,10 @@ INSET_UNANCHORED = {("gtfs_bus", "460")}
 
 INSET_COLORS = {"ladot": [(107, 103, 61)]}
 
+INSET_BLIND = {("ladot", "4446"): [(3540, 3400, 3670, 3590)]}
 
-def inset_runs(ll, main_dist, snap_tree=None, anchors=None, sole=False):
+
+def inset_runs(ll, main_dist, snap_tree=None, anchors=None, sole=False, blind=()):
     """Portions of a shape inside the DTLA inset, as runs of inset-px
     polyline. Motion in the inset is computed natively in inset space (the
     schematic main map collapses downtown, so main-shape distance cannot
@@ -3653,7 +3658,7 @@ def inset_runs(ll, main_dist, snap_tree=None, anchors=None, sole=False):
             sc = snap_coherent([tuple(p) for p in pts], snap_tree,
                                caps=INSET_SOLE_CAPS if sole else INSET_CAPS,
                                win=INSET_WIN, anchors=anchors, anchor_gate=75.0,
-                               min_frac=0.35, region="inset", sole=sole)
+                               min_frac=0.35, region="inset", sole=sole, blind=blind)
             if sc is not None:
                 pts = np.asarray(sc)
         # drop edge-hugging slivers that never meaningfully enter the frame
@@ -4369,7 +4374,8 @@ def main():
                 anc = ([] if (key[0], shape_route.get(key)) in INSET_UNANCHORED
                        else route_anchors(toks, tree, region="inset", colors=gate))
                 runs = inset_runs(ll, lambda px: main_dist(key, si, px), tree, anc,
-                                  sole=key[0] == "gtfs_rail")
+                                  sole=key[0] == "gtfs_rail",
+                                  blind=INSET_BLIND.get((key[0], shape_route.get(key)), ()))
             shape_runs[si] = runs
         return shape_runs[si]
 
