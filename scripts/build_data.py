@@ -1707,6 +1707,14 @@ def trim_terminus(pts, pins):
 # the fault, the corridor walk cannot cross it, and no pin can be placed that
 # attaches to the right part of the shape. See implementation_notes.md.
 OVERRIDE_PATHS = {
+    ("ladot", "868"): {
+        "box": (720, 850, 900, 1000),
+        "path": [
+            (922, 995), (920, 1001), (910, 1004), (890, 1004), (882, 1002),
+            (881, 995), (881, 989), (876, 988), (840, 988), (800, 988),
+            (791, 993), (787, 1002),
+        ],
+    },
     # A short, unambiguous corner where three things fail at once: the warp
     # lands it far off, a station-box marker breaks the ink so no corridor walk
     # crosses it, and the same error scrambles anchor order.
@@ -3575,6 +3583,8 @@ INSET_WIN = 15
 
 INSET_UNANCHORED = {("gtfs_bus", "460")}
 
+INSET_COLORS = {"ladot": [(107, 103, 61)]}
+
 
 def inset_runs(ll, main_dist, snap_tree=None, anchors=None, sole=False):
     """Portions of a shape inside the DTLA inset, as runs of inset-px
@@ -4347,6 +4357,8 @@ def main():
                 cols, tol, toks = shape_isnap.get(key, (None, 0, set()))
                 if key[0] == "gtfs_bus" and cols:
                     cols = [ORANGE]   # inset draws ALL Metro bus lines orange
+                elif cols and key[0] in INSET_COLORS:
+                    cols = INSET_COLORS[key[0]]
                 # Rail is the one network whose printed colors are known
                 # exactly rather than sampled off the artwork, so it is the one
                 # that can be masked on the pyramid — see inset_tile_tree.
