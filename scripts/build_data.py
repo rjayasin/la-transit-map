@@ -1607,6 +1607,7 @@ PINNED_ANCHORS = {
     ("longbeach", "92"): [(2288, 3262)],
     ("longbeach", "93"): [(2288, 3262)],
     ("longbeach", "94"): [(2288, 3262)],
+    ("gtfs_bus", "55"): [(1746.5, 2120)],
     # The sheet stacks its route chips in columns, and a chip's antialiased
     # border is a ring of mask pixels — so a column of them is a ladder the walk
     # can climb between two corridors the length band cannot separate.
@@ -1624,12 +1625,13 @@ PINNED_ANCHORS = {
     # end of it, so the clamp carries a single displacement over the whole run.
     # Three points each: both ends and the bend between them — pinning one end
     # alone runs the interpolation straight across the bend.
-    ("foothill", "20493"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2)],
     ("foothill", "10495"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2)],
     ("foothill", "20498"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2)],
     ("foothill", "10499"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2)],
     ("foothill", "10699"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2)],
     ("foothill", "20707"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2)],
+    ("foothill", "20493"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2),
+                            (2699.5, 2045.3), (2788.5, 2101.0)],
     # A line name is written a handful of times and nowhere else, so a railroad
     # can run a long way before its first one — and where the sheet needs a name
     # to tell two tracks apart, that head is the stretch with nothing to tell it.
