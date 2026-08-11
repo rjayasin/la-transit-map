@@ -3573,6 +3573,8 @@ INSET_CAPS = (60.0, 30.0, 14.0)
 INSET_SOLE_CAPS = (120.0, 60.0, 30.0, 14.0)
 INSET_WIN = 15
 
+INSET_UNANCHORED = {("gtfs_bus", "460")}
+
 
 def inset_runs(ll, main_dist, snap_tree=None, anchors=None, sole=False):
     """Portions of a shape inside the DTLA inset, as runs of inset-px
@@ -3737,6 +3739,7 @@ def main():
     patterns, pattern_idx = [], {}  # key (feed, shape_id, stop_seq)
     stops_px = {}                   # (feed, stop_id) -> (x, y)
     stops_ll = {}                   # (feed, stop_id) -> (lon, lat)
+    shape_route = {}                # (feed, shape_id) -> route id, sans suffix
     stats = defaultdict(int)
 
     for feed in FEEDS:
@@ -3959,6 +3962,7 @@ def main():
             # mask's label-shaped holes cannot answer for the whole of it.
             line_ink = None
             rid = route_by_shape.get(sid)
+            shape_route[(feed, sid)] = (rid or "").split("-")[0]
             toks = badge_tokens.get(rid, set())
             pins = PINNED_ANCHORS.get((feed, (rid or "").split("-")[0]), [])
             cuts = pins + TRIM_TERMINI.get((feed, (rid or "").split("-")[0]), [])
@@ -4350,7 +4354,8 @@ def main():
                 tree = (inset_tile_tree(cols) if cols and key[0] == "gtfs_rail"
                         else mask_tree(cols, tol, region="inset") if cols else None)
                 gate = None if key[0] in ("gtfs_bus", "gtfs_rail") else cols
-                anc = route_anchors(toks, tree, region="inset", colors=gate)
+                anc = ([] if (key[0], shape_route.get(key)) in INSET_UNANCHORED
+                       else route_anchors(toks, tree, region="inset", colors=gate))
                 runs = inset_runs(ll, lambda px: main_dist(key, si, px), tree, anc,
                                   sole=key[0] == "gtfs_rail")
             shape_runs[si] = runs
