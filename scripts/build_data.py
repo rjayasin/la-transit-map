@@ -203,6 +203,10 @@ MAP_LABELS = {
     # *place* name is not — and it is the more misleading of the two, since a
     # rider looking it up on the map finds something. Naming them also anchors
     # them; sheet_tokens is all a DASH has.
+    ("ladot", "567"): "LC",         # DASH Lincoln Heights/Chinatown, clockwise
+    ("ladot", "568"): "LC",         # DASH Lincoln Heights/Chinatown, anticlockwise
+    ("ladot", "575"): "LS",         # DASH Leimert/Slauson, clockwise
+    ("ladot", "605"): "LS",         # DASH Leimert/Slauson, anticlockwise
     ("ladot", "798"): "NR",         # DASH Northridge
     ("ladot", "799"): "VS",         # DASH Van Nuys/Studio City, clockwise
     ("ladot", "800"): "VS",         # DASH Van Nuys/Studio City, counterclockwise
@@ -3581,7 +3585,7 @@ INSET_CAPS = (60.0, 30.0, 14.0)
 INSET_SOLE_CAPS = (120.0, 60.0, 30.0, 14.0)
 INSET_WIN = 15
 
-INSET_UNANCHORED = {("gtfs_bus", "460")}
+INSET_UNANCHORED = {("gtfs_bus", "460"), ("ladot", "567"), ("ladot", "568")}
 
 INSET_COLORS = {"ladot": [(107, 103, 61), (128, 126, 85)]}
 
