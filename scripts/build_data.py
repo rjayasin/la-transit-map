@@ -1707,6 +1707,14 @@ def trim_terminus(pts, pins):
 # the fault, the corridor walk cannot cross it, and no pin can be placed that
 # attaches to the right part of the shape. See implementation_notes.md.
 OVERRIDE_PATHS = {
+    ("ladot", "868"): {
+        "box": (720, 850, 900, 1000),
+        "path": [
+            (922, 995), (920, 1001), (910, 1004), (890, 1004), (882, 1002),
+            (881, 995), (881, 989), (876, 988), (840, 988), (800, 988),
+            (791, 993), (787, 1002),
+        ],
+    },
     # A short, unambiguous corner where three things fail at once: the warp
     # lands it far off, a station-box marker breaks the ink so no corridor walk
     # crosses it, and the same error scrambles anchor order.
@@ -3573,6 +3581,10 @@ INSET_CAPS = (60.0, 30.0, 14.0)
 INSET_SOLE_CAPS = (120.0, 60.0, 30.0, 14.0)
 INSET_WIN = 15
 
+INSET_UNANCHORED = {("gtfs_bus", "460")}
+
+INSET_COLORS = {"ladot": [(107, 103, 61), (128, 126, 85)]}
+
 
 def inset_runs(ll, main_dist, snap_tree=None, anchors=None, sole=False):
     """Portions of a shape inside the DTLA inset, as runs of inset-px
@@ -3737,6 +3749,7 @@ def main():
     patterns, pattern_idx = [], {}  # key (feed, shape_id, stop_seq)
     stops_px = {}                   # (feed, stop_id) -> (x, y)
     stops_ll = {}                   # (feed, stop_id) -> (lon, lat)
+    shape_route = {}                # (feed, shape_id) -> route id, sans suffix
     stats = defaultdict(int)
 
     for feed in FEEDS:
@@ -3959,6 +3972,7 @@ def main():
             # mask's label-shaped holes cannot answer for the whole of it.
             line_ink = None
             rid = route_by_shape.get(sid)
+            shape_route[(feed, sid)] = (rid or "").split("-")[0]
             toks = badge_tokens.get(rid, set())
             pins = PINNED_ANCHORS.get((feed, (rid or "").split("-")[0]), [])
             cuts = pins + TRIM_TERMINI.get((feed, (rid or "").split("-")[0]), [])
@@ -4343,6 +4357,8 @@ def main():
                 cols, tol, toks = shape_isnap.get(key, (None, 0, set()))
                 if key[0] == "gtfs_bus" and cols:
                     cols = [ORANGE]   # inset draws ALL Metro bus lines orange
+                elif cols and key[0] in INSET_COLORS:
+                    cols = INSET_COLORS[key[0]]
                 # Rail is the one network whose printed colors are known
                 # exactly rather than sampled off the artwork, so it is the one
                 # that can be masked on the pyramid — see inset_tile_tree.
@@ -4350,7 +4366,8 @@ def main():
                 tree = (inset_tile_tree(cols) if cols and key[0] == "gtfs_rail"
                         else mask_tree(cols, tol, region="inset") if cols else None)
                 gate = None if key[0] in ("gtfs_bus", "gtfs_rail") else cols
-                anc = route_anchors(toks, tree, region="inset", colors=gate)
+                anc = ([] if (key[0], shape_route.get(key)) in INSET_UNANCHORED
+                       else route_anchors(toks, tree, region="inset", colors=gate))
                 runs = inset_runs(ll, lambda px: main_dist(key, si, px), tree, anc,
                                   sole=key[0] == "gtfs_rail")
             shape_runs[si] = runs
