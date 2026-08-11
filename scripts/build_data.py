@@ -1607,10 +1607,6 @@ PINNED_ANCHORS = {
     ("longbeach", "92"): [(2288, 3262)],
     ("longbeach", "93"): [(2288, 3262)],
     ("longbeach", "94"): [(2288, 3262)],
-    # Routes sharing a street are drawn as ribbons a dozen px apart, which the
-    # walk's lattice reads as one corridor: at a corner it rides whichever
-    # ribbon runs shortest and rejoins further on. A pin on the corner itself
-    # is the shortcut's own end, so neither half of the span reaches it.
     ("gtfs_bus", "55"): [(1746.5, 2120)],
     # The sheet stacks its route chips in columns, and a chip's antialiased
     # border is a ring of mask pixels — so a column of them is a ladder the walk
@@ -1634,12 +1630,6 @@ PINNED_ANCHORS = {
     ("foothill", "10499"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2)],
     ("foothill", "10699"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2)],
     ("foothill", "20707"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2)],
-    # Those three, and two more out along the freeway. A freeway express is
-    # drawn dashed, and a dash reads too pale at 4096 px for the colour mask to
-    # hold any of it — so a stretch with no badge on it has neither ink to snap
-    # to nor a walk to trace, and the fit interpolates the chord across
-    # whatever the line curves through. Points on the drawn line are all there
-    # is to bend it back.
     ("foothill", "20493"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2),
                             (2699.5, 2045.3), (2788.5, 2101.0)],
     # A line name is written a handful of times and nowhere else, so a railroad
