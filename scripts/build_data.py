@@ -1621,11 +1621,14 @@ PINNED_ANCHORS = {
     ("longbeach", "61"): [(1930, 2752.2)],
     ("torrance", "6"): [(1378, 2822), (1575, 2785)],
     ("gtfs_bus", "217"): [(1802, 1499)],
+    ("gtfs_bus", "233"): [(1040.9, 1755.1), (1004.7, 1810.7)],
     # Several routes share one corridor with every badge they have past the far
     # end of it, so the clamp carries a single displacement over the whole run.
     # Three points each: both ends and the bend between them — pinning one end
     # alone runs the interpolation straight across the bend.
-    ("foothill", "10495"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2)],
+    ("foothill", "10495"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2),
+                            (2699.5, 2045.3), (2788.5, 2101.0),
+                            (3207.0, 2166.0), (3216.0, 2098.0)],
     ("foothill", "20498"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2)],
     ("foothill", "10499"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2)],
     ("foothill", "10699"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2)],
