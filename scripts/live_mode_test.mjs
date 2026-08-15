@@ -1,12 +1,7 @@
-// Switch the page into live mode, in a real browser, and check it is telling
-// the truth: the clock it shows is Los Angeles', it advances at 1×, and the
-// controls that would fight it are dead.
-//
-// Live is the one mode whose correctness can't be seen by looking at the map —
-// a plausible-looking swarm at the wrong hour, or on the viewer's own zone,
-// looks exactly like a right one. So the clock is computed here, independently,
-// and the two are compared. Checked across a stretch with no frames too, since
-// the mode exists to be left open in a background tab.
+// Switch the page into live mode, in a real browser, and check the clock it
+// shows is Los Angeles', advancing at 1×, with the controls that would fight it
+// dead. A swarm at the wrong hour looks exactly like one at the right hour, so
+// the clock is computed here rather than read back out of the page.
 //
 //     python3 -m http.server 8741      # from the repo root, in another shell
 //     node scripts/live_mode_test.mjs
@@ -87,8 +82,6 @@ const results = [];
 const check = (name, got, want) => results.push(
   [name, JSON.stringify(got), JSON.stringify(want), JSON.stringify(got) === JSON.stringify(want)]);
 
-// The page's answer has to be checked against a clock the page had no hand in,
-// so this is the same reading taken here rather than anything read back out.
 const fmt = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/Los_Angeles", hourCycle: "h23",
   hour: "2-digit", minute: "2-digit", second: "2-digit",
@@ -98,8 +91,8 @@ function laNow() {
   for (const { type, value } of fmt.formatToParts(new Date())) p[type] = value;
   return (+p.hour % 24) * 3600 + +p.minute * 60 + +p.second;
 }
-// Signed distance between two times of day, by the short way round: every
-// comparison below straddles midnight one run in ninety.
+// signed distance between two times of day, by the short way round — every
+// comparison below straddles midnight one run in ninety
 const gap = (a, b) => {
   let d = (a - b) % 86400;
   if (d > 43200) d -= 86400;
@@ -153,8 +146,7 @@ console.log(`Los Angeles ${here} s, page ${there.toFixed(1)} s, off by ${gap(the
 check("the clock is Los Angeles'", Math.abs(gap(there, here)) < 2, true);
 check("the readout says which mode this is",
       await evaluate("stats.textContent.startsWith('live · ')"), true);
-// Within half a step: the scrubber quantizes to 10 s, which is finer than its
-// thumb can show over a 24-hour track.
+// half a step: the scrubber quantizes to 10 s
 check("the scrubber follows along", await evaluate("Math.abs(+scrub.value - simT) <= 5"), true);
 
 const a0 = await evaluate("simT");
@@ -163,8 +155,8 @@ const advanced = gap(await evaluate("simT"), a0);
 console.log(`3 s of real time advanced the map ${advanced.toFixed(2)} s`);
 check("it runs at 1×", Math.abs(advanced - 3) < 0.3, true);
 
-// A tab that gets no frames for a while is the normal case for this mode, and
-// integrating dt would come back behind by exactly the time it was away.
+// the normal case for this mode: integrating dt would come back behind by
+// exactly the time it was away
 await evaluate("window.__raf = requestAnimationFrame; window.requestAnimationFrame = () => 0;");
 await sleep(3000);
 await evaluate("window.requestAnimationFrame = window.__raf; armFrame();");

@@ -92,15 +92,13 @@ addEventListener("keydown", e => {
 });
 
 // ---- live mode ----
-// Two ways to watch one timetable: the whole service day sped up (the
-// scrubbable default), or the network as it is running right now, at 1×. Live
-// is the same stored schedule read against the wall clock — there is no
-// realtime feed behind it, so what it shows is where each vehicle is *due*.
+// The stored timetable read against the wall clock at 1×. No realtime feed
+// behind it, so what it shows is where each vehicle is *due*.
 let live = qp.has("live");
 
-// Seconds since midnight in Los Angeles. The zone is the schedule's, not the
-// viewer's: a rider in New York opening the map wants the network as it is
-// running in LA, and a fixed offset would be an hour wrong for half the year.
+// Seconds since midnight in Los Angeles — the schedule's zone, not the
+// viewer's. Through Intl rather than a fixed offset, which is an hour wrong for
+// half the year.
 const LA_ZONE = "America/Los_Angeles";
 const laParts = new Intl.DateTimeFormat("en-US", {
   timeZone: LA_ZONE, hourCycle: "h23",
@@ -113,14 +111,12 @@ function laTimeOfDay(ms) {
     else if (type === "minute") s += +value * 60;
     else if (type === "second") s += +value;
   }
-  // Zone offsets are whole minutes, so LA's seconds tick in phase with the
-  // wall clock's and its fraction completes the reading.
+  // zone offsets are whole minutes, so the wall clock's fraction completes it
   return s + (ms % 1000) / 1000;
 }
 
-// Formatting a date every frame would allocate in the hot path, so what is kept
-// is the offset — constant between DST switches — and re-measured rarely enough
-// to cost nothing, often enough to follow a switch or the OS clock being set.
+// Formatting a date every frame would allocate in the hot path. The offset is
+// constant between DST switches, so keep it and re-measure rarely.
 const LA_RESAMPLE_MS = 60000;
 let laOffset = 0, laOffsetAt = -Infinity;
 function liveClock() {
@@ -135,9 +131,8 @@ const bar = document.getElementById("bar");
 const filtersEl = document.getElementById("filters");
 const sysBtn = document.getElementById("sys");
 let sysOn = [];
-// index.html has to stay byte-identical across deploys, so anything added to
-// the page since brings its own styles from here — markup shipped in a
-// versioned app.js against rules a cached index.html would not carry.
+// index.html has to stay byte-identical across deploys, so markup added since
+// brings its own styles — a cached copy would not carry them.
 sysBtn.title = "view mode & transit systems";
 const panelCss = document.createElement("style");
 panelCss.textContent = `
@@ -165,12 +160,9 @@ sysBtn.onclick = () => {
   }
 };
 
-// The mode row, and the transport controls it governs: live drives the clock
-// from outside, so the scrubber, the speed and play/pause have nothing to act
-// on. They are disabled rather than hidden — the bar losing half its width on a
-// mode switch reads as the page breaking — except for the speed, which greyed
-// at 60× beside a map running at 1× would read as wrong rather than as inert.
-// Live borrows the select for a rate of its own and gives the setting back.
+// Live drives the clock from outside, so the transport controls are disabled —
+// not hidden, since the bar losing half its width reads as breakage. The speed
+// would read as wrong rather than inert at 60×, so live lends it a 1× of its own.
 const liveSpeed = new Option("1×", "1");
 let speedWas = "";
 let hintEl = null, modeBtns = [];
@@ -189,9 +181,8 @@ function setLive(on) {
   refreshHint();
 }
 
-// The timetable is one service day, so on any other weekday live mode is
-// showing that day's service at today's clock. Say which day, when it differs —
-// left unsaid it looks like a feed of what is actually running.
+// The timetable is one service day, so on any other weekday live shows that
+// day's service at today's clock. Unsaid, it reads as a feed of what is running.
 function scheduleWeekday() {
   const s = String((data && data.date) || "");
   if (!/^\d{8}$/.test(s)) return "";
@@ -1850,9 +1841,8 @@ const MAX_STEP_SEC = 0.25;   // 4 fps; below this, real frame pacing is preserve
 function drawFrame(now) {
   const dt = Math.min(MAX_STEP_SEC, Math.max(0, (now - lastFrame) / 1000));
   lastFrame = now;
-  // Live reads the clock outright instead of integrating dt, so the frame-gap
-  // clamp below cannot leave it behind: a tab that comes back after an hour in
-  // the background comes back in step rather than an hour ago.
+  // Reading the clock rather than integrating dt keeps the clamp above from
+  // leaving live behind: a backgrounded tab comes back in step.
   if (live) {
     simT = liveClock();
     scrub.value = simT | 0;
