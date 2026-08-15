@@ -89,7 +89,13 @@ regression.
   can't carry a version, so a cached copy has to be identical to a fresh one.
   Put changes in `app.js`, which is fetched content-addressed as `?v=<sha>`.
   `scripts/stamp_build.mjs` rewrites the `__BUILD__` / `__V_*__` placeholders at
-  deploy time; don't hand-edit them.
+  deploy time; don't hand-edit them. New UI markup *and its CSS* therefore ship
+  from `app.js` — the popover injects its own stylesheet — or a client on a
+  cached page gets the markup without the rules.
+- **Live mode owns the clock.** It sets `simT` from the wall clock each frame
+  rather than integrating `dt`, so the frame-gap clamp can't leave it behind and
+  the transport controls are disabled rather than left to fight it. The zone is
+  the schedule's, through `Intl`, so a DST switch needs no calendar of its own.
 - **Trips start at the origin's departure time**, not its arrival — some feeds
   time origins up to two hours early, and using arrival pools whole fleets into
   motionless clusters at their terminals.
