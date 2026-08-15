@@ -14,12 +14,14 @@ python3 -m http.server 8741
 ```
 
 - **Controls** — play/pause, scrubber, speed (30–400×).
+- **View mode** — the popover switches between that time-lapse and **Live**,
+  which runs the same timetable on Los Angeles' clock at 1×.
 - **Navigation** — drag to pan. On a Mac trackpad, gestures follow Maps.app:
   two-finger swipe pans, pinch zooms. A mouse wheel zooms.
 - **Tap a vehicle** to trace the line it runs, anywhere it is drawn — on the
   map or inside the Downtown call-out. Tap another to switch, empty space to
   clear.
-- **URL params** — `?t=8:30&speed=150&paused=1`.
+- **URL params** — `?t=8:30&speed=150&paused=1`, or `?live` to open live.
 
 ## How it works
 
@@ -108,6 +110,7 @@ on :8741.
 | `deploy_test.mjs` | A stamped copy reports its build, asks for data by content hash, notices a newer build, and offers a reload instead of taking one |
 | `live_stall_test.mjs` | The watchdog in a real browser: kills `rAF`, checks the stall is caught, the verdict names the page, the tab strip warns, and the re-arm restores the loop |
 | `inset_tap_test.mjs` | A tap on a vehicle in the Downtown panel selects the one drawn *there*; blank panel clears the selection |
+| `live_mode_test.mjs` | Live mode runs on Los Angeles' clock at 1×, survives a gap in frames, and hands the clock back on the way out |
 
 ## Rebuild data
 
@@ -230,6 +233,10 @@ which reports from off the main thread and cannot be suppressed by it.
   legend with no public GTFS.
 - **Stale feeds** — some municipal calendars end before the target service
   date; those systems animate their busiest covered Wednesday instead.
+- **Live is scheduled, not realtime** — there is no vehicle feed behind it. It
+  reads the stored timetable at the current time, so it shows where each
+  vehicle is *due*; and that timetable is one weekday's service whatever day
+  you open it on.
 - **Schematic corners** — the map distorts the far San Fernando Valley and the
   far east, where buses can drift off their drawn streets.
 - **Off the sheet** — a few outer-suburban workings run past the edge of the

@@ -70,14 +70,17 @@ const scrub = document.getElementById("scrub");
 const playBtn = document.getElementById("play");
 const stats = document.getElementById("stats");
 
-// URL params: ?t=HH:MM start time, ?speed=N, ?paused=1
+// URL params: ?t=HH:MM start time, ?speed=N, ?paused=1, ?live
 const qp = new URLSearchParams(location.search);
 if (qp.get("t")) { const [h, m] = qp.get("t").split(":").map(Number); simT = h * 3600 + (m || 0) * 60; }
 if (qp.get("speed")) speedSel.value = qp.get("speed");
-if (qp.get("paused")) { playing = false; playBtn.textContent = "▶"; }
+
+function setPlaying(on) { playing = on; playBtn.textContent = on ? "⏸" : "▶"; }
+if (qp.get("paused")) setPlaying(false);
 
 function togglePlay() {
-  playing = !playing; playBtn.textContent = playing ? "⏸" : "▶";
+  if (live) return;   // the wall clock is not ours to pause
+  setPlaying(!playing);
 }
 playBtn.onclick = togglePlay;
 scrub.oninput = () => { simT = +scrub.value; };
@@ -88,13 +91,66 @@ addEventListener("keydown", e => {
   togglePlay();
 });
 
-// ---- system filter popover ----
+// ---- live mode ----
+// The stored timetable read against the wall clock at 1×. No realtime feed
+// behind it, so what it shows is where each vehicle is *due*.
+let live = qp.has("live");
+
+// Seconds since midnight in Los Angeles — the schedule's zone, not the
+// viewer's. Through Intl rather than a fixed offset, which is an hour wrong for
+// half the year.
+const LA_ZONE = "America/Los_Angeles";
+const laParts = new Intl.DateTimeFormat("en-US", {
+  timeZone: LA_ZONE, hourCycle: "h23",
+  hour: "2-digit", minute: "2-digit", second: "2-digit",
+});
+function laTimeOfDay(ms) {
+  let s = 0;
+  for (const { type, value } of laParts.formatToParts(new Date(ms))) {
+    if (type === "hour") s += (+value % 24) * 3600;          // h23 still says 24 in some engines
+    else if (type === "minute") s += +value * 60;
+    else if (type === "second") s += +value;
+  }
+  // zone offsets are whole minutes, so the wall clock's fraction completes it
+  return s + (ms % 1000) / 1000;
+}
+
+// Formatting a date every frame would allocate in the hot path. The offset is
+// constant between DST switches, so keep it and re-measure rarely.
+const LA_RESAMPLE_MS = 60000;
+let laOffset = 0, laOffsetAt = -Infinity;
+function liveClock() {
+  const ms = Date.now();
+  if (ms - laOffsetAt >= LA_RESAMPLE_MS) { laOffset = laTimeOfDay(ms) - ms / 1000; laOffsetAt = ms; }
+  const t = (ms / 1000 + laOffset) % 86400;
+  return t < 0 ? t + 86400 : t;
+}
+
+// ---- popover: view mode, then which systems are shown ----
 const bar = document.getElementById("bar");
 const filtersEl = document.getElementById("filters");
 const sysBtn = document.getElementById("sys");
 let sysOn = [];
+// index.html has to stay byte-identical across deploys, so markup added since
+// brings its own styles — a cached copy would not carry them.
+sysBtn.title = "view mode & transit systems";
+const panelCss = document.createElement("style");
+panelCss.textContent = `
+  #filters .modes { display: flex; gap: 6px; }
+  #filters .modes button { flex: 1 1 0; background: rgba(255,255,255,.12); color: #fff;
+                           border: 0; border-radius: 8px; padding: 6px 14px;
+                           font: inherit; cursor: pointer; }
+  #filters .modes button:hover { background: rgba(255,255,255,.22); }
+  #filters .modes button[aria-pressed=true] { background: #e8a33d; color: #201800;
+                                              font-weight: 600; }
+  #filters .hint { opacity: .7; margin: 8px 0 10px; padding-bottom: 10px;
+                   border-bottom: 1px solid rgba(255,255,255,.25); }
+  #bar :disabled { opacity: .35; }
+`;
+document.head.append(panelCss);
 sysBtn.onclick = () => {
   if (filtersEl.classList.toggle("open")) {
+    refreshHint();   // before measuring: the line can be what sets the width
     // center over the button, clamped to the viewport; aim the caret at it
     const cx = sysBtn.getBoundingClientRect().left + sysBtn.offsetWidth / 2;
     const w = filtersEl.offsetWidth;
@@ -103,6 +159,62 @@ sysBtn.onclick = () => {
     filtersEl.style.setProperty("--caret-x", (cx - left) + "px");
   }
 };
+
+// Live drives the clock from outside, so the transport controls are disabled —
+// not hidden, since the bar losing half its width reads as breakage. The speed
+// would read as wrong rather than inert at 60×, so live lends it a 1× of its own.
+const liveSpeed = new Option("1×", "1");
+let speedWas = "";
+let hintEl = null, modeBtns = [];
+function setLive(on) {
+  live = on;
+  if (live) {
+    setPlaying(true);   // a disabled ▶ over a moving map reads as stuck
+    if (!liveSpeed.parentNode) { speedWas = speedSel.value; speedSel.append(liveSpeed); }
+    speedSel.value = liveSpeed.value;
+  } else if (liveSpeed.parentNode) {
+    liveSpeed.remove();
+    speedSel.value = speedWas;
+  }
+  playBtn.disabled = scrub.disabled = speedSel.disabled = live;
+  for (const [btn, isLive] of modeBtns) btn.setAttribute("aria-pressed", String(isLive === live));
+  refreshHint();
+}
+
+// The timetable is one service day, so on any other weekday live shows that
+// day's service at today's clock. Unsaid, it reads as a feed of what is running.
+function scheduleWeekday() {
+  const s = String((data && data.date) || "");
+  if (!/^\d{8}$/.test(s)) return "";
+  const day = new Date(Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8)));
+  const name = tz => new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: tz }).format(day);
+  const today = new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: LA_ZONE }).format(new Date());
+  return name("UTC") === today ? "" : name("UTC");
+}
+function refreshHint() {
+  if (!hintEl) return;
+  if (!live) { hintEl.textContent = "The whole service day, sped up."; return; }
+  const day = scheduleWeekday();
+  hintEl.textContent = "Los Angeles time, 1×." + (day ? ` Timetable is a ${day}.` : "");
+}
+
+function buildPanel(systems) {
+  const modes = document.createElement("div");
+  modes.className = "modes";
+  modeBtns = [["Time-lapse", false], ["Live", true]].map(([label, isLive]) => {
+    const btn = document.createElement("button");
+    btn.textContent = label;
+    btn.onclick = () => setLive(isLive);
+    modes.append(btn);
+    return [btn, isLive];
+  });
+  hintEl = document.createElement("div");
+  hintEl.className = "hint";
+  filtersEl.append(modes, hintEl);
+  buildFilters(systems);
+  setLive(live);
+}
+
 function buildFilters(systems) {
   sysOn = systems.map(() => true);
   const allCb = document.createElement("input");
@@ -670,7 +782,7 @@ Promise.all([
   }
   shapes = d.shapes.map(toShape);
   sprites = d.routes.map(makeSprite);
-  buildFilters(d.systems || []);
+  buildPanel(d.systems || []);
   insetRect = d.insetRect;
   insetRuns = (d.insets || []).map(runs => runs && runs.map(toShape));
   // GTFS times are minute-quantized, so consecutive stops can share a
@@ -1729,7 +1841,12 @@ const MAX_STEP_SEC = 0.25;   // 4 fps; below this, real frame pacing is preserve
 function drawFrame(now) {
   const dt = Math.min(MAX_STEP_SEC, Math.max(0, (now - lastFrame) / 1000));
   lastFrame = now;
-  if (playing) {
+  // Reading the clock rather than integrating dt keeps the clamp above from
+  // leaving live behind: a backgrounded tab comes back in step.
+  if (live) {
+    simT = liveClock();
+    scrub.value = simT | 0;
+  } else if (playing) {
     simT += dt * +speedSel.value;
     if (simT >= 86400) simT -= 86400;
     scrub.value = simT | 0;
@@ -1874,7 +1991,7 @@ function drawFrame(now) {
   // read `costSprites` against.
   spriteDraws = drawn;
   const hhmm = `${hh}:${mm}`;
-  stats.textContent = `${hhmm} · ${active} vehicles` +
+  stats.textContent = (live ? "live · " : "") + `${hhmm} · ${active} vehicles` +
     (pathTrip >= 0 && trips[pathTrip] ? ` · path: ${data.routes[trips[pathTrip].r].n}` : "") +
     (DEBUG ? ` · tiles:${tilesDrawn}/${tileCache.size}` : "");
 }
