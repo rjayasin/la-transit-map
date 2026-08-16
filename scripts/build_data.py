@@ -1,16 +1,18 @@
 """Build schedule.json from all cached GTFS feeds in data/gtfs/.
 
-- Gathers every trip active on the target service date (Wed 2026-07-22);
-  feeds whose calendar doesn't cover it fall back to their busiest Wednesday.
+- Gathers every trip active on each day of the target week (Wed 2026-07-22's);
+  feeds whose calendar doesn't cover a day fall back to their busiest date of
+  that same weekday.
 - Projects shapes into map pixel space via data/transform.json (poly2 warp).
 - Metro rail shapes are additionally snapped onto the drawn line pixels.
 - Stops are projected onto shapes to get distance-along-shape per stop.
 - Emits compact JSON: routes, shapes (px polylines), patterns (stop dists),
-  trips (route, pattern, stop arrival times).
+  trips (route, pattern, stop arrival times) and, per trip, a bitmask of the
+  weekdays it runs on.
 
-Trips crossing midnight (times >= 24:00) are also emitted shifted by -24h so
-the after-midnight portion of "yesterday's" service appears at the start of
-the simulated day.
+Trips crossing midnight (times >= 24:00) are also emitted shifted by -24h onto
+the following day, so the after-midnight portion of yesterday's service appears
+at the start of the day.
 """
 import colorsys, csv, hashlib, inspect, json, math, os, re, sys
 from collections import Counter, defaultdict
@@ -133,26 +135,37 @@ def active_services(feed, d):
     return active
 
 
-def pick_date(feed, trips_per_service):
-    """TARGET if it has service; else the busiest Wednesday the feed covers."""
+def pick_date(feed, trips_per_service, target):
+    """`target` if it has service; else the busiest same-weekday date the feed
+    covers. Staying on the weekday matters: the fallback stands in for the day
+    it replaces, and a Sunday's service is not a Wednesday's."""
     def score(d):
         return sum(trips_per_service.get(s, 0) for s in active_services(feed, d))
-    if score(TARGET) > 0:
-        return TARGET
+    if score(target) > 0:
+        return target
+    wd = target.weekday()
     cands = set()
     for row in read_csv(feed, "calendar.txt"):
         d0 = datetime.strptime(row["start_date"], "%Y%m%d").date()
         d1 = datetime.strptime(row["end_date"], "%Y%m%d").date()
-        d = d0 + timedelta(days=(2 - d0.weekday()) % 7)  # first Wednesday
+        d = d0 + timedelta(days=(wd - d0.weekday()) % 7)   # first one of that weekday
         while d <= d1 and len(cands) < 400:
             cands.add(d)
             d += timedelta(days=7)
     for row in read_csv(feed, "calendar_dates.txt"):
         d = datetime.strptime(row["date"], "%Y%m%d").date()
-        if d.weekday() == 2 and row["exception_type"] == "1":
+        if d.weekday() == wd and row["exception_type"] == "1":
             cands.add(d)
-    best = max(cands, key=lambda d: (score(d), -abs((d - TARGET).days)), default=None)
+    best = max(cands, key=lambda d: (score(d), -abs((d - target).days)), default=None)
     return best if best and score(best) > 0 else None
+
+
+def pick_dates(feed, trips_per_service):
+    """A service date per weekday, indexed the way JS reads one: 0 = Sunday.
+    Taken from TARGET's own week, so the seven are one week's service rather
+    than seven days gathered from wherever each is busiest."""
+    sunday = TARGET - timedelta(days=(TARGET.weekday() + 1) % 7)
+    return [pick_date(feed, trips_per_service, sunday + timedelta(days=i)) for i in range(7)]
 
 
 def parse_time(s):
@@ -3765,11 +3778,18 @@ def main():
         tps = defaultdict(int)
         for row in trip_rows:
             tps[row["service_id"]] += 1
-        day = pick_date(feed, tps)
-        if day is None:
+        days = pick_dates(feed, tps)
+        if not any(days):
             print(f"{feed}: no usable service date, skipped")
             continue
-        active = active_services(feed, day)
+        # Which weekdays each service_id runs on, as a bitmask over the seven
+        # dates above. A trip is emitted once and carried by every day it runs.
+        dow_of = defaultdict(int)
+        for i, d in enumerate(days):
+            if d is None:
+                continue
+            for s in active_services(feed, d):
+                dow_of[s] |= 1 << i
 
         srows = read_csv(feed, "stops.txt")
         if srows:
@@ -3832,14 +3852,15 @@ def main():
                 {MAP_LABELS[(feed, row["route_id"])]}
                 if (feed, row["route_id"]) in MAP_LABELS else set())
 
-        trip_info = {}
+        trip_info, trip_dow = {}, {}
         for row in trip_rows:
-            if row["service_id"] not in active:
+            if row["service_id"] not in dow_of:
                 continue
             sid = row.get("shape_id", "")
             if feed == "metrolink":
                 sid = METROLINK_SHAPES.get((row["route_id"], row.get("direction_id", "")), sid)
             trip_info[row["trip_id"]] = (row["route_id"], sid)
+            trip_dow[row["trip_id"]] = dow_of[row["service_id"]]
 
         stop_times = defaultdict(list)
         for ti, seq, at, dt, sid_ in read_cols(
@@ -3887,7 +3908,7 @@ def main():
             if pkey not in pattern_idx:
                 pattern_idx[pkey] = len(patterns)
                 patterns.append(pkey)
-            trips_out.append((route_idx[rkey], pkey, times))
+            trips_out.append((route_idx[rkey], pkey, times, trip_dow[ti]))
             used_shapes.add(sid)
 
         # load shapes used by this feed
@@ -4314,7 +4335,8 @@ def main():
             shape_ll[(feed, sid)] = [(q[1], q[2]) for q in p]
         n_trips = len(trips_out) - n_before
         stats[feed] = n_trips
-        print(f"{feed}: {n_trips} trips on {day} "
+        picked = [d for d in days if d]
+        print(f"{feed}: {n_trips} trips over {min(picked)}..{max(picked)} "
               f"({snapped}/{len(warped)} shapes snapped, {anchored} anchored)")
 
     # finalize shapes + cumulative dists (including stop-derived pseudo-shapes)
@@ -4407,16 +4429,33 @@ def main():
                 entry["id"] = [round(v) for v in idist]
         patterns_out.append(entry)
 
-    trips_final = []
-    for ridx, pkey, times in trips_out:
+    # Every trip of the week, once, with the weekdays it runs on as a bitmask
+    # (bit 0 = Sunday) alongside; the client picks a day by filtering on it.
+    # Rows identical in route, pattern and every time are merged, so a working
+    # that keeps to one timetable all week carries several day bits instead of
+    # costing several rows — feeds give each day its own trip ids, and without
+    # the merge the file would be most of seven whole timetables.
+    trips_final, trip_days = [], []
+    seen = {}
+
+    def emit(row, dows):
+        i = seen.setdefault(tuple(row), len(trips_final))
+        if i == len(trips_final):
+            trips_final.append(row)
+            trip_days.append(0)
+        trip_days[i] |= dows
+
+    for ridx, pkey, times, dows in trips_out:
         pi = pattern_idx[pkey]
         if patterns_out[pi] is None:
             continue
         t0 = times[0]
         deltas = [times[k] - times[k - 1] for k in range(1, len(times))]
-        trips_final.append([ridx, pi, t0] + deltas)
+        emit([ridx, pi, t0] + deltas, dows)
         if times[-1] > 86400:
-            trips_final.append([ridx, pi, t0 - 86400] + deltas)
+            # The tail of a trip that crosses midnight belongs to the *next*
+            # day: the vehicles running at 01:00 are yesterday's last workings.
+            emit([ridx, pi, t0 - 86400] + deltas, (dows << 1 | dows >> 6) & 0x7F)
             stats["wrapped"] += 1
 
     # inset run geometry, only for shapes some pattern actually mapped onto
@@ -4430,6 +4469,7 @@ def main():
     out = {"date": TARGET.strftime("%Y%m%d"), "systems": systems,
            "routes": routes, "shapes": shapes_out,
            "patterns": patterns_out, "trips": trips_final,
+           "tripDays": trip_days,
            "insets": insets_out, "insetRect": list(INSET_RECT)}
     with open("schedule.json", "w") as f:
         json.dump(out, f, separators=(",", ":"))
@@ -4438,6 +4478,9 @@ def main():
     stats["patterns"] = len(patterns_out)
     stats["trips_total"] = len(trips_final)
     print(dict(stats))
+    print("per weekday: " + ", ".join(
+        f"{n} {sum(1 for m in trip_days if m >> i & 1)}" for i, n in enumerate(
+            ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"])))
     if DETOUR_AUDIT:
         worst = sorted(DETOUR_AUDIT, reverse=True)
         print(f"detours: {len(worst)} on {len({(f, r) for _, f, r, _, _ in worst})} routes"

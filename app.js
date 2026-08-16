@@ -92,8 +92,9 @@ addEventListener("keydown", e => {
 });
 
 // ---- live mode ----
-// The stored timetable read against the wall clock at 1×. No realtime feed
-// behind it, so what it shows is where each vehicle is *due*.
+// Today's timetable read against the wall clock at 1×. No realtime feed behind
+// it, so what it shows is where each vehicle is *due*. The build carries a
+// timetable per weekday, and live plays whichever one Los Angeles is on.
 let live = qp.has("live");
 
 // Seconds since midnight in Los Angeles — the schedule's zone, not the
@@ -115,16 +116,31 @@ function laTimeOfDay(ms) {
   return s + (ms % 1000) / 1000;
 }
 
+const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const laDayFmt = new Intl.DateTimeFormat("en-US", { timeZone: LA_ZONE, weekday: "long" });
+
 // Formatting a date every frame would allocate in the hot path. The offset is
-// constant between DST switches, so keep it and re-measure rarely.
+// constant between DST switches and the weekday between midnights, so keep both
+// and re-measure rarely; a caller that knows the day just turned over expires
+// the sample itself rather than waiting for it to age out.
 const LA_RESAMPLE_MS = 60000;
-let laOffset = 0, laOffsetAt = -Infinity;
-function liveClock() {
+let laOffset = 0, laOffsetAt = -Infinity, laDow = 0;
+function laResample() {
   const ms = Date.now();
-  if (ms - laOffsetAt >= LA_RESAMPLE_MS) { laOffset = laTimeOfDay(ms) - ms / 1000; laOffsetAt = ms; }
+  if (ms - laOffsetAt >= LA_RESAMPLE_MS) {
+    laOffset = laTimeOfDay(ms) - ms / 1000;
+    laDow = DAY_NAMES.indexOf(laDayFmt.format(new Date(ms)));
+    laOffsetAt = ms;
+  }
+  return ms;
+}
+function liveClock() {
+  const ms = laResample();
   const t = (ms / 1000 + laOffset) % 86400;
   return t < 0 ? t + 86400 : t;
 }
+// The weekday it is in Los Angeles, 0 = Sunday — which timetable live plays.
+function laDay() { laResample(); return laDow; }
 
 // ---- popover: view mode, then which systems are shown ----
 const bar = document.getElementById("bar");
@@ -178,24 +194,19 @@ function setLive(on) {
   }
   playBtn.disabled = scrub.disabled = speedSel.disabled = live;
   for (const [btn, isLive] of modeBtns) btn.setAttribute("aria-pressed", String(isLive === live));
+  if (data) showDay(live ? laDay() : REF_DAY);
   refreshHint();
 }
 
-// The timetable is one service day, so on any other weekday live shows that
-// day's service at today's clock. Unsaid, it reads as a feed of what is running.
-function scheduleWeekday() {
-  const s = String((data && data.date) || "");
-  if (!/^\d{8}$/.test(s)) return "";
-  const day = new Date(Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8)));
-  const name = tz => new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: tz }).format(day);
-  const today = new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: LA_ZONE }).format(new Date());
-  return name("UTC") === today ? "" : name("UTC");
-}
 function refreshHint() {
   if (!hintEl) return;
-  if (!live) { hintEl.textContent = "The whole service day, sped up."; return; }
-  const day = scheduleWeekday();
-  hintEl.textContent = "Los Angeles time, 1×." + (day ? ` Timetable is a ${day}.` : "");
+  if (live) {
+    hintEl.textContent = `Today's ${DAY_NAMES[laDay()]} service, on Los Angeles' clock at 1×.`;
+    return;
+  }
+  const day = refDayName();
+  hintEl.textContent = "The whole service day, sped up."
+    + (day ? ` The timetable is a ${day}.` : "");
 }
 
 function buildPanel(systems) {
@@ -759,6 +770,98 @@ function spriteSize(half, s) {
   return [px, px / (DPR * view.k)];
 }
 
+// ---- a timetable per weekday ----
+// The file carries every trip of the week once, and `tripDays[i]` is a bitmask
+// of the weekdays trip i runs on (bit 0 = Sunday). A day is a filter over that
+// one list, so the arrival times are built once and switching days costs a
+// pass, not a rebuild — and the two modes differ only in which day they ask
+// for: live today's, the time-lapse the reference day the build names in
+// `date`.
+const REF_DAY = -1;
+let allTrips = [];       // every trip in the file, in draw order
+const byDay = new Map(); // weekday -> the trips of `allTrips` running that day
+let dayShown = null;     // the weekday now in `trips`
+
+// The service date the build was fitted to, as a Date, or null.
+function refDate() {
+  const s = String((data && data.date) || "");
+  if (!/^\d{8}$/.test(s)) return null;
+  return new Date(Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8)));
+}
+function refDayName() {
+  const d = refDate();
+  return d ? new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: "UTC" }).format(d) : "";
+}
+function refDow() {
+  const d = refDate();
+  return d ? d.getUTCDay() : 0;
+}
+
+// GTFS times are minute-quantized, so consecutive stops can share a
+// timestamp (or sit 1s apart — a scheduler trick to force ordering) while
+// the bus travels between them, teleporting the vehicle. Spread each run
+// of (near-)tied times over the adjacent gap, proportional to distance.
+function detie(times, dist) {
+  const n = times.length;
+  let i = 0;
+  while (i < n - 1) {
+    if (times[i+1] - times[i] > 1) { i++; continue; }
+    let j = i;
+    while (j + 1 < n && times[j+1] - times[j] <= 1) j++;
+    if (j + 1 < n) {           // spread [i..j+1] over the gap that follows
+      const T = times[i], U = times[j+1], D = dist[j+1] - dist[i];
+      if (D > 0) for (let m = i + 1; m <= j; m++)
+        times[m] = T + (U - T) * (dist[m] - dist[i]) / D;
+    } else if (i > 0) {        // run ends the trip: use the preceding gap
+      const T = times[i-1], U = times[j], D = dist[j] - dist[i-1];
+      if (D > 0) for (let m = i; m < j; m++)
+        times[m] = T + (U - T) * (dist[m] - dist[i-1]) / D;
+    }
+    i = j;
+  }
+}
+// distance for de-tying: downtown the main map is so compressed that stop
+// distances plateau, which would starve inset-moving segments of time —
+// weigh inset movement (at ~1/5 scale, the inset's magnification) too
+function effDist(pat) {
+  const dd = pat.d, ir = pat.ir, id = pat.id;
+  if (!ir) return dd;
+  const eff = new Float64Array(dd.length);
+  for (let i = 1; i < dd.length; i++) {
+    let step = dd[i] - dd[i-1];
+    if (ir[i] >= 0 && ir[i] === ir[i-1]) step = Math.max(step, Math.abs(id[i] - id[i-1]) / 5);
+    eff[i] = eff[i-1] + step;
+  }
+  return eff;
+}
+
+function buildTrips() {
+  const out = data.trips.map((t, i) => {
+    const times = new Float64Array(t.length - 2);
+    times[0] = t[2];
+    for (let i = 3; i < t.length; i++) times[i-2] = times[i-3] + t[i];
+    const pat = data.patterns[t[1]];
+    if (pat) detie(times, effDist(pat));
+    return { r: t[0], p: t[1], times, t0: times[0], t1: times[times.length-1],
+             days: data.tripDays[i] };
+  });
+  // draw rail last so trains sit on top of the bus swarm
+  out.sort((a, b) => (data.routes[a.r].rail ? 1 : 0) - (data.routes[b.r].rail ? 1 : 0));
+  return out;
+}
+
+// Play `dow`'s timetable, or the reference day's for REF_DAY.
+function showDay(dow) {
+  const day = dow === REF_DAY ? refDow() : dow;
+  if (day === dayShown) return;
+  dayShown = day;
+  if (!allTrips.length) allTrips = buildTrips();
+  if (!byDay.has(day)) byDay.set(day, allTrips.filter(t => t.days >> day & 1));
+  trips = byDay.get(day);
+  vAlpha = new Float32Array(trips.length);   // all hidden; they fade in on the next frame
+  pathTrip = -1;                             // trip indices are this day's own
+}
+
 // ---- load ----
 Promise.all([
   new Promise(res => { const im = new Image(); im.onload = () => res(im); im.src = `map.png?v=${V_MAP}`; }),
@@ -785,54 +888,7 @@ Promise.all([
   buildPanel(d.systems || []);
   insetRect = d.insetRect;
   insetRuns = (d.insets || []).map(runs => runs && runs.map(toShape));
-  // GTFS times are minute-quantized, so consecutive stops can share a
-  // timestamp (or sit 1s apart — a scheduler trick to force ordering) while
-  // the bus travels between them, teleporting the vehicle. Spread each run
-  // of (near-)tied times over the adjacent gap, proportional to distance.
-  function detie(times, dist) {
-    const n = times.length;
-    let i = 0;
-    while (i < n - 1) {
-      if (times[i+1] - times[i] > 1) { i++; continue; }
-      let j = i;
-      while (j + 1 < n && times[j+1] - times[j] <= 1) j++;
-      if (j + 1 < n) {           // spread [i..j+1] over the gap that follows
-        const T = times[i], U = times[j+1], D = dist[j+1] - dist[i];
-        if (D > 0) for (let m = i + 1; m <= j; m++)
-          times[m] = T + (U - T) * (dist[m] - dist[i]) / D;
-      } else if (i > 0) {        // run ends the trip: use the preceding gap
-        const T = times[i-1], U = times[j], D = dist[j] - dist[i-1];
-        if (D > 0) for (let m = i; m < j; m++)
-          times[m] = T + (U - T) * (dist[m] - dist[i-1]) / D;
-      }
-      i = j;
-    }
-  }
-  // distance for de-tying: downtown the main map is so compressed that stop
-  // distances plateau, which would starve inset-moving segments of time —
-  // weigh inset movement (at ~1/5 scale, the inset's magnification) too
-  function effDist(pat) {
-    const dd = pat.d, ir = pat.ir, id = pat.id;
-    if (!ir) return dd;
-    const eff = new Float64Array(dd.length);
-    for (let i = 1; i < dd.length; i++) {
-      let step = dd[i] - dd[i-1];
-      if (ir[i] >= 0 && ir[i] === ir[i-1]) step = Math.max(step, Math.abs(id[i] - id[i-1]) / 5);
-      eff[i] = eff[i-1] + step;
-    }
-    return eff;
-  }
-  trips = d.trips.map(t => {
-    const times = new Float64Array(t.length - 2);
-    times[0] = t[2];
-    for (let i = 3; i < t.length; i++) times[i-2] = times[i-3] + t[i];
-    const pat = d.patterns[t[1]];
-    if (pat) detie(times, effDist(pat));
-    return { r: t[0], p: t[1], times, t0: times[0], t1: times[times.length-1] };
-  });
-  // draw rail last so trains sit on top of the bus swarm
-  trips.sort((a, b) => (d.routes[a.r].rail ? 1 : 0) - (d.routes[b.r].rail ? 1 : 0));
-  vAlpha = new Float32Array(trips.length);   // all start hidden, fade in on first frame
+  showDay(live ? laDay() : REF_DAY);
   armFrame();
 });
 
@@ -1844,7 +1900,13 @@ function drawFrame(now) {
   // Reading the clock rather than integrating dt keeps the clamp above from
   // leaving live behind: a backgrounded tab comes back in step.
   if (live) {
-    simT = liveClock();
+    const t = liveClock();
+    // Past midnight in Los Angeles: a new day, and a timetable of its own. The
+    // cached weekday is expired here rather than left to age out, so the swap
+    // happens on the stroke rather than up to a resample later.
+    if (t < simT - 3600) laOffsetAt = -Infinity;
+    simT = t;
+    showDay(laDay());
     scrub.value = simT | 0;
   } else if (playing) {
     simT += dt * +speedSel.value;

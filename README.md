@@ -14,8 +14,9 @@ python3 -m http.server 8741
 ```
 
 - **Controls** — play/pause, scrubber, speed (30–400×).
-- **View mode** — the popover switches between that time-lapse and **Live**,
-  which runs the same timetable on Los Angeles' clock at 1×.
+- **View mode** — the popover switches between that time-lapse, which plays one
+  reference weekday whatever day you open it on, and **Live**, which runs
+  *today's* timetable on Los Angeles' clock at 1×.
 - **Navigation** — drag to pan. On a Mac trackpad, gestures follow Maps.app:
   two-finger swipe pans, pinch zooms. A mouse wheel zooms.
 - **Tap a vehicle** to trace the line it runs, anywhere it is drawn — on the
@@ -33,11 +34,14 @@ and emits `schedule.json`.
   (`tiles/{2,4,8}/`, 512px tiles ≈ up to 700 dpi of the 47″ sheet), rendered
   from the PDF vectors. Tiles cascade in as you zoom, and zoom is capped at the
   deepest level's 1:1, so the background is never upscaled.
-- **Data** — 14 static GTFS feeds are reduced to one service date and emitted
-  as `schedule.json` (~7 MB): **26,371 trips on 327 routes**, as route
+- **Data** — 14 static GTFS feeds are reduced to one service date per weekday
+  and emitted as `schedule.json` (~12 MB): **49,545 trips on 331 routes** —
+  a whole week, around 26,000 of them running on any one weekday — as route
   colors/labels, shape polylines in map pixels, per-stop distance along each
-  shape, and stop arrival times. Trips crossing midnight are duplicated at
-  −24 h so owl service appears at the start of the day.
+  shape, stop arrival times, and a bitmask per trip of the days it runs, so
+  the week costs one list rather than seven. Trips crossing midnight are
+  duplicated at −24 h onto the following day, so owl service appears at the
+  start of the day.
 - **Georeferencing** — the map is only quasi-geographic, so a lat/lon→pixel
   transform is fitted rather than assumed: color-mask the drawn rail lines,
   then ICP-align GTFS rail shapes to them (affine init → 2nd-order polynomial
@@ -232,11 +236,12 @@ which reports from off the main thread and cannot be suppressed by it.
   Californian feed published), Amtrak, and the community shuttles in the map's
   legend with no public GTFS.
 - **Stale feeds** — some municipal calendars end before the target service
-  date; those systems animate their busiest covered Wednesday instead.
+  week; those systems animate their busiest covered date of the same weekday
+  instead.
 - **Live is scheduled, not realtime** — there is no vehicle feed behind it. It
-  reads the stored timetable at the current time, so it shows where each
-  vehicle is *due*; and that timetable is one weekday's service whatever day
-  you open it on.
+  reads today's stored timetable at the current time, so it shows where each
+  vehicle is *due*, not where it is. The day is matched by weekday against
+  cached feeds, so a holiday animates its ordinary weekday's service.
 - **Schematic corners** — the map distorts the far San Fernando Valley and the
   far east, where buses can drift off their drawn streets.
 - **Off the sheet** — a few outer-suburban workings run past the edge of the

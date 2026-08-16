@@ -60,6 +60,9 @@ diff two runs to see exactly what a change did. Then:
 .venv/bin/python scripts/debug_line.py <n> # look at it
 ```
 
+`trips` is the whole week, so the checks rank weekend-only workings alongside
+the rest and their trip counts are a week's, not a day's.
+
 **`drift_check` moves its own yardstick.** It refines the mask color off the
 *stored* shapes, so a change that moves shapes onto their lines also changes the
 color it measures against, and before/after totals from two different runs are
@@ -92,10 +95,23 @@ regression.
   deploy time; don't hand-edit them. New UI markup *and its CSS* therefore ship
   from `app.js` — the popover injects its own stylesheet — or a client on a
   cached page gets the markup without the rules.
-- **Live mode owns the clock.** It sets `simT` from the wall clock each frame
-  rather than integrating `dt`, so the frame-gap clamp can't leave it behind and
-  the transport controls are disabled rather than left to fight it. The zone is
-  the schedule's, through `Intl`, so a DST switch needs no calendar of its own.
+- **Live mode owns the clock, and the day.** It sets `simT` from the wall clock
+  each frame rather than integrating `dt`, so the frame-gap clamp can't leave it
+  behind and the transport controls are disabled rather than left to fight it.
+  The zone is the schedule's, through `Intl`, so a DST switch needs no calendar
+  of its own. The weekday comes from the same reading and is cached with the
+  offset; a page left open past Los Angeles midnight swaps to the next day's
+  trip list on the stroke.
+- **The timetable is a week, not a day.** `trips` holds every working of the
+  week once and `tripDays[i]` is a bitmask of the weekdays trip *i* runs on
+  (bit 0 = Sunday); a day on screen is a filter over that one list, which is
+  why the arrival times are built once at load. Rows identical in route,
+  pattern and every time are merged, so a working that keeps to one timetable
+  all week carries several day bits instead of costing several rows. Live plays
+  today's day; the time-lapse plays the weekday of `date`, whatever day it is
+  opened on. A trip crossing midnight is emitted again on the *next* day at
+  −24 h, because the vehicles on screen at 01:00 are the previous day's last
+  workings.
 - **Trips start at the origin's departure time**, not its arrival — some feeds
   time origins up to two hours early, and using arrival pools whole fleets into
   motionless clusters at their terminals.
