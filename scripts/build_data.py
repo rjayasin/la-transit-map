@@ -1635,6 +1635,10 @@ PINNED_ANCHORS = {
     ("torrance", "6"): [(1378, 2822), (1575, 2785)],
     ("gtfs_bus", "217"): [(1802, 1499)],
     ("gtfs_bus", "233"): [(1040.9, 1755.1), (1004.7, 1810.7)],
+    # A corridor whose last badge stands short of where it runs into the
+    # Downtown call-out: unpinned, the stretch between takes the cross-streets
+    # it passes instead, and meets the panel well off the corner the line does.
+    ("gtfs_bus", "4"): [(1729.7, 1775)],      # Sunset, at the call-out corner
     # Several routes share one corridor with every badge they have past the far
     # end of it, so the clamp carries a single displacement over the whole run.
     # Three points each: both ends and the bend between them — pinning one end
