@@ -13,10 +13,11 @@ python3 -m http.server 8741
 # open http://localhost:8741
 ```
 
-- **Controls** — play/pause, scrubber, speed (30–400×).
-- **View mode** — the popover switches between that time-lapse, which plays one
-  reference weekday whatever day you open it on, and **Live**, which runs
-  *today's* timetable on Los Angeles' clock at 1×.
+- **Controls** — play/pause, scrubber, speed (30–400×). It opens at the current
+  Los Angeles time and runs on from there.
+- **View mode** — both modes play *today's* timetable. The popover switches
+  between the time-lapse, which scrubs the whole day at 30–400×, and **Live**,
+  which holds the map to Los Angeles' clock at 1×.
 - **Navigation** — drag to pan. On a Mac trackpad, gestures follow Maps.app:
   two-finger swipe pans, pinch zooms. A mouse wheel zooms.
 - **Tap a vehicle** to trace the line it runs, anywhere it is drawn — on the
@@ -114,7 +115,7 @@ on :8741.
 | `deploy_test.mjs` | A stamped copy reports its build, asks for data by content hash, notices a newer build, and offers a reload instead of taking one |
 | `live_stall_test.mjs` | The watchdog in a real browser: kills `rAF`, checks the stall is caught, the verdict names the page, the tab strip warns, and the re-arm restores the loop |
 | `inset_tap_test.mjs` | A tap on a vehicle in the Downtown panel selects the one drawn *there*; blank panel clears the selection |
-| `live_mode_test.mjs` | Live mode runs on Los Angeles' clock at 1×, survives a gap in frames, and hands the clock back on the way out |
+| `live_mode_test.mjs` | Live mode runs on Los Angeles' clock at 1×, survives a gap in frames, and hands the clock back on the way out; both modes open on today's timetable, at the current time |
 
 ## Rebuild data
 
@@ -238,10 +239,10 @@ which reports from off the main thread and cannot be suppressed by it.
 - **Stale feeds** — some municipal calendars end before the target service
   week; those systems animate their busiest covered date of the same weekday
   instead.
-- **Live is scheduled, not realtime** — there is no vehicle feed behind it. It
-  reads today's stored timetable at the current time, so it shows where each
-  vehicle is *due*, not where it is. The day is matched by weekday against
-  cached feeds, so a holiday animates its ordinary weekday's service.
+- **Scheduled, not realtime** — there is no vehicle feed behind either mode.
+  They read today's stored timetable, so what they show is where each vehicle
+  is *due*, not where it is. The day is matched by weekday against cached
+  feeds, so a holiday animates its ordinary weekday's service.
 - **Schematic corners** — the map distorts the far San Fernando Valley and the
   far east, where buses can drift off their drawn streets.
 - **Off the sheet** — a few outer-suburban workings run past the edge of the

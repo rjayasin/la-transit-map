@@ -91,10 +91,10 @@ addEventListener("keydown", e => {
   togglePlay();
 });
 
-// ---- live mode ----
-// Today's timetable read against the wall clock at 1×. No realtime feed behind
-// it, so what it shows is where each vehicle is *due*. The build carries a
-// timetable per weekday, and live plays whichever one Los Angeles is on.
+// ---- Los Angeles' day ----
+// Both modes play today's timetable — the build carries one per weekday — and
+// live additionally holds the clock to Los Angeles' at 1×. No realtime feed
+// behind either, so what they show is where each vehicle is *due*.
 let live = qp.has("live");
 
 // Seconds since midnight in Los Angeles — the schedule's zone, not the
@@ -139,8 +139,14 @@ function liveClock() {
   const t = (ms / 1000 + laOffset) % 86400;
   return t < 0 ? t + 86400 : t;
 }
-// The weekday it is in Los Angeles, 0 = Sunday — which timetable live plays.
+// The weekday it is in Los Angeles, 0 = Sunday — the timetable both modes play.
 function laDay() { laResample(); return laDow; }
+
+// Open on the clock rather than at midnight, so the first thing on screen is
+// the network as it is now; ?t= still says otherwise. The scrubber is set from
+// here too — paused, no frame will do it, and it would read midnight.
+if (!qp.get("t")) simT = liveClock();
+scrub.value = simT | 0;
 
 // ---- popover: view mode, then which systems are shown ----
 const bar = document.getElementById("bar");
@@ -194,19 +200,17 @@ function setLive(on) {
   }
   playBtn.disabled = scrub.disabled = speedSel.disabled = live;
   for (const [btn, isLive] of modeBtns) btn.setAttribute("aria-pressed", String(isLive === live));
-  if (data) showDay(live ? laDay() : REF_DAY);
   refreshHint();
 }
 
+// Both modes run today's timetable, so the day is named either way and what
+// separates them is the clock: one is the whole of it, the other is now.
 function refreshHint() {
   if (!hintEl) return;
-  if (live) {
-    hintEl.textContent = `Today's ${DAY_NAMES[laDay()]} service, on Los Angeles' clock at 1×.`;
-    return;
-  }
-  const day = refDayName();
-  hintEl.textContent = "The whole service day, sped up."
-    + (day ? ` The timetable is a ${day}.` : "");
+  const day = DAY_NAMES[laDay()];
+  hintEl.textContent = live
+    ? `Today's service (${day}), on Los Angeles' clock at 1×.`
+    : `The whole of today's service (${day}), sped up.`;
 }
 
 function buildPanel(systems) {
@@ -770,32 +774,15 @@ function spriteSize(half, s) {
   return [px, px / (DPR * view.k)];
 }
 
-// ---- a timetable per weekday ----
+// ---- the day on screen ----
 // The file carries every trip of the week once, and `tripDays[i]` is a bitmask
 // of the weekdays trip i runs on (bit 0 = Sunday). A day is a filter over that
-// one list, so the arrival times are built once and switching days costs a
-// pass, not a rebuild — and the two modes differ only in which day they ask
-// for: live today's, the time-lapse the reference day the build names in
-// `date`.
-const REF_DAY = -1;
+// one list, so the arrival times are built once and the turn of the day costs
+// a pass, not a rebuild. Both modes ask for today; a session open across Los
+// Angeles midnight is handed the next day's.
 let allTrips = [];       // every trip in the file, in draw order
 const byDay = new Map(); // weekday -> the trips of `allTrips` running that day
 let dayShown = null;     // the weekday now in `trips`
-
-// The service date the build was fitted to, as a Date, or null.
-function refDate() {
-  const s = String((data && data.date) || "");
-  if (!/^\d{8}$/.test(s)) return null;
-  return new Date(Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8)));
-}
-function refDayName() {
-  const d = refDate();
-  return d ? new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: "UTC" }).format(d) : "";
-}
-function refDow() {
-  const d = refDate();
-  return d ? d.getUTCDay() : 0;
-}
 
 // GTFS times are minute-quantized, so consecutive stops can share a
 // timestamp (or sit 1s apart — a scheduler trick to force ordering) while
@@ -850,9 +837,8 @@ function buildTrips() {
   return out;
 }
 
-// Play `dow`'s timetable, or the reference day's for REF_DAY.
-function showDay(dow) {
-  const day = dow === REF_DAY ? refDow() : dow;
+// Play weekday `day`'s timetable.
+function showDay(day) {
   if (day === dayShown) return;
   dayShown = day;
   if (!allTrips.length) allTrips = buildTrips();
@@ -888,7 +874,7 @@ Promise.all([
   buildPanel(d.systems || []);
   insetRect = d.insetRect;
   insetRuns = (d.insets || []).map(runs => runs && runs.map(toShape));
-  showDay(live ? laDay() : REF_DAY);
+  showDay(laDay());
   armFrame();
 });
 
@@ -1903,16 +1889,18 @@ function drawFrame(now) {
     const t = liveClock();
     // Past midnight in Los Angeles: a new day, and a timetable of its own. The
     // cached weekday is expired here rather than left to age out, so the swap
-    // happens on the stroke rather than up to a resample later.
+    // happens on the stroke rather than up to a resample later. The time-lapse
+    // crosses its own midnight every few minutes and means nothing by it, so it
+    // waits for the resample instead.
     if (t < simT - 3600) laOffsetAt = -Infinity;
     simT = t;
-    showDay(laDay());
     scrub.value = simT | 0;
   } else if (playing) {
     simT += dt * +speedSel.value;
     if (simT >= 86400) simT -= 86400;
     scrub.value = simT | 0;
   }
+  showDay(laDay());   // both modes play today, whichever day today has become
   // Whether tiles may be fetched this frame — see getTile. Decided once, here,
   // so every lookup in the frame agrees, and so the moment the view lands can be
   // seen: nothing has changed at that instant, so composeBackground would skip,
