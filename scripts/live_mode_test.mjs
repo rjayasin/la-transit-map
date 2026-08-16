@@ -112,7 +112,7 @@ const pressed = `[...filtersEl.querySelectorAll(".modes button")]`
 await send("Page.enable");
 await send("Runtime.enable");
 await send("Page.navigate", { url: URL });
-for (let i = 0; i < 60 && !(await evaluate("!!(window.trips && trips.length)")); i++) await sleep(500);
+for (let i = 0; i < 60 && !(await evaluate("typeof trips !== 'undefined' && trips.length > 0")); i++) await sleep(500);
 check("loaded", await evaluate("trips.length > 0"), true);
 
 // ---- the default is still the time-lapse ---------------------------------
@@ -192,18 +192,29 @@ await sleep(600);
 check("running again", gap(await evaluate("simT"), handover) > 10, true);
 check("and the readout drops the mark",
       await evaluate("stats.textContent.startsWith('live · ')"), false);
-check("the time-lapse is back on the reference day",
-      await evaluate("dayShown === refDow()"), true);
+check("the time-lapse plays today as well", await evaluate("dayShown"), laDay());
 
 // ---- ?live opens straight into it ----------------------------------------
 await send("Page.navigate", { url: URL + "?live" });
-for (let i = 0; i < 60 && !(await evaluate("!!(window.trips && trips.length)")); i++) await sleep(500);
+for (let i = 0; i < 60 && !(await evaluate("typeof trips !== 'undefined' && trips.length > 0")); i++) await sleep(500);
 await sleep(600);
 check("?live: opens live", await evaluate("live"), true);
 check("?live: on Los Angeles' clock",
       Math.abs(gap(await evaluate("simT"), laNow())) < 2, true);
 check("?live: the mode row shows it", await evaluate(pressed), ["false", "true"]);
 check("?live: nothing threw on the way", await evaluate("frameErrors"), 0);
+
+// ---- it opens on the clock, not at midnight ------------------------------
+// Paused, so simT is what the page opened with however long the load took —
+// minutes of slack still tells "now" apart from midnight, which is the point.
+await send("Page.navigate", { url: URL + "?paused=1" });
+for (let i = 0; i < 60 && !(await evaluate("typeof trips !== 'undefined' && trips.length > 0")); i++) await sleep(500);
+check("?paused: opens at the current time",
+      Math.abs(gap(await evaluate("simT"), laNow())) < 120, true);
+check("?paused: and the scrubber opens there too",
+      await evaluate("Math.abs(+scrub.value - simT) <= 5"), true);
+check("?paused: the time-lapse is on today's timetable",
+      await evaluate("dayShown"), laDay());
 
 const pad = Math.max(...results.map(r => r[0].length));
 let bad = 0;
