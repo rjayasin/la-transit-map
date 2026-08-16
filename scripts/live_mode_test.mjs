@@ -91,6 +91,11 @@ function laNow() {
   for (const { type, value } of fmt.formatToParts(new Date())) p[type] = value;
   return (+p.hour % 24) * 3600 + +p.minute * 60 + +p.second;
 }
+const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const dayFmt = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/Los_Angeles", weekday: "long",
+});
+const laDay = () => DAYS.indexOf(dayFmt.format(new Date()));
 // signed distance between two times of day, by the short way round — every
 // comparison below straddles midnight one run in ninety
 const gap = (a, b) => {
@@ -140,6 +145,14 @@ check("it is playing", await evaluate("playing"), true);
 check("and the space bar cannot pause it",
       await evaluate("dispatchEvent(new KeyboardEvent('keydown', {code:'Space'})); playing"), true);
 
+// ---- the day it plays is today, not the day the build was fitted to --------
+check("it plays today's timetable", await evaluate("dayShown"), laDay());
+check("and only the vehicles that run today are on it",
+      await evaluate("trips.length === data.tripDays.filter(m => m >> dayShown & 1).length"
+                     + " && trips.every(t => t.days >> dayShown & 1)"), true);
+const liveHint = await evaluate(`filtersEl.querySelector(".hint").textContent`);
+check("and the panel names that day", liveHint.includes(DAYS[laDay()]), true);
+
 await sleep(400);   // a frame or two to take the clock over
 const here = laNow(), there = await evaluate("simT");
 console.log(`Los Angeles ${here} s, page ${there.toFixed(1)} s, off by ${gap(there, here).toFixed(2)} s`);
@@ -179,6 +192,8 @@ await sleep(600);
 check("running again", gap(await evaluate("simT"), handover) > 10, true);
 check("and the readout drops the mark",
       await evaluate("stats.textContent.startsWith('live · ')"), false);
+check("the time-lapse is back on the reference day",
+      await evaluate("dayShown === refDow()"), true);
 
 // ---- ?live opens straight into it ----------------------------------------
 await send("Page.navigate", { url: URL + "?live" });
