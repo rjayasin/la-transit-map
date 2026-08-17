@@ -44,11 +44,7 @@ EXCLUDE = [
     (0, 0, 4096, 708),
     (3200, 2400, 4096, 3650),  # DTLA inset
     (2400, 3020, 3300, 3650),  # legend
-    # G line detour inset. Cut to the panel's own border (240..629, 1651..1848)
-    # plus its antialiased edge and no further: the padding this used to carry
-    # reached 80 px past the bottom right corner, over live map, and took the
-    # badges standing there with it.
-    (236, 1647, 634, 1852),
+    (236, 1647, 634, 1852),    # G line detour inset
     (180, 2150, 700, 2420),    # D line extension inset
 ]
 
