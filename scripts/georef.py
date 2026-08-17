@@ -44,7 +44,7 @@ EXCLUDE = [
     (0, 0, 4096, 708),
     (3200, 2400, 4096, 3650),  # DTLA inset
     (2400, 3020, 3300, 3650),  # legend
-    (180, 1600, 700, 1930),    # G line detour inset
+    (236, 1647, 634, 1852),    # G line detour inset
     (180, 2150, 700, 2420),    # D line extension inset
 ]
 

@@ -1621,6 +1621,8 @@ PINNED_ANCHORS = {
     ("longbeach", "93"): [(2288, 3262)],
     ("longbeach", "94"): [(2288, 3262)],
     ("gtfs_bus", "55"): [(1746.5, 2120)],
+    ("foothill", "20270"): [(2684.3, 1426.0)],
+    ("foothill", "20284"): [(3209.0, 1712.0), (3236.0, 1695.5)],
     # The sheet stacks its route chips in columns, and a chip's antialiased
     # border is a ring of mask pixels — so a column of them is a ladder the walk
     # can climb between two corridors the length band cannot separate.
