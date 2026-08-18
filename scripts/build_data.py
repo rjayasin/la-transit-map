@@ -32,6 +32,8 @@ from georef_inset import GEO as INSET_GEO, LEGEND as INSET_LEGEND, RECT as INSET
 
 TARGET = date(2026, 7, 22)  # a Wednesday inside the Metro JUNE26 calendar window
 GTFS = "data/gtfs"
+PDF = "26-1720_blt_system_map_47x47.5-2.pdf"   # the sheet itself, read for both
+                                               # its strokes and its knockouts
 # gtfs_rail first so Metro trains draw config (snap) is applied; order otherwise cosmetic
 # Norwalk Transit is not here, and the feed is gone with it. The Mobility
 # Database entry catalogued as "us-california-norwalk-transit-system-nts" is
@@ -302,7 +304,8 @@ def bg_palette(k=12):
 LABEL_HALO = 24     # px; how far a label's knockout reaches past its glyphs
 LABEL_REACH = 28    # px; how far into a gap the artwork is worth recovering
 FADE_MIN = 0.30     # faintest line-over-page blend still read as drawn line
-FADE_MARGIN = 6.0   # how much better this agency's blend must fit than a rival's
+FADE_MARGIN = 6.0   # how much better this agency's blend must fit than a rival's;
+                    # under a knockout panel, scaled by the ink the panel leaves
 
 
 def box_dilate(m, radius):
@@ -330,6 +333,50 @@ def glyphs(sub):
     return _GLYPHS[key]
 
 
+_PANELS = None
+PANEL_MAX = 1e5     # px²; above this a page-colored fill is the page, not a panel
+
+
+def knockout_panels():
+    """A mask of the page-colored panels the sheet lays over its own artwork.
+
+    A place name set across the drawing gets one of these behind it, and what
+    it covers survives at a fraction of its ink rather than at the ~40% a
+    label's halo leaves. They are a few hundred small fills of the page's own
+    color in the PDF — which is named by the fill color the page reads as,
+    rather than by a constant of ours — and the page itself is the one fill of
+    it too big to be a panel. Without pymupdf there are no panels and the
+    deep-knockback rule below simply never fires."""
+    global _PANELS
+    if _PANELS is None:
+        im, _ = map_image()
+        h, w = im.shape[:2]
+        _PANELS = np.zeros((h, w), dtype=bool)
+        try:
+            import fitz
+            page = fitz.open(PDF)[0]
+            s = w / page.rect.width
+            paper = np.asarray(bg_palette()[-1], dtype=float)
+            fills = []
+            for it in page.get_drawings():
+                if it["type"] != "f" or it.get("fill") is None:
+                    continue
+                r = it["rect"]
+                fills.append((tuple(c * 255 for c in it["fill"]),
+                              (r.x0 * s, r.y0 * s, r.x1 * s, r.y1 * s)))
+            if fills:
+                page_fill = min(set(c for c, _ in fills),
+                                key=lambda c: ((np.asarray(c) - paper) ** 2).sum())
+                for fill, (x0, y0, x1, y1) in fills:
+                    if fill != page_fill or (x1 - x0) * (y1 - y0) > PANEL_MAX:
+                        continue
+                    _PANELS[max(0, int(y0)):int(y1) + 1,
+                            max(0, int(x0)):int(x1) + 1] = True
+        except Exception as e:                      # missing pdf / pymupdf
+            print(f"knockout panels unavailable: {e}")
+    return _PANELS
+
+
 def unfade(m, sub, d2a, tol, colors):
     """Re-add drawn-line pixels that a place-name label has dimmed.
 
@@ -337,8 +384,9 @@ def unfade(m, sub, d2a, tol, colors):
     crosses a line — a long place name can knock a ~45 px hole in one, and the
     snap then locks onto whichever parallel street stays unbroken. But the label
     isn't painting the line out: under its halo the map knocks the artwork back
-    toward the page, to roughly 40% opacity. The line is still there, just too
-    pale for the mask's tolerance.
+    toward the page, and a place name set over the artwork adds a page-colored
+    panel that knocks it back further still, to a quarter or a third of the
+    ink. The line is still there, just too pale for the mask's tolerance.
 
     So inside the halo, take a pixel that reads as this agency's color painted
     over the page at partial opacity: near the segment from the page color to
@@ -346,8 +394,16 @@ def unfade(m, sub, d2a, tol, colors):
     colors dim into ordinary map grays, so — as in the mask itself — a pixel
     counts only when this agency's blend explains it better than any background
     or rival agency's does; without that test a gray livery claims every light
-    gray on the sheet. Recovery stays within LABEL_REACH of real artwork,
-    since the point is to close gaps in drawn lines, not to find new ones.
+    gray on the sheet. Under a knockout panel that margin has to be read
+    against the ink that is left: every blend line converges on the page color,
+    so where the panel leaves a third of the ink the distance between this
+    agency's blend and a rival's shrinks with it, and a fixed margin in RGB
+    units becomes impossible to meet however distinct the two colors are.
+    Scaling it by the fade there asks the same separation of a pale stretch as
+    of a solid one; outside the panels, where a halo leaves enough ink to
+    judge, the margin stays absolute and the reading stays as strict as it was.
+    Recovery stays within LABEL_REACH of real artwork, since the point is to
+    close gaps in drawn lines, not to find new ones.
 
     Glyphs still interrupt what's recovered, but only by a stroke width at a
     time, which nearest-pixel snapping rides straight over. Bridging those too
@@ -370,10 +426,11 @@ def unfade(m, sub, d2a, tol, colors):
         a = np.clip((P @ d) / (d @ d), 0, 1)
         return ((P - a[:, None] * d) ** 2).sum(1), a
 
-    own, lit = np.full(len(P), np.inf), np.zeros(len(P), bool)
+    own, own_a = np.full(len(P), np.inf), np.zeros(len(P))
     for c in colors:
         d2, a = fit(c)
-        own, lit = np.minimum(own, d2), lit | (a > FADE_MIN)
+        take = d2 < own
+        own, own_a = np.where(take, d2, own), np.where(take, a, own_a)
     # One independent fit per rival color, min-reduced — the bulk of the build.
     # numpy drops the GIL for work this size, so threads give real parallelism
     # and, unlike splitting the pixels up, every fit sees the same arithmetic
@@ -385,7 +442,9 @@ def unfade(m, sub, d2a, tol, colors):
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         for d2 in pool.map(lambda r: fit(r)[0], rivals):
             rival = np.minimum(rival, d2)
-    ok = lit & (own < (tol * 0.6) ** 2) & (np.sqrt(own) + FADE_MARGIN < np.sqrt(rival))
+    margin = np.where(knockout_panels()[ys, xs], FADE_MARGIN * own_a, FADE_MARGIN)
+    ok = ((own_a > FADE_MIN) & (own < (tol * 0.6) ** 2)
+          & (np.sqrt(own) + margin < np.sqrt(rival)))
     out[ys[ok], xs[ok]] = True
     return out
 
@@ -446,8 +505,9 @@ def mask_tree(colors, tol=38.0, region="main"):
     key = (tuple(map(tuple, colors)), tol, region)
     if key not in _TREES:
         pts = cached_pixels(
-            ("mask", key, art_stamp("map.png"), EXCLUDE,
-             code_stamp(mask_pixels, unfade, box_dilate, bg_palette, rival_palette)),
+            ("mask", key, art_stamp("map.png", PDF), EXCLUDE,
+             code_stamp(mask_pixels, unfade, knockout_panels, box_dilate,
+                        bg_palette, rival_palette)),
             lambda: mask_pixels(colors, tol, region))
         _TREES[key] = cKDTree(pts) if len(pts) > 300 else None
     return _TREES[key]
@@ -1120,7 +1180,6 @@ def drawn_color(shape_pts, seed, r2=55 * 55, need=250, level=SPRITE_LEVEL):
 # railroad's centreline under its dashed ticks, LADOT's solid DASH against its
 # dashed Commuter Express — so the dash pattern selects between them too.
 
-PDF = "26-1720_blt_system_map_47x47.5-2.pdf"
 INK_STEP = 3.0      # px between samples along a stroke read from the PDF
 
 # The inks, as the PDF has them. An agency's lines are laid down in two colors
