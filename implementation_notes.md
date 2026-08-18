@@ -18,6 +18,61 @@ what the project does; this covers what will bite you.
 | Cleanup | `despike`, `unfold`, `undetour`, `trim_terminus` |
 | Emit | `main` — builds `schedule.json` and prints a stats dict |
 
+## When a line leaves its drawing
+
+A snap follows whatever is in the tree it was handed, so a shape on the wrong
+street is a statement about that tree, about the anchors, or about the sheet —
+and which one it is decides the fix. Diagnose before reaching for a table.
+
+1. **See both courses at once.** `debug_line.py <n> --system <name> --no-stops`
+   puts the stored path over the artwork. Crop `tiles/<level>/<col>_<row>.webp`
+   (512 px tiles, level = scale over the 4096 px base) for the drawing on its
+   own — a path drawn over its line hides the line. What the sheet draws is the
+   target, not what the street grid suggests.
+2. **Ask the feed where the route actually goes.** The stop names in order
+   (`stop_times.txt` joined to `stops.txt`) name the streets, and `to_px` puts
+   them in map px. That separates the drawn corridor from the decoy running
+   parallel to it before any pixel work starts.
+3. **Score against the strokes, not the mask.** `pdf_ink([LEGEND_INK[feed]])`
+   is the drawing itself — complete under every label, with no chips and no
+   lettering in it — so the distance from the stored shape to those points is
+   the deviation with nothing inferred. It is also the one yardstick a mask
+   change cannot move. `drift_check --ink` is this for the agencies the PDF can
+   settle.
+4. **Ask whether the mask holds the line at all.** Query the agency's
+   `mask_tree` with the ink points along the stretch. A run of ink several px
+   from any mask pixel is a hole, and a hole is what a snap falls into: the
+   shape leaves for whichever parallel corridor is unbroken.
+   `ink_gap_check.py` asks the cruder version of the same question against the
+   grey street art.
+
+What the answer means:
+
+- **A hole under a place name.** The artwork there is washed back, not painted
+  out, and putting it back is `unfade`'s business. Its gates are measurable one
+  pixel at a time — the fade fraction along page→color, the fit to this
+  agency's blend, the fit to the best rival's — so print them for the pixels
+  sitting on the ink. The gate that rejects them names the fix, and it is a fix
+  for every line under every name rather than for this one route.
+- **The mask holds the line and the path still leaves it.** Then it is an
+  anchor question, not a mask one: nothing tells the snap which end of the
+  drawing this leg belongs to. See `PINNED_ANCHORS` and the two pin failures
+  below.
+- **The mask holds something that is not the line** — lettering, a neighbour's
+  casing — and the shape walks to it. That is a color question: `LEGEND_SEEDS`,
+  `BADGE_FILLS`, or the agency belongs in `INK_SNAP` and should be snapped on
+  strokes instead.
+- **The sheet draws nothing under the stretch.** Then the warp is the best
+  there is and the shape is already right. `drift_check` counts this apart as
+  `beyond`; a yardstick that treats a sibling's ink as "near" will call it
+  drift anyway, so check the artwork before believing the number.
+
+Prefer the general fix to the particular one — a mechanism that mis-reads the
+sheet mis-reads it everywhere — but price it. A change inside the mask
+machinery moves every color-masked feed at once, so diff the two builds' shapes
+per system, score both against the strokes, and look at the largest movers by
+eye. A total that improves can still hide a route that got worse.
+
 ## Hand-tuned tables
 
 Everything the artwork can't settle on its own is named in a table near the code
@@ -92,6 +147,13 @@ regression.
   survives back into the mask. So the masks are keyed on the sheet as well as
   on `map.png`, and without pymupdf they lose the panels — a gap under a name
   is then a hole again, and the snap will take a parallel street instead.
+- **A build without pymupdf poisons the cache.** The badges, the strokes and
+  the knockout panels all come from the PDF, and each falls back to nothing
+  rather than failing — but the empty stroke set is written to
+  `scratch/mask-cache/` under a key that says nothing about which libraries
+  were installed, so the *next* build reads it back and comes out wrong with no
+  warning at all. Install pymupdf before building, and clear the cache
+  directory if a run printed either "unavailable" line.
 - **Module docstrings are user-facing.** Several scripts pass `__doc__` as their
   argparse `description`. Trimming one changes `--help`.
 - **`index.html` must stay byte-stable across deploys.** It is the one URL that
