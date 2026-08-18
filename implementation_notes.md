@@ -10,7 +10,7 @@ what the project does; this covers what will bite you.
 | Region | What lives there |
 |---|---|
 | Feeds & calendars | `FEEDS`, `FEED_NAMES`, `pick_date`, `parse_time` |
-| Masks | `mask_tree`, `tile_tree`, `mask_pixels`, `unfade`, `cached_pixels` |
+| Masks | `mask_tree`, `tile_tree`, `mask_pixels`, `unfade`, `knockout_panels`, `cached_pixels` |
 | Drawn colors | `DRAWN_COLORS`, `LEGEND_SEEDS`, `BADGE_FILLS`, `refine_color` |
 | PDF strokes | `pdf_ink`, `ink_tree`, `*_INK` constants |
 | Anchors | `badge_words`, `route_anchors`, `trace_anchors`, `anchor_slide` |
@@ -86,6 +86,12 @@ regression.
   `inspect.getsource` of the mask-building functions, so editing them — comments
   included — invalidates `scratch/mask-cache/` and forces one cold rebuild
   (~80 s against ~30 s). Harmless, but don't be surprised by it.
+- **The colour masks read the PDF too.** A place name doesn't paint out the
+  line it crosses; it washes it back, under a halo and under a page-coloured
+  panel that `knockout_panels` reads off the PDF, and `unfade` puts what
+  survives back into the mask. So the masks are keyed on the sheet as well as
+  on `map.png`, and without pymupdf they lose the panels — a gap under a name
+  is then a hole again, and the snap will take a parallel street instead.
 - **Module docstrings are user-facing.** Several scripts pass `__doc__` as their
   argparse `description`. Trimming one changes `--help`.
 - **`index.html` must stay byte-stable across deploys.** It is the one URL that
