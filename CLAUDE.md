@@ -48,6 +48,10 @@ Don't feed it.
   explaining itself, and one or two lines at that.
 - **A worked example is not documentation of a fix.** Prefer the general
   statement of the failure over the instance that revealed it.
+- **A new entry in a hand-tuned table gets no comment.** `PINNED_ANCHORS`,
+  `OVERRIDE_PATHS`, `MAP_LABELS` and the rest already say what they are for;
+  the row is the fix, and why this route needed one belongs in the commit
+  message. Leave the comments already in those tables alone.
 - **`implementation_notes.md`** holds what someone needs to do further work:
   the hand-tuned tables and when to reach for each, verification gotchas,
   invariants. Keep it concise, and put new notes there rather than in the README.

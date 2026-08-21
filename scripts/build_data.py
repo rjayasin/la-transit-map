@@ -1680,9 +1680,6 @@ PINNED_ANCHORS = {
     ("longbeach", "93"): [(2288, 3262)],
     ("longbeach", "94"): [(2288, 3262)],
     ("gtfs_bus", "55"): [(1746.5, 2120)],
-    # A corner the route turns with other lines crossing either side of it: the
-    # walk leaves the corridor at one crossing and rejoins at the next, cutting
-    # the corner off. Pinned, no crossing lies between it and either badge.
     ("gtfs_bus", "222"): [(1334.8, 1040.3)],
     ("foothill", "20270"): [(2684.3, 1426.0)],
     ("foothill", "20284"): [(3209.0, 1712.0), (3236.0, 1695.5)],
@@ -1920,11 +1917,6 @@ OVERRIDE_PATHS = {
             (1368.5, 2925.0), (1368.5, 2910.5),
         ],
     },
-    # The sheet compresses a peninsula tip into a fraction of the ground the
-    # route covers there, laying the warp's descent over where the corridor
-    # below it is drawn: the badge at the far end is nearest that descent and
-    # anchors it, leaving everything past it to a chord across the loop. The
-    # corridor is traced out and back, the way the route runs it.
     ("gtfs_bus", "344"): {
         "box": (1105, 3262, 1225, 3450),
         "path": [
