@@ -2413,9 +2413,13 @@ def apply_override(full, base, spec):
 
 BRANCH_FLOOR = 24.0    # px further than the nearest variant a badge may sit and
                        # still be shared, about the width of a drawn street
+SLIDE_SPAN = 800.0     # px across a route's badges that one slide can stand for:
+                       # the warp's error holds over a few miles of map, and a
+                       # route badged over more ground than this is out by a
+                       # different vector at each end
 
 
-def branch_anchors(anchors, sid, sids, kd_for):
+def branch_anchors(anchors, sid, sids, kd_for, slide_for):
     """The badges that belong to *this* variant of a route.
 
     route_anchors finds every badge the sheet prints for a route, and a shape
@@ -2434,10 +2438,20 @@ def branch_anchors(anchors, sid, sids, kd_for):
     px away and a ratio is meaningless, and where it is bad every distance is
     inflated by the same local error, so the slack is measured in the error
     rather than in streets. 24 px is under the 30 that separates parallel drawn
-    lines, so a badge on the next street over can't be shared."""
+    lines, so a badge on the next street over can't be shared.
+
+    That slack is what the badges are read against the *slid* route for. Where
+    the warp is out by about half the distance between two parallel drawn lines
+    — a feed pairing two lines under one route puts a variant on each, so the
+    pair's badges are printed a street apart — a badge sitting between them is
+    nearer the wrong variant by less than the slack, and every variant keeps
+    every badge. The error is common to the variants, so taking it off first
+    leaves the comparison to be decided by the distance between the drawn lines,
+    which is wider than the slack."""
     if not anchors or len(sids) < 2:
         return anchors
     A = np.asarray(anchors, dtype=float)
+    A = A - slide_for(sids, A)
     dists = [kd_for(s).query(A)[0] for s in sids]
     best = np.min(np.vstack(dists), axis=0)
     mine = dists[sids.index(sid)]
@@ -2841,6 +2855,8 @@ def trace_anchors(s, D, A, P, cum, tree):
     return np.concatenate(out_s), np.concatenate(out_D), walked, believed
 
 
+ANCHOR_GATE = 120.0   # px a badge may stand from a shape and still count for it,
+                      # and so also the furthest a slide is worth searching
 ANCHOR_PASSES = 3     # times the anchor fit may be re-run to pick up more badges
 ANCHOR_PITCH = (8.0, 2.0)   # px; the slide is searched coarse, then refined
 ANCHOR_DRAG = 0.15    # px of residual charged per px of slide, per badge
@@ -3059,7 +3075,7 @@ def solid_pixels(tree):
 
 
 def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
-                  anchor_gate=120.0, min_frac=0.5, tail=(10.0, 11), region="main",
+                  anchor_gate=ANCHOR_GATE, min_frac=0.5, tail=(10.0, 11), region="main",
                   speckled=True, sole=False):
     """Snap a warped polyline onto a drawn-line mask. The displacement field is
     smoothed along the line so whole stretches move to the same drawn street
@@ -4006,12 +4022,31 @@ def main():
         for sid in warped:
             r = route_by_shape.get(sid)
             label_sids[rmeta[r][0] if r in rmeta else r].append(sid)
-        _kd = {}
+        _kd, _slide = {}, {}
 
         def kd_for(sid):
             if sid not in _kd:
                 _kd[sid] = cKDTree(np.asarray(densify(warped[sid], 4.0), dtype=float))
             return _kd[sid]
+
+        def slide_for(sids, A):
+            """The warp's local error where a route's badges are, as the one
+            translation that best puts its whole drawing on them — the reading
+            branch_anchors weighs the variants against.
+
+            Fitted over every variant at once, so it is the error they share
+            rather than one of them pulled onto another's badges, and taken only
+            where one vector can speak for the error at all (SLIDE_SPAN).
+            anchor_slide refuses a slide the badges don't agree on a direction
+            for, so a route whose variants disagree keeps its warp and is read
+            as it stands."""
+            key = tuple(sids)
+            if key not in _slide:
+                span = np.hypot(*(A.max(0) - A.min(0))) if len(A) else 0.0
+                _slide[key] = (anchor_slide(np.vstack([kd_for(s).data for s in sids]),
+                                            A, ANCHOR_GATE)
+                               if span <= SLIDE_SPAN else np.zeros(2))
+            return _slide[key]
 
         # snap shapes onto the drawn lines of this system where they exist
         agency_tree, sprite_cols = None, None
@@ -4135,7 +4170,8 @@ def main():
                     # is on the one variant that gets there — the workings that
                     # turn back at Harbor Gateway must not be dragged 640 px
                     # south onto it.
-                    anc = branch_anchors(anc, sid, route_sids[rid], kd_for)
+                    anc = branch_anchors(anc, sid, route_sids[rid], kd_for,
+                                         slide_for)
                     anchored += bool(anc)
                     can_refit = not busway
                     out_pts = snap_recording(pts, snap_tree, anchors=anc,
@@ -4212,7 +4248,8 @@ def main():
                 # here exactly as it does elsewhere, and a DASH — badged once or
                 # twice on the whole sheet, if at all — is the case with least
                 # else to go on.
-                anc = branch_anchors(anc + pins, sid, route_sids[rid], kd_for)
+                anc = branch_anchors(anc + pins, sid, route_sids[rid], kd_for,
+                                     slide_for)
                 anchored += bool(anc)
                 if tree is not None:
                     can_refit = True
@@ -4232,7 +4269,8 @@ def main():
                 if owned is None:
                     anc = branch_anchors(
                         anc, sid,
-                        label_sids[rmeta[rid][0] if rid in rmeta else rid], kd_for)
+                        label_sids[rmeta[rid][0] if rid in rmeta else rid], kd_for,
+                        slide_for)
                 else:
                     # Named by hand, so `branch_anchors` has nothing left to
                     # decide — see SYMBOL_OWNERS, which exists because the
@@ -4265,7 +4303,7 @@ def main():
                 gate_cols = anchor_cols + LEGEND_SEEDS.get(feed, [])
                 anc = branch_anchors(
                     route_anchors(toks, anchor_tree, colors=gate_cols) + pins,
-                    sid, route_sids[rid], kd_for)
+                    sid, route_sids[rid], kd_for, slide_for)
                 anchored += bool(anc)
                 can_refit = True
                 # Snap on the strokes where the sheet's vectors can be trusted
