@@ -1631,6 +1631,7 @@ def ladot_livery(tokens, is_dash, sheet_tokens=()):
 PINNED_ANCHORS = {
     ("gtfs_bus", "2"): [(1001, 1801)],
     ("bigbluebus", "4061"): [(1138, 2215), (1090, 2271)],
+    ("bigbluebus", "4056"): [(991.6, 2006.5), (1092.0, 1949.6)],
     ("longbeach", "2"): [(1610, 3044)],
     ("longbeach", "91"): [(2288, 3262)],
     ("longbeach", "92"): [(2288, 3262)],
