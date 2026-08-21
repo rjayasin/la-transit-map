@@ -198,26 +198,10 @@ MAP_LABELS = {
     ("ladot", "710"): "WM",         # DASH Wilmington, counterclockwise
     ("ladot", "713"): "WT",         # DASH Watts, clockwise
     ("ladot", "714"): "WT",         # DASH Watts, counterclockwise
-    # Two the feed's own name cannot yield: one initialises to a code the sheet
-    # prints nowhere, and the other isn't compressed at all — its first token is
-    # short enough for route_label to keep, so the buses ran badged a word the
-    # sheet prints only as part of place names.
     ("ladot", "4867"): "BE",        # DASH Boyle Heights
     ("ladot", "4868"): "SC",        # DASH El Sereno/City Terrace
-    # This one has to come with them: route_label yields the same two letters
-    # for it, so fixing the entry above without fixing this would put two
-    # unrelated loops under one designation — the thing the table exists to
-    # undo. Correcting a designation means checking nothing else collides with
-    # the code being freed up.
     ("ladot", "1757"): "SE",        # DASH Southeast, clockwise
     ("ladot", "1758"): "SE",        # DASH Southeast, counterclockwise
-    # The second is the case this table exists for at its sharpest, and the
-    # reason orphan_check cannot be relied on to find these: a made-up
-    # initialism the sheet prints nowhere is reported as an orphan, but an
-    # uncompressed first token that happens to be a word the sheet prints as a
-    # *place* name is not — and it is the more misleading of the two, since a
-    # rider looking it up on the map finds something. Naming them also anchors
-    # them; sheet_tokens is all a DASH has.
     ("ladot", "798"): "NR",         # DASH Northridge
     ("ladot", "799"): "VS",         # DASH Van Nuys/Studio City, clockwise
     ("ladot", "800"): "VS",         # DASH Van Nuys/Studio City, counterclockwise
@@ -904,11 +888,6 @@ STREET_SNAP = {"pasadena"}
 BADGE_FILLS = {
     "foothill": (118, 140, 120),
     "longbeach": (126, 33, 58),
-    # LADOT's DASH chips, read off every one of them within a couple of px:
-    # a flat olive, darker and far less washed than either livery's drawn
-    # stroke. Wanted because a DASH designation is two capitals and the sheet
-    # is covered in two-capital words — see ladot_livery, where this is the
-    # test that tells a chip from a street label.
     "ladot": (105, 103, 55),
 }
 
@@ -916,24 +895,12 @@ LEGEND_SEEDS = {
     "culvercity": [(215, 215, 157)],
     "gtrans": [(198, 165, 188)],
     "ladot": [(175, 170, 141), (154, 150, 117)],   # DASH + Commuter Express olives
-    # Two, because refining along a warp that is mostly *beside* the line settles
-    # on the shoulder where the stroke meets the page, and a tolerance round the
-    # shoulder admits the shoulder and nothing else — the core of a thick line is
-    # out of range, and a line the sheet draws thin is a single-px core between
-    # two pale blends with no pixel in the mask anywhere along it. Naming the
-    # stroke itself as a second seed puts the ink back in the mask.
     "longbeach": [(136, 88, 92), (98, 38, 53)],
     "bigbluebus": [(143, 135, 136)],
     "foothill": [(62, 100, 78)],    # dark evergreen lines; legend swatch too pale
     "montebello": [(172, 186, 153)],
     "torrance": [(137, 139, 174)],
     "burbank": [(132, 168, 155)],
-    # The same evergreen Foothill is drawn in — the sheet's legend gives both
-    # agencies the one swatch, and the sheet is 60 km wide enough that they
-    # never meet. The seed here used to be (170,181,169), a pale gray-green
-    # that is nothing on the page: refine_color drifted it to a flat gray, the
-    # mask came back as street art and lettering, and both Beach Cities routes
-    # snapped to whatever ran nearest.
     "beachcities": [(62, 100, 78)],
 }
 
@@ -1662,19 +1629,9 @@ def ladot_livery(tokens, is_dash, sheet_tokens=()):
 # schematic that ends a route at its hub while the GTFS runs on to a layover the
 # map omits. That doubles as a hazard — see trim_terminus and TRIM_TERMINI.
 PINNED_ANCHORS = {
-    # A hub chip belongs to another agency, so the colour gate rightly refuses
-    # it and the route's own end is left with nothing.
     ("gtfs_bus", "2"): [(1001, 1801)],
-    ("bigbluebus", "4061"): [
-        (1138, 2215),                     # ...and the overshoot past the hub
-        (1090, 2271),                     # a corner the walk can't cross: the
-    ],                                    # mask breaks where another agency's
-                                          # ink crosses it
-    ("longbeach", "2"): [(1610, 3044)],   # spur hanging past the last badge
-    # Where a walk can reach a drawn corridor by a shorter way than the route
-    # takes, one point splits the span so neither half reaches the shortcut. A
-    # pin only closes the shortcuts that lie beyond it, so it goes at the end
-    # the shortcut leaves from. Four routes drawn along one corridor share it.
+    ("bigbluebus", "4061"): [(1138, 2215), (1090, 2271)],
+    ("longbeach", "2"): [(1610, 3044)],
     ("longbeach", "91"): [(2288, 3262)],
     ("longbeach", "92"): [(2288, 3262)],
     ("longbeach", "93"): [(2288, 3262)],
@@ -1683,24 +1640,12 @@ PINNED_ANCHORS = {
     ("gtfs_bus", "222"): [(1334.8, 1040.3)],
     ("foothill", "20270"): [(2684.3, 1426.0)],
     ("foothill", "20284"): [(3209.0, 1712.0), (3236.0, 1695.5)],
-    # The sheet stacks its route chips in columns, and a chip's antialiased
-    # border is a ring of mask pixels — so a column of them is a ladder the walk
-    # can climb between two corridors the length band cannot separate.
     ("longbeach", "131"): [(2113, 3320)],
-    # An arc reading just outside the length band is refused as a shortcut and
-    # the chord interpolates it instead. Halved, each span is short enough that
-    # the straight interpolation *is* the corridor.
     ("longbeach", "111"): [(2146, 2880)],
-    # The badges run out at a corner, leaving a whole limb of the route past the
-    # last one with only the clamped displacement to carry it.
     ("longbeach", "61"): [(1930, 2752.2)],
     ("torrance", "6"): [(1378, 2822), (1575, 2785)],
     ("gtfs_bus", "217"): [(1802, 1499)],
     ("gtfs_bus", "233"): [(1040.9, 1755.1), (1004.7, 1810.7)],
-    # Several routes share one corridor with every badge they have past the far
-    # end of it, so the clamp carries a single displacement over the whole run.
-    # Three points each: both ends and the bend between them — pinning one end
-    # alone runs the interpolation straight across the bend.
     ("foothill", "10495"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2),
                             (2699.5, 2045.3), (2788.5, 2101.0),
                             (3207.0, 2166.0), (3216.0, 2098.0)],
@@ -1710,18 +1655,10 @@ PINNED_ANCHORS = {
     ("foothill", "20707"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2)],
     ("foothill", "20493"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2),
                             (2699.5, 2045.3), (2788.5, 2101.0)],
-    # A line name is written a handful of times and nowhere else, so a railroad
-    # can run a long way before its first one — and where the sheet needs a name
-    # to tell two tracks apart, that head is the stretch with nothing to tell it.
     ("metrolink", "Riverside Line"): [(1860, 2077.4)],
-    # A loop the sheet gives a badge or two, where the warp is larger than the
-    # blocks the loop is drawn around, so each leg goes to whichever stroke of
-    # the agency's own ink it lands nearest.
     ("ladot", "798"): [(645, 1236), (652, 1140)],
-    ("ladot", "799"): [(1032, 1472), (999, 1336),       # both directions of one
-                       (1180, 1507)],                   # loop share the drawing,
-    ("ladot", "800"): [(1032, 1472), (999, 1336),       # so they share the pins
-                       (1180, 1507)],
+    ("ladot", "799"): [(1032, 1472), (999, 1336), (1180, 1507)],
+    ("ladot", "800"): [(1032, 1472), (999, 1336), (1180, 1507)],
 }
 
 
@@ -1793,9 +1730,6 @@ OVERRIDE_PATHS = {
             (791, 993), (787, 1002),
         ],
     },
-    # A short, unambiguous corner where three things fail at once: the warp
-    # lands it far off, a station-box marker breaks the ink so no corridor walk
-    # crosses it, and the same error scrambles anchor order.
     ("gtfs_bus", "761"): {
         "box": (930, 1786, 1002, 1861),
         "path": [
@@ -1805,10 +1739,6 @@ OVERRIDE_PATHS = {
             (1001, 1830), (1001, 1845), (1001, 1858),
         ],
     },
-    # The sheet draws a street vertical that really slants, which inflates the
-    # badge-to-badge arc until the walk is refused as a shortcut — and refused
-    # identically on every pass, so the re-fit cannot rescue it. A pin attaches
-    # to the wrong leg.
     ("montebello", "10"): {
         "box": (2085, 1966, 2158, 2078),
         "path": [
@@ -1817,9 +1747,6 @@ OVERRIDE_PATHS = {
             (2159, 2058), (2157, 2064), (2157, 2071),
         ],
     },
-    # The warp lays a later leg of the route over where the sheet draws this
-    # one, so every point of the drawn corridor is nearest a leg far further
-    # into the shape and pins the wrong stretch.
     ("gtfs_bus", "501"): {
         "box": (1180, 1320, 1345, 1440),
         "path": [
@@ -1828,10 +1755,6 @@ OVERRIDE_PATHS = {
             (1338.7, 1452.9), (1343.6, 1455.7),
         ],
     },
-    # The chips bracketing the corner are closer together than TRACE_SPAN's
-    # floor, so no walk is attempted, and a pin attaches to the layover leg.
-    # Left alone the tail climbs onto a freeway drawn in the same agency's ink,
-    # which is why drift_check scores it clean.
     ("gtfs_bus", "251"): {
         "box": (1780, 1430, 1875, 1580),
         "path": [
@@ -1841,9 +1764,6 @@ OVERRIDE_PATHS = {
             (1784.0, 1525.0), (1784.0, 1545.0), (1784.0, 1570.0),
         ],
     },
-    # The warp's error runs from tens of px at one end of the stretch to nil at
-    # the other, which one bodily anchor slide cannot cover, and a pin attaches
-    # to the wrong stretch.
     ("ladot", "870"): {
         "box": (1560, 3380, 1700, 3500),
         "path": [
@@ -1854,10 +1774,6 @@ OVERRIDE_PATHS = {
             (1682.0, 3322.9),
         ],
     },
-    # An out-and-back stub shorter than the smoothing window, so the two legs
-    # average into each other and a pin reaches both without settling either.
-    # One path serves both directions: net displacement is nil, so the
-    # orientation test is a no-op.
     ("montebello", "20"): {
         "box": (2186, 2080, 2276, 2146),
         "path": [
@@ -1868,8 +1784,6 @@ OVERRIDE_PATHS = {
             (2252.0, 2124.9), (2260.0, 2129.4), (2271.0, 2136.5),
         ],
     },
-    # A badge printed on the drawn corridor stands nearer a different leg of the
-    # warp than the leg it is printed on.
     ("torrance", "5"): {
         "box": (1405, 3106, 1470, 3210),
         "path": [
@@ -1877,11 +1791,6 @@ OVERRIDE_PATHS = {
             (1433.0, 3132.5),
         ],
     },
-    # Two routes turning at one junction, failing together: their badges bracket
-    # it closer than TRACE_SPAN's floor so no walk is attempted, the chips
-    # attach to the wrong legs, and both routes are short enough that a pin
-    # near the corner falls inside trim_terminus's tail. Each box brackets the
-    # warp rather than the ink, and each direction enters it once.
     ("longbeach", "1"): {
         "box": (1655, 2800, 1790, 2925),
         "path": [
@@ -1907,8 +1816,6 @@ OVERRIDE_PATHS = {
             (1692.5, 2900.0), (1692.5, 2925.0), (1692.5, 2948.0),
         ],
     },
-    # The warp's inbound leg runs over where the sheet draws the outbound one, so
-    # every point of the street speaks for the leg the bus comes back down.
     ("torrance", "6"): {
         "box": (1320, 2950, 1400, 3010),
         "path": [
