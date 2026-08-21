@@ -57,6 +57,7 @@ diff two runs to see exactly what a change did. Then:
 .venv/bin/python scripts/drift_check.py    # how far each route is off its drawn line
 .venv/bin/python scripts/path_check.py     # hairpins and kinks
 .venv/bin/python scripts/speed_check.py    # implausible speeds
+.venv/bin/python scripts/speed_check.py --slow   # ... and vehicles held still
 .venv/bin/python scripts/debug_line.py <n> # look at it
 ```
 
@@ -69,11 +70,19 @@ color it measures against, and before/after totals from two different runs are
 not comparable. Compare both shapes against one tree, refined the way the build
 refines it — off the warps.
 
-Two blind spots to know about, since a fix can look like a no-op:
+Three blind spots to know about, since a fix can look like a no-op:
 
 - `drift_check` scores by color, so a route sitting on a *sibling* route's ink
   of the same color scores clean.
 - `path_check` scores by straightness, so a smoothly cut corner scores zero.
+- `speed_check --slow` scores by a speed the sheet is not always entitled to.
+  Three things hold a vehicle still without anything being wrong: a shape
+  trimmed to its drawn terminus, which parks every stop on the omitted layover
+  tail on one point; downtown compression, where the sheet barely moves and the
+  call-out does; and a circulator that really is scheduled at a walking pace.
+  The row's `pile`, `panel` and `held` columns are there to tell those from a
+  stall, and `held` is worth reading in px — stop spacing is ~13 px and stored
+  rounded, so a single px is quantization.
 
 A change can legitimately make `path_check` rank a route *worse* — an exact
 retrace is a true 180° fold where a wrong-but-smooth path was a shallow cusp.
@@ -133,6 +142,17 @@ regression.
   slide and the badges are read where they lie.
 - **The Downtown call-out has nothing drawn under it.** Shapes crossing it keep
   the warp; don't interpolate a snap correction across the panel.
+- **Stop distances ride on the stored arc.** `main_dist` places the stops on the
+  warp and carries that parameterization onto the stored shape point for point,
+  so whatever shortens the line compresses the stops with it. `unfold` is what
+  usually does: where the sheet draws one line for a stretch the route drives
+  twice — a one-way pair, a circulator's loop — every point along it offers an
+  ordinary-looking fold, and flattening the lot leaves half the line. The stops
+  then stack up on what is left and the vehicle stands at one of them for the
+  leg it should have spent driving. `FOLD_KEEP` is the floor in `settle` that
+  stops it, and `speed_check --slow` is what catches it when it happens. Keeping
+  a retrace costs `path_check` — a true 180° fold scores far worse than the
+  smooth wrong line it replaces — and that trade is the right way round.
 
 ## Adding a feed
 
