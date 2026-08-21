@@ -1973,6 +1973,22 @@ FOLD_WARP = 4.0     # px of that same gap, in the warp the fold was crushed from
                     # rather than out and back down one street. Under it the
                     # doubling-back is the route's own and the snapper only
                     # inherited it.
+FOLD_KEEP = 0.75    # of the snapped line's arc, the least a cleanup may leave.
+                    # The tests above read one fold at a time, and a route whose
+                    # arms run a block apart in the warp — a one-way pair, a
+                    # circulator drawn as a single line — offers a fold at every
+                    # point along it, each of them ordinary. Taken together they
+                    # are half the route. Stop distances are carried through this
+                    # geometry, so a line that comes out short does not merely
+                    # look wrong: the stops stack up on what is left of it, and
+                    # the vehicle stands at one of them for the leg it should
+                    # have spent driving.
+
+
+def arc_length(P):
+    """Total length along a polyline, px."""
+    P = np.asarray(P, dtype=float)
+    return float(np.hypot(*np.diff(P, axis=0).T).sum()) if len(P) > 1 else 0.0
 
 
 def arm_gap(P, i, j):
@@ -3726,15 +3742,22 @@ def settle(full, base, anc, line_ink):
     The old promise still holds, and is explicit: a candidate that would rank
     worse on `spike_penalty` than the snapper's own shape is thrown out before
     it can be scored, so nothing buys a straighter line at the cost of a
-    hairpin."""
+    hairpin. A candidate that has lost more than FOLD_KEEP of the line's arc
+    goes the same way, and for the same reason: the folds each read as the
+    snapper's, but a route drawn as one line and driven as two offers one at
+    every point along it, and flattening the lot leaves a line too short for
+    the timetable it carries."""
     as_snapped = full
     spike0 = stored_penalty(as_snapped)
+    floor = FOLD_KEEP * arc_length(as_snapped)
     best = spike0 + DETOUR_WEIGHT * detour_penalty(as_snapped, base, anc, line_ink)
     unfolded = unfold(as_snapped, base, anc)
     undet = undetour(as_snapped, base, anc, line_ink)
     for cand in (despike(as_snapped), unfolded, despike(unfolded),
                  undet, despike(undet), unfold(undet, base, anc)):
         if np.array_equal(cand, as_snapped):
+            continue
+        if arc_length(cand) < floor:
             continue
         spike = stored_penalty(cand)
         if spike > spike0:
