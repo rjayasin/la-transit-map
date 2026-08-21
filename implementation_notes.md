@@ -124,6 +124,13 @@ regression.
 - **Trips start at the origin's departure time**, not its arrival — some feeds
   time origins up to two hours early, and using arrival pools whole fleets into
   motionless clusters at their terminals.
+- **Badges are read against the route slid onto them.** Which variant a badge
+  anchors is settled after the warp's local error is taken off (`slide_for`):
+  where the warp is out by about half the distance between two parallel drawn
+  lines, a badge printed on one of them comes out nearest the variant running
+  the other, by less than the slack `branch_anchors` allows. Over a badge cloud
+  wider than `SLIDE_SPAN` one vector cannot stand for that error, so there is no
+  slide and the badges are read where they lie.
 - **The Downtown call-out has nothing drawn under it.** Shapes crossing it keep
   the warp; don't interpolate a snap correction across the panel.
 
