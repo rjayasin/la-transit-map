@@ -35,16 +35,12 @@ GTFS = "data/gtfs"
 PDF = "26-1720_blt_system_map_47x47.5-2.pdf"   # the sheet itself, read for both
                                                # its strokes and its knockouts
 # gtfs_rail first so Metro trains draw config (snap) is applied; order otherwise cosmetic
-# Norwalk Transit is not here, and the feed is gone with it. The Mobility
-# Database entry catalogued as "us-california-norwalk-transit-system-nts" is
-# Norwalk Transit *District*, Connecticut — America/New_York, a 203 phone
-# number, and routes to SoNo Station, Wilton Center and Greenwich. Its shapes
-# warp to around (-10000, 320000), a quarter of a million px off the sheet, so
-# all 531 of its trips animated nowhere: every one of them off-map in
-# speed_check, none of them drawable, and debug_line died on the negative crop.
+# Norwalk Transit publishes only from its own site; the Mobility Database entry
+# catalogued as "us-california-norwalk-transit-system-nts" is Connecticut's
+# Norwalk Transit District, and warps a quarter of a million px off the sheet.
 FEEDS = ["gtfs_rail", "gtfs_bus", "bigbluebus", "culvercity", "ladot", "longbeach",
          "foothill", "torrance", "montebello", "gtrans", "pasadena",
-         "burbank", "beachcities", "metrolink"]
+         "burbank", "beachcities", "norwalk", "metrolink"]
 WORKERS = min(8, (os.cpu_count() or 4))   # threads for the mask fits
 METRO_BUS_COLOR, METRO_BUS_TEXT = "E16710", "FFFFFF"
 FALLBACK_COLOR, FALLBACK_TEXT = "888888", "FFFFFF"
@@ -58,7 +54,7 @@ FEED_NAMES = {
     "montebello": "Montebello Bus Lines",
     "gtrans": "GTrans", "pasadena": "Pasadena Transit",
     "burbank": "BurbankBus", "beachcities": "Beach Cities Transit",
-    "metrolink": "Metrolink",
+    "norwalk": "Norwalk Transit", "metrolink": "Metrolink",
 }
 
 # Metrolink trips.txt leaves shape_id empty; shapes.txt carries per-line
@@ -902,6 +898,7 @@ LEGEND_SEEDS = {
     "torrance": [(137, 139, 174)],
     "burbank": [(132, 168, 155)],
     "beachcities": [(62, 100, 78)],
+    "norwalk": [(168, 208, 208)],
 }
 
 # The two operators the sheet symbolises by *agency* rather than by route, and

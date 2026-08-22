@@ -3,7 +3,7 @@
 **[Live map → rjayasin.github.io/la-transit-map](https://rjayasin.github.io/la-transit-map/)**
 
 Animated 24-hour visualization of every scheduled transit vehicle in LA — Metro
-bus & rail plus 11 municipal systems and Metrolink — played over Metro's
+bus & rail plus 12 municipal systems and Metrolink — played over Metro's
 official "Bus and Rail System" map (May 2026).
 
 ## Run
@@ -35,8 +35,8 @@ and emits `schedule.json`.
   (`tiles/{2,4,8}/`, 512px tiles ≈ up to 700 dpi of the 47″ sheet), rendered
   from the PDF vectors. Tiles cascade in as you zoom, and zoom is capped at the
   deepest level's 1:1, so the background is never upscaled.
-- **Data** — 14 static GTFS feeds are reduced to one service date per weekday
-  and emitted as `schedule.json` (~12 MB): **49,545 trips on 331 routes** —
+- **Data** — 15 static GTFS feeds are reduced to one service date per weekday
+  and emitted as `schedule.json` (~12 MB): **49,960 trips on 337 routes** —
   a whole week, around 26,000 of them running on any one weekday — as route
   colors/labels, shape polylines in map pixels, per-stop distance along each
   shape, stop arrival times, and a bitmask per trip of the days it runs, so
@@ -233,9 +233,8 @@ which reports from off the main thread and cannot be suppressed by it.
 ## Known limitations
 
 - **Missing systems** — Glendale Beeline (download blocked), OCTA / AVTA /
-  Santa Clarita / Simi Valley (essentially off-map), Norwalk Transit (no
-  Californian feed published), Amtrak, and the community shuttles in the map's
-  legend with no public GTFS.
+  Santa Clarita / Simi Valley (essentially off-map), Amtrak, and the community
+  shuttles in the map's legend with no public GTFS.
 - **Stale feeds** — some municipal calendars end before the target service
   week; those systems animate their busiest covered date of the same weekday
   instead.
@@ -278,3 +277,4 @@ its official site.
 | `pasadena` | Pasadena Transit | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-pasadena-transit-gtfs-41.zip?alt=media) |
 | `burbank` | BurbankBus | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-burbankbus-gtfs-2149.zip?alt=media) |
 | `beachcities` | Beach Cities Transit (Redondo) | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-beach-cities-transit-gtfs-1999.zip?alt=media) |
+| `norwalk` | Norwalk Transit System | [City of Norwalk GTFS](https://nts.rideralerts.com/infopoint/gtfs-zip.ashx) |
