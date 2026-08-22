@@ -223,7 +223,8 @@ regression.
 ## Adding a feed
 
 Add the zip under `data/gtfs/`, then the key to `FEEDS` (rail first — Metro rail
-seeds the snap config) and `FEED_NAMES`. Give it a drawn color in
-`DRAWN_COLORS`, or add it to `INK_SNAP` if its lines can't be separated from the
-page by color. Then run the checks above; a feed that warps far off the sheet
-shows up immediately in `speed_check` as off-map.
+seeds the snap config) and `FEED_NAMES`. Seed its drawn color in
+`LEGEND_SEEDS`, or add it to `INK_SNAP` if its lines can't be separated from the
+page by color; an agency the sheet draws no line for gets a sprite color in
+`DRAWN_COLORS` instead and keeps the warp. Then run the checks above; a feed
+that warps far off the sheet shows up immediately in `speed_check` as off-map.
