@@ -90,6 +90,7 @@ MIN_ARC = 80.0         # px; ignore a route with almost nothing on the sheet
 # masks can't separate — build_data gives it no mask either, so neither can this.
 METRO_RAPID = {"720", "754", "761"}
 METRO_BUSWAY = {"G"}
+METRO_JLINE = {"910"}   # drawn as the freeway busway's gray ribbon, not in bus orange
 METRO_UNDRAWN = {"J"}
 
 # The sheet letters its rail lines; the feed numbers them.
@@ -113,6 +114,8 @@ def tree_for(system, label, cache, rail_trees):
             out = (None, "-")
         elif label in METRO_BUSWAY:
             out = (B.ink_tree(B.BUSWAY_INK), "ink")
+        elif label in METRO_JLINE:
+            out = (B.ink_tree(B.JLINE_INK), "ink")
         elif label in METRO_RAPID:
             out = (B.ink_tree(B.RAPID_RED_INK), "ink")
         else:
