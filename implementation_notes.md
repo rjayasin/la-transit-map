@@ -34,19 +34,81 @@ fix — try them in this order, least invasive first:
 | `TRIM_TERMINI` | A pin can't both anchor and trim; give the terminus in *warp* px for the trim alone |
 | `OVERRIDE_PATHS` | Nothing above can reach it. A corridor drawn by hand, spliced into the snapped shape. Last resort |
 
-Two recurring reasons a pin doesn't work, worth recognising before reaching for
-an override:
+Three recurring reasons a pin doesn't work, worth recognising before reaching
+for an override:
 
 - **The pin speaks for the wrong stretch.** Anchors attach to the nearest point
   of the *warp*, so where the warp lays one leg of a route over where another is
   drawn, a point on the drawn line attaches to the wrong leg and anchors the
   middle of the route instead of the end.
+- **The warp never goes there.** A pin can only hold a stretch the warp
+  actually passes through. Where the sheet straightens out a jog the route
+  really makes — round a block, into a terminal, through a fairground — there
+  is no warp on the drawn corridor to attach to, and no pin placed on it can
+  put the line there. Only an override can.
 - **The pin reads as a terminus.** `trim_terminus` cuts a shape back to a pin
   near its end (`TERMINUS_TAIL`), so a pin placed inside that tail removes the
   stretch it was meant to anchor.
 
+All three are one measurement: the distance from the intended pin to the
+nearest warp point, and to the nearest point on any *other* leg of the same
+warp. A few px, with the runner-up far behind, and the pin holds. Tens of px,
+or a runner-up as close as the winner, and it will attach somewhere else. The
+build says nothing when this happens — the shape simply comes back wrong in a
+new place — so it is worth checking before a rebuild rather than after.
+
 Snapping strategy per agency is set by the `STREET_SNAP` / `INK_SNAP` /
 `SYMBOL_FEEDS` sets and `DRAWN_COLORS`.
+
+## Chasing a divergent path
+
+A line reported off its drawn ink is usually one *variant* of a route rather
+than the route, and the checks are the wrong end to start from — `drift_check`
+scores by colour, and a route that has wandered onto a sibling of the same
+agency scores clean. Work from the drawing instead.
+
+**Find the variant.** Every variant of a route normally comes from one warp
+corridor, so measure each stored shape against the drawn line over a window
+round the divergence — `mask_tree` on the agency's colour, or a polyline traced
+off the artwork — and the odd one out is the fault. Comparing variants against
+each other instead has two traps: stored shapes keep only the points
+`simplify` left, so vertex-to-vertex distance reports the gap to the nearest
+*corner* and can be several times the real one, and where a route passes
+through an area twice the nearest point on the other variant can be on its
+other leg, which hides the divergence entirely.
+
+**Read length as well as distance.** A path cutting the corner off a tight loop
+can sit a few px from the corridor at its worst and still be obviously wrong on
+screen. How much arc the shape spends inside the window is the second measure,
+and a shortcut shows up there as ground it never covers — which is also what
+the stops ride on, so it is the half that reaches the animation.
+
+**Then pick the table**, by the pin test above. Placing a pin: take its
+coordinates off a variant that already sits on the line, or scan `mask_tree`
+across the corridor for the centreline — the drawn line is a couple of px wide
+and the warp can be tens of px off it, so a coordinate guessed from the warp
+lands on the wrong street.
+
+**Placing an override.** `box` is matched against the warp, and the run
+replaced runs from the *first* to the *last* warp point inside it: an excursion
+that leaves the box in between is harmless, but a second pass through the box
+later in the route swallows everything between the two. List the in-box index
+runs for every shape of the route before trusting a box. One `path` serves both
+directions, since the orientation is taken from the direction of travel rather
+than from which end the shape enters by. Trace the corridor off the artwork and
+draw the trace back over the tiles before wiring it in — a hook or a dip the
+eye skips over is obvious the moment it is drawn.
+
+**Where the box ends matters as much as the path.** The box picks its run off
+the warp, but each end of the hand-drawn path has to meet a point the *snap*
+placed, and the snap moves points along the line as well as across it. Put an
+edge where it does — at a corner, or anywhere the fit is already wandering —
+and the neighbour outside the box can sit past the end of the path, which
+leaves a reversal where the two meet. Nothing measures this except
+`path_check`, which will report a cusp at the box edge and no longer at the
+thing you set out to fix. Edges belong in long straight stretches, where the
+snap can only move the line sideways, and the fix for a cusp at an edge is to
+move the edge out rather than to redraw the path.
 
 ## Verifying a change
 
@@ -63,6 +125,10 @@ diff two runs to see exactly what a change did. Then:
 
 `trips` is the whole week, so the checks rank weekend-only workings alongside
 the rest and their trip counts are a week's, not a day's.
+
+Count the shapes that changed, too. A fix aimed at one route should touch that
+route's shapes and no others, and a table entry that reaches further than it
+was meant to shows up here before it shows up anywhere else.
 
 **`drift_check` moves its own yardstick.** It refines the mask color off the
 *stored* shapes, so a change that moves shapes onto their lines also changes the
