@@ -48,7 +48,9 @@ for an override:
   put the line there. Only an override can.
 - **The pin reads as a terminus.** `trim_terminus` cuts a shape back to a pin
   near its end (`TERMINUS_TAIL`), so a pin placed inside that tail removes the
-  stretch it was meant to anchor.
+  stretch it was meant to anchor. A limb shorter than that tail therefore
+  cannot be pinned at all without losing the terminus beyond it: pinning the
+  end and pinning the limb are the same choice, and only an override has both.
 
 All three are one measurement: the distance from the intended pin to the
 nearest warp point, and to the nearest point on any *other* leg of the same
