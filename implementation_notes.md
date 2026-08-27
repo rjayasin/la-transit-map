@@ -120,6 +120,7 @@ diff two runs to see exactly what a change did. Then:
 ```sh
 .venv/bin/python scripts/drift_check.py    # how far each route is off its drawn line
 .venv/bin/python scripts/path_check.py     # hairpins and kinks
+.venv/bin/python scripts/path_check.py --inset   # ... in the Downtown call-out
 .venv/bin/python scripts/speed_check.py    # implausible speeds
 .venv/bin/python scripts/speed_check.py --slow   # ... and vehicles held still
 .venv/bin/python scripts/debug_line.py <n> # look at it
@@ -143,6 +144,9 @@ Three blind spots to know about, since a fix can look like a no-op:
 - `drift_check` scores by color, so a route sitting on a *sibling* route's ink
   of the same color scores clean.
 - `path_check` scores by straightness, so a smoothly cut corner scores zero.
+  It also reads the main map alone unless asked for `--inset`: the call-out is
+  a second, separately snapped drawing of the same routes, and its runs are
+  stored apart from the shapes.
 - `speed_check --slow` scores by a speed the sheet is not always entitled to.
   Three things hold a vehicle still without anything being wrong: a shape
   trimmed to its drawn terminus, which parks every stop on the omitted layover
@@ -210,6 +214,22 @@ regression.
   slide and the badges are read where they lie.
 - **The Downtown call-out has nothing drawn under it.** Shapes crossing it keep
   the warp; don't interpolate a snap correction across the panel.
+- **The call-out draws each direction of a route separately.** Where a route
+  runs a one-way pair the panel draws two lines a block apart and prints a
+  badge column beside each, so a shape — which is one direction — must not take
+  both: `uncrossed_badges` gives a contested stretch to the badge nearest it,
+  and `branch_anchors`, run again over the variants' inset-px warps, hands the
+  rest to the variant that runs their street. With both columns in hand the fit
+  weaves the line between the two, once per pair down the corridor. Out on the
+  schematic the pair is one line carrying both directions' badges, which is
+  `anchor_slide`'s case and not this one.
+- **A corridor walk far longer than the shape is usually going round a hole.**
+  The sheet knocks its own line out for a station marker or a chip, and
+  `mask_path` bridges a hole only where the mask connects nothing at all — so
+  where the block closes round it, the walk takes the block and `align_walk`
+  pins the route to it. `trace_anchors` asks again with `over_holes=True` and
+  keeps that answer only when it comes back the length the shape says, which is
+  the test a corner-cutting bridge fails.
 - **Stop distances ride on the stored arc.** `main_dist` places the stops on the
   warp and carries that parameterization onto the stored shape point for point,
   so whatever shortens the line compresses the stops with it. `unfold` is what
