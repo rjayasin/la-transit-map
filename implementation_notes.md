@@ -222,7 +222,11 @@ regression.
   rest to the variant that runs their street. With both columns in hand the fit
   weaves the line between the two, once per pair down the corridor. Out on the
   schematic the pair is one line carrying both directions' badges, which is
-  `anchor_slide`'s case and not this one.
+  `anchor_slide`'s case and not this one. Both rules keep the constants they
+  were given for the main map: the panel magnifies downtown severalfold but the
+  sheet draws its lines at a legible width either way, so parallel drawn lines
+  sit ~30-40 px apart in both and `CROSSED_APART` and `BRANCH_FLOOR` mean the
+  same thing there.
 - **A corridor walk far longer than the shape is usually going round a hole.**
   The sheet knocks its own line out for a station marker or a chip, and
   `mask_path` bridges a hole only where the mask connects nothing at all — so
