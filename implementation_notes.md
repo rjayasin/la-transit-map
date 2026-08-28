@@ -305,6 +305,15 @@ regression.
   chips out, which matters more down there than anywhere: a chip is a solid
   disc of the line's own colour a few tens of px off the line, and on the
   raster it is fused to it.
+- **A colour mask can be mostly lettering.** Where an agency's line is thin and
+  its colour muted, map.png's reduction blends the line toward the page while
+  the place names set in the same grey survive intact — Big Blue Bus through
+  Pacific Palisades read 800 mask px in a frame where the pyramid finds 3400,
+  and nearly all of the 800 were type. A shape fitted on that is fitted to the
+  labels, and every check reads clean: `drift_check` scores it against the same
+  mask, and cutting a corner smoothly costs `path_check` nothing. `LEGEND_INK`
+  and `INK_SNAP` are the way out where the PDF carries the agency's strokes;
+  `ink_gap_check.py` is how to see the holes.
 - **Mask cache keys include function source.** `code_stamp` hashes
   `inspect.getsource` of the mask-building functions, so editing them — comments
   included — invalidates `scratch/mask-cache/` and forces one cold rebuild
