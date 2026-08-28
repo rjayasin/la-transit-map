@@ -154,15 +154,26 @@ the stops ride on, so it is the half that reaches the animation. Scoring a
 candidate as (distance to the trace, fraction of the trace covered) catches
 both at once.
 
-**Stand up a one-agency harness before trying anything.** A full build is
-around two minutes; one agency's snap is seconds, and it reproduces what ships
-to a rounding. Load the feed's `shapes.txt` through `to_px`, refine the colour
-and build `mask_tree` as `main` does, then per shape: `trim_terminus` on the
-pins, `route_anchors` + pins, `branch_anchors`, `snap_recording`, `settle`, and
-the alignment ballot (`resnap_without_alignment`, kept unless it beats the
-aligned fit on `stored_penalty` or by 0.5 px of `ink_offset`). Check it against
-`schedule.json` once — the stored shapes should match to a rounding — and after
-that a pin position is a loop, not a rebuild.
+**Refit the one route rather than rebuilding.** A full build is around two
+minutes and almost all of it is shapes the change under test cannot reach.
+`build_data.py --only <feed>[:<route>]` fits that route alone and writes a
+`schedule.json`-shaped stub `debug_line.py --schedule` draws:
+
+```sh
+.venv/bin/python scripts/build_data.py --only bigbluebus:9
+.venv/bin/python scripts/debug_line.py 9 --schedule scratch/refit_bigbluebus.json --no-stops
+```
+
+Two seconds for a route, five for a whole agency, against 107 for the build,
+and the geometry is identical — it is the build's own code with the fit loop
+narrowed. So a pin position is a loop, not a rebuild. What it does *not* give
+you is `schedule.json`: it emits no timetable and no call-out runs, so
+`drift_check`, `path_check` and `speed_check` still want a full build before
+you commit.
+
+The route token matches a route id, an id without its variant suffix, or the
+designation the sheet prints, so `--only ladot:437` and `--only bigbluebus:9`
+both work without looking an opaque feed id up.
 
 **Two signatures worth recognising**, each of which names its own fix:
 
@@ -283,6 +294,16 @@ regression.
   `inspect.getsource` of the mask-building functions, so editing them — comments
   included — invalidates `scratch/mask-cache/` and forces one cold rebuild
   (~80 s against ~30 s). Harmless, but don't be surprised by it.
+- **`--only` reads a cached shape set; a full build never does.** Which shapes a
+  feed runs is settled by its timetable, and the colour the feed is masked on is
+  refined off the first twenty of them — so a refit that guessed the set from
+  `trips.txt` could mask on a different colour and answer a question the build
+  never asked. `scratch/shape-cache/` holds the set, stamped with the size and
+  mtime of the files it came from; a full build writes it and reads nothing, and
+  a refit whose stamp doesn't match reads the stop times as usual. The busways
+  are the exception a refit can't take: they anchor on the station names printed
+  beside them, which come out of the timetable, so `--only gtfs_bus` and
+  `--only gtfs_bus:901` parse it whatever the cache says.
 - **The colour masks read the PDF too.** A place name doesn't paint out the
   line it crosses; it washes it back, under a halo and under a page-coloured
   panel that `knockout_panels` reads off the PDF, and `unfade` puts what
