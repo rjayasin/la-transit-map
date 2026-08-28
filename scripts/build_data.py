@@ -3683,7 +3683,43 @@ INSET_COLORS = {"ladot": [(107, 103, 61), (128, 126, 85)]}
 INSET_ORANGE = (245, 132, 70)
 
 
-def inset_runs(ll, main_dist, snap_tree=None, anchors=None, sole=False):
+# Diversions the call-out doesn't draw, in inset px. A feed sometimes routes
+# some workings of a route off the line the sheet gives it — round a closure,
+# usually — and the panel is the one view that draws the difference, on streets
+# it never badges the route along. The box brackets the stretch; the run of the
+# shape inside it is replaced by its own chord, so a variant that keeps to the
+# corridor is left exactly as it was and only the diverted one is straightened.
+# Which workings divert, and why, belongs to the feed and changes with it.
+INSET_DIVERSIONS = {
+    ("gtfs_bus", "18"): [(3550, 2980, 3710, 3100)],
+}
+DIVERSION_BULGE = 25.0   # px off its own chord before a run counts as diverted
+
+
+def undivert(pts, boxes):
+    """`pts` with any boxed run that bulges off its chord flattened onto it."""
+    P = np.asarray(pts, dtype=float)
+    for x0, y0, x1, y1 in boxes:
+        k = np.nonzero((P[:, 0] >= x0) & (P[:, 0] <= x1)
+                       & (P[:, 1] >= y0) & (P[:, 1] <= y1))[0]
+        if len(k) < 3:
+            continue
+        lo, hi = int(k[0]), int(k[-1])
+        a, b = P[lo], P[hi]
+        n = b - a
+        L = float(np.hypot(*n))
+        if L < 1e-6:
+            continue
+        off = np.abs(np.cross(n / L, P[lo:hi + 1] - a))
+        if off.max() < DIVERSION_BULGE:
+            continue
+        t = np.linspace(0, 1, hi - lo + 1)[:, None]
+        P[lo:hi + 1] = a + t * n
+    return P
+
+
+def inset_runs(ll, main_dist, snap_tree=None, anchors=None, sole=False,
+               boxes=()):
     """Portions of a shape inside the DTLA inset, as runs of inset-px
     polyline. Motion in the inset is computed natively in inset space (the
     schematic main map collapses downtown, so main-shape distance cannot
@@ -3742,6 +3778,8 @@ def inset_runs(ll, main_dist, snap_tree=None, anchors=None, sole=False):
         mx, my = to_px(ll[a:b+1, 0], ll[a:b+1, 1])
         d = main_dist(list(zip(mx, my)))
         pts = np.c_[ix[a:b+1], iy[a:b+1]]
+        if boxes:
+            pts = undivert(pts, boxes)
         if snap_tree is not None:
             # the same coherent snap as the main map, scaled for the magnified
             # inset: a short smoothing window keeps the grid's right-angle
@@ -4510,7 +4548,9 @@ def main():
                 # line, so anchoring on one now drags the line off the ink it
                 # was already sitting on.
                 runs = inset_runs(ll, lambda px: main_dist(key, si, px), tree,
-                                  sole=key[0] == "gtfs_rail")
+                                  sole=key[0] == "gtfs_rail",
+                                  boxes=INSET_DIVERSIONS.get(
+                                      (key[0], shape_route.get(key)), ()))
             shape_runs[si] = runs
         return shape_runs[si]
 

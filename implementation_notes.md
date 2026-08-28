@@ -33,6 +33,7 @@ fix — try them in this order, least invasive first:
 | `PINNED_ANCHORS` | The sheet prints no badge over a stretch that needs one. A point on the drawn line then acts as a badge |
 | `TRIM_TERMINI` | A pin can't both anchor and trim; give the terminus in *warp* px for the trim alone |
 | `OVERRIDE_PATHS` | Nothing above can reach it. A corridor drawn by hand, spliced into the snapped shape. Last resort |
+| `INSET_DIVERSIONS` | The feed routes some workings off the line the sheet draws, and only the call-out is magnified enough to show it. A box in inset px; the run inside it is flattened onto its chord |
 
 Three recurring reasons a pin doesn't work, worth recognising before reaching
 for an override:
@@ -228,6 +229,15 @@ regression.
   nothing about the corner by Union Station, where the panel gives the square
   grid up — that corner is extrapolated off the last breakpoint and is the one
   part of the panel the warp is still tens of px out in.
+- **A diversion in the feed is not a snapping fault, and nothing catches it.**
+  Where a route is sent round a closure for some of its workings, the shape
+  really does leave the line the sheet draws — so `undetour` sees nothing (it
+  compares the snap against the warp, and here they agree), `path_check` sees a
+  smooth rectangle, and every general test tried came back too blunt to use:
+  the panel's ink covers the street it diverts onto, its badges are further
+  from a straight variant's own warp than from the diverted one, and a shape
+  running off the frame is further from its own stops than a diversion is.
+  `INSET_DIVERSIONS` is the answer, and finding the next one means looking.
 - **The call-out does not anchor on badges.** Anchors pull a shape onto its
   street where the warp is out by more than the streets are apart, and down
   there it isn't: a chip is printed *beside* its line, so anchoring on one now
