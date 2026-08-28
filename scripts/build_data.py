@@ -1647,6 +1647,8 @@ PINNED_ANCHORS = {
     ("gtfs_bus", "2"): [(1001, 1801)],
     ("bigbluebus", "4061"): [(1138, 2215), (1090, 2271)],
     ("bigbluebus", "4056"): [(991.6, 2006.5), (1092.0, 1949.6)],
+    ("bigbluebus", "4051"): [(830.0, 1962.0)],
+    ("bigbluebus", "4058"): [(705.0, 2085.7), (775.3, 2166.4)],
     ("longbeach", "2"): [(1610, 3044)],
     ("longbeach", "91"): [(2288, 3262)],
     ("longbeach", "92"): [(2288, 3262)],
@@ -3710,7 +3712,8 @@ def undivert(pts, boxes):
         L = float(np.hypot(*n))
         if L < 1e-6:
             continue
-        off = np.abs(np.cross(n / L, P[lo:hi + 1] - a))
+        u, V = n / L, P[lo:hi + 1] - a
+        off = np.abs(u[0] * V[:, 1] - u[1] * V[:, 0])
         if off.max() < DIVERSION_BULGE:
             continue
         t = np.linspace(0, 1, hi - lo + 1)[:, None]
