@@ -25,6 +25,7 @@ Usage:
     scripts/debug_line.py 720 --inset        # only the DTLA inset panel
     scripts/debug_line.py 720 --shape 3      # one variant only
     scripts/debug_line.py 720 --png          # cheap map.png background
+    scripts/debug_line.py 9 --schedule scratch/refit_bigbluebus.json   # a refit
 """
 import argparse
 import json
@@ -51,11 +52,11 @@ COLORS = [
 ]
 
 
-def load():
-    for p in (MAP, SCHEDULE):
+def load(schedule=SCHEDULE):
+    for p in (MAP, schedule):
         if not os.path.exists(p):
             sys.exit(f"missing {p} (run from the repo root)")
-    with open(SCHEDULE) as f:
+    with open(schedule) as f:
         return json.load(f)
 
 
@@ -212,6 +213,9 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("line", help="route label as shown on the map, e.g. 720, A, R10")
     ap.add_argument("--system", help="substring of the system name, to disambiguate")
+    ap.add_argument("--schedule", default=SCHEDULE,
+                    help=f"read shapes from this file instead of {SCHEDULE} — "
+                         "a build_data.py --only refit writes one")
     ap.add_argument("--shape", type=int, help="draw only the Nth variant (see stdout)")
     ap.add_argument("--no-stops", dest="stops", action="store_false",
                     help="just the path — omit the stop marks and the outlines "
@@ -228,7 +232,7 @@ def main():
                          "the inset panel gets the same name with _inset appended")
     a = ap.parse_args()
 
-    d = load()
+    d = load(a.schedule)
     ridx = find_route(d, a.line, a.system)
     route = d["routes"][ridx[0]]
     system = d["systems"][route["sy"]]

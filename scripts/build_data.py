@@ -13,11 +13,23 @@
 Trips crossing midnight (times >= 24:00) are also emitted shifted by -24h onto
 the following day, so the after-midnight portion of yesterday's service appears
 at the start of the day.
+
+--only fits one feed, or one route of it, and writes those shapes alone to a
+stub debug_line.py can draw with --schedule. Seconds instead of two minutes,
+for looking at what a table entry did:
+
+    scripts/build_data.py --only bigbluebus:9
+    scripts/debug_line.py 9 --schedule scratch/refit_bigbluebus.json --no-stops
+
+It fits nothing else and writes no schedule.json, so the checks — drift_check,
+path_check, speed_check — still want a full build before you commit.
 """
-import colorsys, csv, hashlib, inspect, json, math, os, re, sys
+import argparse, colorsys, csv, hashlib, inspect, json, math, os, re, sys
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
+from functools import lru_cache
+from operator import itemgetter
 
 import numpy as np
 from PIL import Image
@@ -134,8 +146,19 @@ def read_cols(feed, name, cols):
             return []
         idx = [head.index(c) if c in head else -1 for c in cols]
         n = len(head)
-        return [tuple(row[i] if 0 <= i < len(row) else "" for i in idx)
-                for row in r if len(row) >= n - 1]
+        # One C call per row rather than a generator frame per field, which is
+        # worth having on a file of two million. The slow path stands behind it
+        # for the rows it cannot index: a column the file doesn't carry, or a
+        # short last field the reader dropped.
+        lo, hi = min(idx), max(idx)
+        wide = itemgetter(*idx) if len(idx) > 1 and lo >= 0 else None
+        out = []
+        for row in r:
+            if len(row) < n - 1:
+                continue
+            out.append(wide(row) if wide is not None and len(row) > hi
+                       else tuple(row[i] if 0 <= i < len(row) else "" for i in idx))
+        return out
 
 
 def active_services(feed, d):
@@ -184,6 +207,8 @@ def pick_dates(feed, trips_per_service):
     return [pick_date(feed, trips_per_service, sunday + timedelta(days=i)) for i in range(7)]
 
 
+@lru_cache(maxsize=None)   # called once per stop time — millions of them, over
+                           # a few tens of thousands of distinct clock readings
 def parse_time(s):
     parts = s.split(":")
     return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2] if len(parts) > 2 else 0)
@@ -3876,7 +3901,80 @@ def settle(full, base, anc, line_ink):
     return full
 
 
+# One agency's — or one route's — shapes, fitted the way the full build fits
+# them and written as a `schedule.json`-shaped stub `debug_line.py --schedule`
+# can draw. A full build is around two minutes, and almost all of it is shapes
+# the change under test cannot reach; a refit is seconds. It runs the build's
+# own code rather than a copy, so the fast path cannot answer a question the
+# slow one wouldn't.
+REFIT = None            # (feed, route token or None, output path) while refitting
+SHAPE_CACHE = "scratch/shape-cache"
+
+# Which shapes a feed actually runs is settled by the timetable — a trip with
+# fewer than two timed stops contributes none — and the colour a feed is masked
+# on is refined off the first twenty shapes it does run (`refine_color`). So a
+# refit that guessed the set from trips.txt alone could mask on a different
+# colour and answer a question the build never asked. The set is cached
+# instead: every full build writes it, a refit reads it, and a cold or stale
+# one falls back to reading the stop times as usual.
+
+
+def used_shapes_stamp(feed):
+    """What a feed's set of live shape ids depends on: its trips, its stop
+    times, its calendar, and the week being built."""
+    h = hashlib.sha1(str(TARGET).encode())
+    for name in ("trips.txt", "stop_times.txt", "calendar.txt", "calendar_dates.txt"):
+        path = f"{GTFS}/{feed}/{name}"
+        st = os.stat(path) if os.path.exists(path) else None
+        h.update(f"{name}:{st.st_size if st else 0}:{st.st_mtime_ns if st else 0}"
+                 .encode())
+    return h.hexdigest()
+
+
+def cached_used_shapes(feed):
+    path = f"{SHAPE_CACHE}/{feed}.json"
+    try:
+        with open(path) as f:
+            blob = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return set(blob["shapes"]) if blob.get("stamp") == used_shapes_stamp(feed) else None
+
+
+def store_used_shapes(feed, used):
+    os.makedirs(SHAPE_CACHE, exist_ok=True)
+    with open(f"{SHAPE_CACHE}/{feed}.json", "w") as f:
+        json.dump({"stamp": used_shapes_stamp(feed), "shapes": sorted(used)}, f)
+
+
+def write_refit(path, feed, shapes_raw, route_by_shape, route_idx, routes,
+                systems, trip_counts):
+    """The refitted shapes as the keys `debug_line.py` reads, and no others: a
+    refit has no timetable, so the stop distances are empty and the call-out
+    runs are absent. Trip counts come from trips.txt, which is enough to keep
+    the variants in the order the full build lists them."""
+    keys = [k for k in shapes_raw if k[0] == feed]
+    shapes, patterns, trips = [], [], []
+    for i, key in enumerate(keys):
+        P = np.asarray(shapes_raw[key])
+        shapes.append([round(v, 1) for xy in P for v in xy])
+        patterns.append({"s": i, "d": []})
+        ridx = route_idx.get((feed, route_by_shape.get(key[1])))
+        if ridx is not None:
+            trips += [[ridx, i, 0]] * max(1, trip_counts.get(key[1], 1))
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w") as f:
+        json.dump({"date": TARGET.strftime("%Y%m%d"), "systems": systems,
+                   "routes": routes, "shapes": shapes, "patterns": patterns,
+                   "trips": trips, "tripDays": [0] * len(trips),
+                   "insets": [None] * len(shapes),
+                   "insetRect": list(INSET_RECT)}, f, separators=(",", ":"))
+    print(f"refit -> {path}  ({len(shapes)} shapes)\n"
+          f"  scripts/debug_line.py <line> --schedule {path} --no-stops")
+
+
 def main():
+    refit_feed, refit_route, refit_out = REFIT or (None, None, None)
     rail_trees = load_masks()
 
     routes, route_idx = [], {}      # route_idx[(feed, route_id)]
@@ -3897,6 +3995,8 @@ def main():
     stats = defaultdict(int)
 
     for feed in FEEDS:
+        if refit_feed and feed != refit_feed:
+            continue
         if not os.path.isdir(f"{GTFS}/{feed}"):
             print(f"{feed}: missing, skipped")
             continue
@@ -3990,19 +4090,45 @@ def main():
             trip_info[row["trip_id"]] = (row["route_id"], sid)
             trip_dow[row["trip_id"]] = dow_of[row["service_id"]]
 
+        def route_index(rid):
+            """This feed's route, registered on first sight."""
+            key = (feed, rid)
+            if key not in route_idx:
+                label, color, text, rail = rmeta[rid]
+                if feed not in system_idx:
+                    system_idx[feed] = len(systems)
+                    systems.append(FEED_NAMES.get(feed, feed))
+                route_idx[key] = len(routes)
+                routes.append({"n": label, "c": "#" + color, "t": "#" + text,
+                               "rail": rail, "sy": system_idx[feed]})
+            return route_idx[key]
+
+        # The busways are pinned by the station names printed beside them, and
+        # those come out of the timetable; every other fit reads nothing the
+        # stop times carry, so a refit can take the shape set from the cache
+        # and leave the largest file in the feed unread.
+        cached = None
+        if refit_feed and not (feed == "gtfs_bus" and (
+                refit_route is None or refit_route.split("-")[0] in ("901", "910"))):
+            cached = cached_used_shapes(feed)
+
         stop_times = defaultdict(list)
-        for ti, seq, at, dt, sid_ in read_cols(
-                feed, "stop_times.txt",
-                ("trip_id", "stop_sequence", "arrival_time", "departure_time", "stop_id")):
-            if ti in trip_info and at.strip():
-                # keep both times: a stop is a dwell [arrival, departure], and at
-                # the origin that dwell is a layover we must not draw (see below)
-                stop_times[ti].append((int(seq), parse_time(at),
-                                       parse_time(dt) if dt.strip() else parse_time(at),
-                                       sid_))
+        if cached is None:
+            for ti, seq, at, dt, sid_ in read_cols(
+                    feed, "stop_times.txt",
+                    ("trip_id", "stop_sequence", "arrival_time", "departure_time", "stop_id")):
+                if ti in trip_info and at.strip():
+                    # keep both times: a stop is a dwell [arrival, departure], and at
+                    # the origin that dwell is a layover we must not draw (see below)
+                    stop_times[ti].append((int(seq), parse_time(at),
+                                           parse_time(dt) if dt.strip() else parse_time(at),
+                                           sid_))
 
         n_before = len(trips_out)
-        used_shapes = set()
+        used_shapes = set(cached or ())
+        for rid, sid in trip_info.values() if cached else ():
+            if sid in used_shapes and rid in rmeta:
+                route_index(rid)
         for ti, sts in stop_times.items():
             if len(sts) < 2:
                 continue
@@ -4023,21 +4149,15 @@ def main():
             if len(times) > 1:
                 times[0] = min(sts[0][2], times[1])
             stop_seq = tuple(s for _, _, _, s in sts)
-            rkey = (feed, rid)
-            if rkey not in route_idx:
-                label, color, text, rail = rmeta[rid]
-                if feed not in system_idx:
-                    system_idx[feed] = len(systems)
-                    systems.append(FEED_NAMES.get(feed, feed))
-                route_idx[rkey] = len(routes)
-                routes.append({"n": label, "c": "#" + color, "t": "#" + text,
-                               "rail": rail, "sy": system_idx[feed]})
+            ridx = route_index(rid)
             pkey = (feed, sid, stop_seq)
             if pkey not in pattern_idx:
                 pattern_idx[pkey] = len(patterns)
                 patterns.append(pkey)
-            trips_out.append((route_idx[rkey], pkey, times, trip_dow[ti]))
+            trips_out.append((ridx, pkey, times, trip_dow[ti]))
             used_shapes.add(sid)
+        if cached is None:
+            store_used_shapes(feed, used_shapes)
 
         # load shapes used by this feed
         tmp = defaultdict(list)
@@ -4053,6 +4173,17 @@ def main():
             # belongs to. METROLINK_SHAPES already paired the two; trip_info
             # carries that pairing.
             route_by_shape = {s: r for r, s in trip_info.values()}
+        # Which routes a `--only feed:route` refit fits. The token is matched
+        # against the route id, the id without its variant suffix, and the
+        # designation the sheet prints, since a feed's own ids are opaque.
+        refit_ids = None
+        if refit_route is not None:
+            want = refit_route.lower()
+            refit_ids = {r for r in set(route_by_shape.values())
+                         if want in {r.lower(), r.split("-")[0].lower(),
+                                     rmeta[r][0].lower() if r in rmeta else ""}}
+            if not refit_ids:
+                sys.exit(f"--only {feed}:{refit_route}: no route of that name")
         warped = {}
         for sid, p in tmp.items():
             p.sort()
@@ -4133,8 +4264,15 @@ def main():
                 routes[ridx]["c"] = "#%02X%02X%02X" % tuple(sprite_cols[0])
                 routes[ridx]["t"] = "#FFFFFF"
 
-        snapped = anchored = 0
+        snapped = anchored = fitted = 0
         for sid, pts in warped.items():
+            # Only the fit is narrowed, never `warped`: the colour this feed is
+            # masked on is refined off the shapes it runs (`refine_color`), so
+            # a route fitted alone has to be fitted against the whole agency's
+            # reading of its own ink.
+            if refit_ids is not None and route_by_shape.get(sid) not in refit_ids:
+                continue
+            fitted += 1
             out_pts, anc, can_refit = None, [], False
             # The drawing this shape was snapped on: the PDF's strokes where it
             # has them, its agency's colour mask where it does not. It is the
@@ -4486,6 +4624,12 @@ def main():
         n_trips = len(trips_out) - n_before
         stats[feed] = n_trips
         picked = [d for d in days if d]
+        if refit_feed:
+            print(f"{feed}: {snapped}/{fitted} shapes snapped, {anchored} anchored")
+            write_refit(refit_out, feed, shapes_raw, route_by_shape, route_idx,
+                        routes, systems,
+                        Counter(s for _, s in trip_info.values()))
+            return
         print(f"{feed}: {n_trips} trips over {min(picked)}..{max(picked)} "
               f"({snapped}/{len(warped)} shapes snapped, {anchored} anchored)")
 
@@ -4653,4 +4797,19 @@ def main():
 
 
 if __name__ == "__main__":
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--only", metavar="FEED[:ROUTE]",
+                    help="fit one feed, or one of its routes, and write the "
+                         "shapes to a debug_line stub instead of a full build")
+    ap.add_argument("-o", "--out", metavar="PATH",
+                    help="where --only writes (default scratch/refit_<feed>.json)")
+    a = ap.parse_args()
+    if a.only:
+        _feed, _, _route = a.only.partition(":")
+        if _feed not in FEEDS:
+            sys.exit(f"--only: no feed {_feed!r}; one of {', '.join(FEEDS)}")
+        REFIT = (_feed, _route or None, a.out or f"scratch/refit_{_feed}.json")
+    elif a.out:
+        sys.exit("--out goes with --only; a full build writes schedule.json")
     main()
