@@ -88,7 +88,7 @@ pipeline order is `georef.py` → `georef_inset.py` → `build_data.py`;
 |---|---|
 | `scripts/build_data.py` | Builds `schedule.json`: picks a service date per feed, warps and snaps every shape, projects stops onto them, emits routes / shapes / patterns / trips plus the inset geometry |
 | `scripts/georef.py` | Fits the main lat/lon→pixel transform; owns the map constants the pipeline shares (drawn rail colors, mask tolerances, excluded regions) |
-| `scripts/georef_inset.py` | The same fit for the Downtown call-out panel, plus that panel's geometry |
+| `scripts/georef_inset.py` | Fits the Downtown call-out's own transform, plus that panel's geometry. The call-out redraws the rotated downtown grid square, so this is a separable fit in the grid's two axes rather than a polynomial in lon/lat |
 | `scripts/make_tiles.py` | Rasterizes the background tile pyramid from the map PDF. Only rerun if the PDF changes |
 | `index.html` | Markup, styles, and a bootstrapper. Asks `version.json` which build is live and loads the client from that URL |
 | `app.js` | The client: loader, canvas renderer, controls. Fetched at `app.js?v=<sha>` |
@@ -123,6 +123,7 @@ on :8741.
 python3 -m venv .venv && .venv/bin/pip install numpy scipy pillow pymupdf
 cd data/gtfs && for z in *.zip; do unzip -o "$z" -d "${z%.zip}"; done && cd ../..
 .venv/bin/python scripts/georef.py      # refit the transform (optional)
+.venv/bin/python scripts/georef_inset.py   # ... and the Downtown call-out's
 .venv/bin/python scripts/build_data.py  # regenerate schedule.json
 .venv/bin/python scripts/make_tiles.py  # only if the map PDF changes
 ```
