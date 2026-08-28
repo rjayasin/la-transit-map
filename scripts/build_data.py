@@ -2079,7 +2079,10 @@ def arm_gap(P, i, j):
     if length <= 0:
         return 0.0
     x, y = run[:, 0], run[:, 1]
-    return abs(np.sum(x * np.roll(y, -1) - np.roll(x, -1) * y)) / length
+    xr, yr = np.empty_like(x), np.empty_like(y)      # np.roll(-1), without the
+    xr[:-1], xr[-1] = x[1:], x[0]                    # gather and the concatenate
+    yr[:-1], yr[-1] = y[1:], y[0]
+    return abs(np.sum(x * yr - xr * y)) / length
 
 
 def strands_badge(before, after, badges):
@@ -2108,16 +2111,30 @@ def folds(full, base):
     over itself wins, since it is the one with more to be rid of."""
     n = len(full)
     cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(full, axis=0).T))])
+    lo = np.searchsorted(cum, cum + FOLD_MIN, side="left")
+    hi = np.minimum(np.searchsorted(cum, cum + FOLD_MAX, side="right") - 1, n - 1)
+    # Which points come back within FOLD_GAP of which, asked once of a tree
+    # rather than scanned window by window: the pairs are a handful per point,
+    # and finding them by hand cost more than everything else here. The tree
+    # only narrows the candidates — each is still measured with the same
+    # np.hypot on the same two points, so the answer is the scan's, and the
+    # slack on the radius keeps a pair sitting exactly on FOLD_GAP from turning
+    # on which of the two computes the distance.
+    pairs = cKDTree(full).query_pairs(FOLD_GAP * (1 + 1e-9), output_type="ndarray")
+    far = np.full(n, -1)
+    if len(pairs):
+        pi, pj = pairs[:, 0], pairs[:, 1]
+        keep = ((np.hypot(*(full[pj] - full[pi]).T) <= FOLD_GAP)
+                & (pj >= lo[pi]) & (pj <= hi[pi]))
+        pi, pj = pi[keep], pj[keep]
+        if len(pi):
+            order = np.lexsort((pj, pi))
+            pi, pj = pi[order], pj[order]
+            last = np.append(pi[1:] != pi[:-1], True)   # each point's furthest partner
+            far[pi[last]] = pj[last]
     cands = []
-    for i in range(n):
-        lo = int(np.searchsorted(cum, cum[i] + FOLD_MIN, side="left"))
-        hi = min(int(np.searchsorted(cum, cum[i] + FOLD_MAX, side="right")) - 1, n - 1)
-        if lo > hi:
-            continue
-        back = np.nonzero(np.hypot(*(full[lo:hi + 1] - full[i]).T) <= FOLD_GAP)[0]
-        if not len(back):
-            continue
-        j = lo + int(back[-1])
+    for i in np.nonzero(far >= 0)[0]:
+        i, j = int(i), int(far[i])
         if not FOLD_OUT <= np.hypot(*(full[i:j + 1] - full[i]).T).max() <= FOLD_REACH:
             continue
         if arm_gap(full, i, j) > FOLD_WIDTH or arm_gap(base, i, j) <= FOLD_WARP:
@@ -2509,14 +2526,23 @@ def line_headings(P, tree, hood=BRIDGE_HOOD):
     along it, so the largest eigenvector of their covariance is the direction
     it runs. Sign is arbitrary and every caller treats it that way."""
     out = np.zeros((len(P), 2))
-    for i, nb in enumerate(tree.query_ball_point(P, hood)):
+    data = np.asarray(tree.data)
+    rows, mats = [], []
+    for i, nb in enumerate(tree.query_ball_point(P, hood, workers=-1)):
         if len(nb) < 4:
             continue
-        Q = np.asarray(tree.data)[nb]
+        Q = data[nb]
         Q = Q - Q.mean(0)
-        w, v = np.linalg.eigh(Q.T @ Q)
-        if w[1] > 3 * max(w[0], 1e-9):        # a line, not a blob or a corner
-            out[i] = v[:, 1]
+        rows.append(i)
+        mats.append(Q.T @ Q)
+    if not rows:
+        return out
+    # One call for every neighbourhood rather than one per point: each
+    # covariance is still built from its own pixels the same way, and eigh on a
+    # stack is the same 2x2 decomposition of each of them.
+    w, v = np.linalg.eigh(np.stack(mats))
+    line = w[:, 1] > 3 * np.maximum(w[:, 0], 1e-9)   # a line, not a blob or a corner
+    out[np.array(rows)[line]] = v[line][:, :, 1]
     return out
 
 
@@ -2626,7 +2652,11 @@ def mask_path(a, b, tree, step=TRACE_STEP, pad=TRACE_PAD, reach=TRACE_REACH,
     nx, ny = (int(np.ceil((hi[k] - lo[k]) / step)) + 1 for k in (0, 1))
     C = np.stack(np.meshgrid(lo[0] + step * np.arange(nx),
                              lo[1] + step * np.arange(ny), indexing="ij"), -1)
-    free = (tree.query(C.reshape(-1, 2))[0] < reach).reshape(nx, ny)
+    # Only whether each cell is within `reach` of the drawing, never how far
+    # past it — so the query is bounded, which lets the tree stop descending on
+    # the cells over blank page, and spread over the cores.
+    free = (tree.query(C.reshape(-1, 2), distance_upper_bound=reach,
+                       workers=-1)[0] < reach).reshape(nx, ny)
     ia, ib = (int(np.abs(C - p).sum(2).argmin()) for p in (a, b))
     free.flat[[ia, ib]] = True         # the badges themselves are on the line
     idx = np.arange(nx * ny).reshape(nx, ny)
@@ -3023,7 +3053,12 @@ def anchor_slide(P, A, gate):
     for pitch in ANCHOR_PITCH:
         g = np.arange(-span, span + pitch / 2, pitch)
         T = t + np.stack(np.meshgrid(g, g, indexing="ij"), -1).reshape(-1, 2)
-        d = kd.query((A[:, None, :] - T[None, :, :]).reshape(-1, 2))[0]
+        # Everything past the gate scores the gate whatever its distance, so
+        # the search never has to find it: bounding the query returns inf for
+        # exactly those and lets the tree stop looking, which is most of the
+        # coarse grid's thousand offsets.
+        d = kd.query((A[:, None, :] - T[None, :, :]).reshape(-1, 2),
+                     distance_upper_bound=gate, workers=-1)[0]
         r = np.minimum(d.reshape(len(A), len(T)), gate).sum(0)
         k = int((r + ANCHOR_DRAG * np.hypot(*T.T) * len(A)).argmin())
         t, resid = T[k], r[k]
@@ -3886,8 +3921,17 @@ def settle(full, base, anc, line_ink):
     best = spike0 + DETOUR_WEIGHT * detour_penalty(as_snapped, base, anc, line_ink)
     unfolded = unfold(as_snapped, base, anc)
     undet = undetour(as_snapped, base, anc, line_ink)
-    for cand in (despike(as_snapped), unfolded, despike(unfolded),
-                 undet, despike(undet), unfold(undet, base, anc)):
+    # Both hand back the shape they were given where there was nothing to take
+    # out, and the ballot then asks for the same cleanup of the same values two
+    # or three times over. A candidate equal to the snapper's own shape loses
+    # below in any case, and one equal to an earlier candidate cannot beat it
+    # on a strict improvement, so neither is built.
+    cands = [despike(as_snapped)]
+    if not np.array_equal(unfolded, as_snapped):
+        cands += [unfolded, despike(unfolded)]
+    if not np.array_equal(undet, as_snapped):
+        cands += [undet, despike(undet), unfold(undet, base, anc)]
+    for cand in cands:
         if np.array_equal(cand, as_snapped):
             continue
         if arc_length(cand) < floor:

@@ -164,7 +164,7 @@ minutes and almost all of it is shapes the change under test cannot reach.
 .venv/bin/python scripts/debug_line.py 9 --schedule scratch/refit_bigbluebus.json --no-stops
 ```
 
-Two seconds for a route, five for a whole agency, against 107 for the build,
+Two seconds for a route, five for a whole agency, against 72 for the build,
 and the geometry is identical — it is the build's own code with the fit loop
 narrowed. So a pin position is a loop, not a rebuild. What it does *not* give
 you is `schedule.json`: it emits no timetable and no call-out runs, so
