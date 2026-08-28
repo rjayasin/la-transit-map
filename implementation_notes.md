@@ -137,6 +137,19 @@ helped. A variant that *looks* right is not a substitute — sitting on the
 agency's ink is not sitting on this route's line, and a sibling's corridor a
 block over scores clean against every mask measure there is.
 
+`corridor_check.py` is that walk and that scoring in one command:
+
+```sh
+.venv/bin/python scripts/corridor_check.py bigbluebus 9 --from 697,2065.7 --to 775.3,2166.4
+```
+
+It prints the traced corridor — paste-ready for a pin or an override — and then
+each shape's distance to it and how much of it the shape covers, over the
+stretch of the shape that runs it. It takes `--schedule`, so a `--only` refit
+can be scored without a build. Read its walked-against-straight line first: a
+walk that went round something is scoring everything below it against the
+detour.
+
 **Find the variant against that trace**, not against the other variants.
 Comparing variants with each other has two traps: stored shapes keep only the
 points `simplify` left, so vertex-to-vertex distance reports the gap to the
@@ -239,6 +252,8 @@ diff two runs to see exactly what a change did. Then:
 .venv/bin/python scripts/path_check.py --inset   # ... in the Downtown call-out
 .venv/bin/python scripts/speed_check.py    # implausible speeds
 .venv/bin/python scripts/speed_check.py --slow   # ... and vehicles held still
+.venv/bin/python scripts/corridor_check.py <feed> <n> --from X,Y --to X,Y
+                                           # against one traced stretch of line
 .venv/bin/python scripts/debug_line.py <n> # look at it
 ```
 
