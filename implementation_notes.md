@@ -123,29 +123,78 @@ Snapping strategy per agency is set by the `STREET_SNAP` / `INK_SNAP` /
 A line reported off its drawn ink is usually one *variant* of a route rather
 than the route, and the checks are the wrong end to start from — `drift_check`
 scores by colour, and a route that has wandered onto a sibling of the same
-agency scores clean. Work from the drawing instead.
+agency scores clean. Work from the drawing instead, in this order: trace the
+corridor, stand up a harness, then search for the table entry. The first two
+are what make the third cheap, and skipping them is what makes this slow.
 
-**Find the variant.** Every variant of a route normally comes from one warp
-corridor, so measure each stored shape against the drawn line over a window
-round the divergence — `mask_tree` on the agency's colour, or a polyline traced
-off the artwork — and the odd one out is the fault. Comparing variants against
-each other instead has two traps: stored shapes keep only the points
-`simplify` left, so vertex-to-vertex distance reports the gap to the nearest
-*corner* and can be several times the real one, and where a route passes
-through an area twice the nearest point on the other variant can be on its
-other leg, which hides the divergence entirely.
+**Trace the corridor first, and trust nothing else as ground truth.** Two
+points known to be on the drawn line — a badge `route_anchors` returned, a
+drawn terminus — and `mask_path(a, b, tree)` walks the centreline between them;
+a walked length close to the straight distance says it stayed on one corridor
+rather than going round a block. That polyline is the yardstick for every
+question that follows: which variant is wrong, and whether a candidate fix
+helped. A variant that *looks* right is not a substitute — sitting on the
+agency's ink is not sitting on this route's line, and a sibling's corridor a
+block over scores clean against every mask measure there is.
+
+**Find the variant against that trace**, not against the other variants.
+Comparing variants with each other has two traps: stored shapes keep only the
+points `simplify` left, so vertex-to-vertex distance reports the gap to the
+nearest *corner* and can be several times the real one, and where a route
+passes through an area twice the nearest point on the other variant can be on
+its other leg, which hides the divergence entirely. `debug_line.py` draws the
+variants in listed order, so the last one drawn hides the ones under it — read
+the printed legend, or pass `--shape`, before believing a colour.
 
 **Read length as well as distance.** A path cutting the corner off a tight loop
 can sit a few px from the corridor at its worst and still be obviously wrong on
 screen. How much arc the shape spends inside the window is the second measure,
 and a shortcut shows up there as ground it never covers — which is also what
-the stops ride on, so it is the half that reaches the animation.
+the stops ride on, so it is the half that reaches the animation. Scoring a
+candidate as (distance to the trace, fraction of the trace covered) catches
+both at once.
 
-**Then pick the table**, by the pin test above. Placing a pin: take its
-coordinates off a variant that already sits on the line, or scan `mask_tree`
-across the corridor for the centreline — the drawn line is a couple of px wide
-and the warp can be tens of px off it, so a coordinate guessed from the warp
-lands on the wrong street.
+**Stand up a one-agency harness before trying anything.** A full build is
+around two minutes; one agency's snap is seconds, and it reproduces what ships
+to a rounding. Load the feed's `shapes.txt` through `to_px`, refine the colour
+and build `mask_tree` as `main` does, then per shape: `trim_terminus` on the
+pins, `route_anchors` + pins, `branch_anchors`, `snap_recording`, `settle`, and
+the alignment ballot (`resnap_without_alignment`, kept unless it beats the
+aligned fit on `stored_penalty` or by 0.5 px of `ink_offset`). Check it against
+`schedule.json` once — the stored shapes should match to a rounding — and after
+that a pin position is a loop, not a rebuild.
+
+**Two signatures worth recognising**, each of which names its own fix:
+
+- *A foreign agency's badge chip printed over this agency's line.* It knocks a
+  gap in the mask that no bridge will cross, because the block closes round it
+  and `mask_path` prefers the drawn way round; `align_walk` then believes the
+  block and the anchors land on it. The tell is a walk much longer than the
+  straight distance between the two badges, with a run of mask distances of
+  5–10 px under a chip. A pin *inside* the gap splits the badge-to-badge walk
+  so that the leg holding the hole is shorter than `TRACE_SPAN[0]` — below that
+  no walk is attempted at all and the straight interpolation, which is right
+  here, stands.
+- *One direction of a route right and the other wrong on the same badges.* The
+  last badge before the divergence is attached to the wrong point of the warp:
+  near a corner the distance to a badge tens of px off the corridor has a flat
+  minimum, the two directions pick different points in it, and the
+  displacements come out opposite. Beyond that last anchor `np.interp` holds it
+  flat, so the whole unanchored tail inherits a correction pointing the wrong
+  way. The tell is two adjacent badges whose fitted displacements disagree by
+  more than a street. The fix is a pin in the tail.
+
+**Placing a pin is a search with two constraints, both answerable before any
+rebuild.** It has to be on the drawn line — take the coordinates off the trace,
+never off the warp, which can be tens of px away — and it must not read as a
+terminus. Walk candidate positions along the trace and print, for every shape
+of the route, the distance to the nearest warp point and the arc from each end:
+a pin within `TERMINUS_REACH` of the warp and within `TERMINUS_TAIL` of an end
+cuts the shape back to itself. Pick from the rows that trim nothing. The one
+deliberate exception is a pin *at* a drawn terminus, where the trim is the
+thing you want — and where a leg is short enough that no other position on it
+is trim-free, that pin plus one further up the corridor is usually the whole
+fix.
 
 **Placing an override.** `box` is matched against the warp, and the run
 replaced runs from the *first* to the *last* warp point inside it: an excursion
@@ -187,7 +236,12 @@ the rest and their trip counts are a week's, not a day's.
 
 Count the shapes that changed, too. A fix aimed at one route should touch that
 route's shapes and no others, and a table entry that reaches further than it
-was meant to shows up here before it shows up anywhere else.
+was meant to shows up here before it shows up anywhere else. Diff against a
+rebuild of the *unchanged* tree rather than against the committed
+`schedule.json`: the build is deterministic for one set of libraries, not
+across them, and a numpy or scipy upgrade moves a hundred shapes on its own.
+Two builds — one at HEAD, one with the change — cost four minutes and are the
+only way to read that count.
 
 **`drift_check` moves its own yardstick.** It refines the mask color off the
 *stored* shapes, so a change that moves shapes onto their lines also changes the
