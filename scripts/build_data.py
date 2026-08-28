@@ -75,7 +75,7 @@ METROLINK_SHAPES = {
 with open("data/transform.json") as f:
     _TRJ = json.load(f)
 TR = _TRJ["poly2"]
-TR_INSET = _TRJ.get("inset", {}).get("poly2")
+TR_INSET = _TRJ.get("inset", {}).get("grid")
 if "geo" in _TRJ.get("inset", {}):
     INSET_GEO = tuple(_TRJ["inset"]["geo"])   # fitted frame coverage wins
 
@@ -86,10 +86,28 @@ def to_px(lon, lat):
     return B @ TR["cx"], B @ TR["cy"]
 
 
+def _grid_axis(v, table):
+    """One of the call-out's two axes: ground coordinate to drawn pixel,
+    through the streets the fit named, straight on past either end."""
+    c = np.array([r[0] for r in table]), np.array([r[1] for r in table])
+    out = np.interp(v, c[0], c[1])
+    lo, hi = v < c[0][0], v > c[0][-1]
+    if lo.any():
+        out[lo] = c[1][0] + (v[lo] - c[0][0]) * (c[1][1] - c[1][0]) / (c[0][1] - c[0][0])
+    if hi.any():
+        out[hi] = c[1][-1] + (v[hi] - c[0][-1]) * (c[1][-1] - c[1][-2]) / (c[0][-1] - c[0][-2])
+    return out
+
+
 def to_inset_px(lon, lat):
-    L, T = lon - TR_INSET["lon0"], lat - TR_INSET["lat0"]
-    B = np.c_[np.ones_like(L), L, T, L * L, L * T, T * T]
-    return B @ TR_INSET["cx"], B @ TR_INSET["cy"]
+    """The call-out is a rectified drawing of a rotated grid, so the transform
+    is separable in that grid's own axes rather than a polynomial in lon/lat —
+    see georef_inset."""
+    e = np.asarray(TR_INSET["along"])
+    g = np.c_[(np.asarray(lon) - TR_INSET["lon0"]) * TR_INSET["lon_scale"],
+              np.asarray(lat) - TR_INSET["lat0"]]
+    return (_grid_axis(g @ e, TR_INSET["x"]),
+            _grid_axis(g @ np.array([-e[1], e[0]]), TR_INSET["y"]))
 
 
 def read_csv(feed, name):
@@ -2937,22 +2955,6 @@ def crossed_badges(A, cum, j):
                  (np.hypot(*np.diff(pos, axis=0).T) > CROSSED_APART)).any())
 
 
-def uncrossed_badges(A, cum, j, P):
-    """Which badge hits survive where a slide has left two badges a street
-    apart still claiming the same stretch of shape. A slide needs a leg for
-    each badge to land on, and a shape drawn as one of a pair of one-way lines
-    has one — so the nearest badge takes the stretch and the rest are left to
-    the shape drawn on the other line."""
-    keep = np.ones(len(j), dtype=bool)
-    for a in np.argsort(np.hypot(*(A - P[j]).T)):   # nearest claims the stretch
-        if not keep[a]:
-            continue
-        keep &= ~(keep & (np.arange(len(j)) != a)
-                  & (np.abs(cum[j] - cum[j[a]]) < CROSSED_SPAN)
-                  & (np.hypot(*(A - A[a]).T) > CROSSED_APART))
-    return keep
-
-
 def anchor_slide(P, A, gate):
     """The translation of the whole shape that best explains its badges.
 
@@ -3151,11 +3153,6 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
                 hit = badge_passes(P, cum, S, anchor_gate)
                 ai = np.array([h[0] for h in hit], dtype=int)
                 j = np.array([h[1] for h in hit], dtype=int)
-                # Call-out only: on the schematic a one-way pair is one line
-                # carrying both directions' badges, which is the slide's case.
-                if region == "inset" and len(ai):
-                    k = uncrossed_badges(A[ai], cum, j, P)
-                    ai, j = ai[k], j[k]
             if not len(ai):
                 break
             order = np.argsort(cum[j], kind="stable")
@@ -3669,18 +3666,21 @@ def outside_inset(ix, iy, ll):
 # The cap ladder and smoothing window the call-out snaps on. A mask of one
 # route's colour can reach as far there as rail's does on the main map, and
 # needs to: the panel magnifies downtown about fourfold, so the same warp error
-# is four times the pixels, and a line can enter the frame the better part of a
-# hundred px off its own ribbon. A mask holding every bus line in the panel at
-# once gets the short reach it always had, since a longer one would only find a
-# neighbour sooner. Both take the shorter window — it is the magnified grid's
+# is four times the pixels, and the corner by Union Station is still tens of px
+# out. A mask holding every bus line in the panel at once gets the short reach
+# it always had, since a longer one would only find a neighbour sooner. Both take the shorter window — it is the magnified grid's
 # right-angle turns that want it, not the livery.
 INSET_CAPS = (60.0, 30.0, 14.0)
 INSET_SOLE_CAPS = (120.0, 60.0, 30.0, 14.0)
 INSET_WIN = 15
 
-INSET_UNANCHORED = {("gtfs_bus", "460")}
 
 INSET_COLORS = {"ladot": [(107, 103, 61), (128, 126, 85)]}
+
+# Metro's bus orange as the call-out prints it. ORANGE is that colour after
+# map.png's reduction has blended it with the page, which is 30 away and what
+# every mask read off the raster has to match; the pyramid has the ink itself.
+INSET_ORANGE = (245, 132, 70)
 
 
 def inset_runs(ll, main_dist, snap_tree=None, anchors=None, sole=False):
@@ -3743,10 +3743,9 @@ def inset_runs(ll, main_dist, snap_tree=None, anchors=None, sole=False):
         d = main_dist(list(zip(mx, my)))
         pts = np.c_[ix[a:b+1], iy[a:b+1]]
         if snap_tree is not None:
-            # same coherent snap + badge anchors as the main map, but scaled
-            # for the magnified inset: a short smoothing window keeps the
-            # grid's right-angle turns square, and a tight anchor gate stops
-            # chips on the other street of a one-way couplet from matching
+            # the same coherent snap as the main map, scaled for the magnified
+            # inset: a short smoothing window keeps the grid's right-angle
+            # turns square
             sc = snap_coherent([tuple(p) for p in pts], snap_tree,
                                caps=INSET_SOLE_CAPS if sole else INSET_CAPS,
                                win=INSET_WIN, anchors=anchors, anchor_gate=75.0,
@@ -4484,43 +4483,6 @@ def main():
     # DTLA inset: per-shape downtown runs in inset px, computed on demand
     shape_runs = {}                 # si -> runs or None
 
-    # The shapes competing for one set of badges, for branch_anchors in the
-    # space the panel is drawn in. In-frame stretches only: the poly2 folds
-    # distant geography back inside the rect, and a run out to the coast would
-    # line up under a downtown badge.
-    inset_kin = defaultdict(list)
-    for k, (_c, _t, _toks) in shape_isnap.items():
-        if k in shape_ll:
-            inset_kin[(k[0], frozenset(_toks))].append(k)
-    _ikd, _islide = {}, {}
-
-    def inset_kd(key):
-        if key not in _ikd:
-            ll = np.asarray(shape_ll[key], dtype=float)
-            ix, iy = to_inset_px(ll[:, 0], ll[:, 1])
-            keep = (outside_inset(ix, iy, ll) <= INSET_SLACK)
-            _ikd[key] = (cKDTree(np.asarray(densify(list(zip(ix[keep], iy[keep])), 4.0),
-                                            dtype=float))
-                         if keep.sum() > 1 else None)
-        return _ikd[key]
-
-    def inset_slide(keys, A):
-        k = tuple(keys)
-        if k not in _islide:
-            span = np.hypot(*(A.max(0) - A.min(0))) if len(A) else 0.0
-            _islide[k] = (anchor_slide(np.vstack([inset_kd(s).data for s in keys]),
-                                       A, ANCHOR_GATE)
-                          if span <= SLIDE_SPAN else np.zeros(2))
-        return _islide[k]
-
-    def inset_branch(anc, key, toks):
-        """`anc` less the badges another variant of the route explains better."""
-        kin = [k for k in inset_kin.get((key[0], frozenset(toks)), ())
-               if inset_kd(k) is not None]
-        if not anc or key not in kin or len(kin) < 2:
-            return anc
-        return branch_anchors(anc, key, kin, inset_kd, inset_slide)
-
     def runs_for(key, si):
         if si not in shape_runs:
             ll = shape_ll.get(key)
@@ -4528,21 +4490,26 @@ def main():
             if ll is not None and TR_INSET is not None:
                 cols, tol, toks = shape_isnap.get(key, (None, 0, set()))
                 if key[0] == "gtfs_bus" and cols:
-                    cols = [ORANGE]   # inset draws ALL Metro bus lines orange
+                    # one orange for every Metro bus line down there. The Rapid
+                    # does keep a red ribbon of its own, but drawn beside the
+                    # orange on the same street rather than instead of it, and
+                    # the orange is the denser thing to snap on.
+                    cols = [INSET_ORANGE]
                 elif cols and key[0] in INSET_COLORS:
                     cols = INSET_COLORS[key[0]]
-                # Rail is the one network whose printed colors are known
-                # exactly rather than sampled off the artwork, so it is the one
-                # that can be masked on the pyramid — see inset_tile_tree.
-                # Everything else is masked on the reading it was refined from.
-                tree = (inset_tile_tree(cols) if cols and key[0] == "gtfs_rail"
+                # Metro's networks are masked on the pyramid, where the panel
+                # prints its colours faithfully and its badge chips come away
+                # from the lines — see inset_tile_tree. Every other agency is
+                # masked on the reading its colour was refined from.
+                tree = (inset_tile_tree(cols)
+                        if cols and key[0] in ("gtfs_rail", "gtfs_bus")
                         else mask_tree(cols, tol, region="inset") if cols else None)
-                gate = None if key[0] in ("gtfs_bus", "gtfs_rail") else cols
-                anc = ([] if (key[0], shape_route.get(key)) in INSET_UNANCHORED
-                       else inset_branch(
-                           route_anchors(toks, tree, region="inset", colors=gate),
-                           key, toks))
-                runs = inset_runs(ll, lambda px: main_dist(key, si, px), tree, anc,
+                # No badge anchors down here. They exist to pull a shape onto
+                # its street where the warp is out by more than the streets are
+                # apart, and the panel's is not: a chip is printed *beside* its
+                # line, so anchoring on one now drags the line off the ink it
+                # was already sitting on.
+                runs = inset_runs(ll, lambda px: main_dist(key, si, px), tree,
                                   sole=key[0] == "gtfs_rail")
             shape_runs[si] = runs
         return shape_runs[si]

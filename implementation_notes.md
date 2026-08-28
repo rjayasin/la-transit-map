@@ -163,6 +163,12 @@ regression.
 
 ## Gotchas
 
+- **The panel's Metro masks come off the pyramid.** `INSET_ORANGE` is the ink
+  itself; `ORANGE` is that colour after map.png's reduction has blended it with
+  the page, 30 away. The pyramid also lets `inset_tile_tree` cut the badge
+  chips out, which matters more down there than anywhere: a chip is a solid
+  disc of the line's own colour a few tens of px off the line, and on the
+  raster it is fused to it.
 - **Mask cache keys include function source.** `code_stamp` hashes
   `inspect.getsource` of the mask-building functions, so editing them — comments
   included — invalidates `scratch/mask-cache/` and forces one cold rebuild
@@ -214,19 +220,21 @@ regression.
   slide and the badges are read where they lie.
 - **The Downtown call-out has nothing drawn under it.** Shapes crossing it keep
   the warp; don't interpolate a snap correction across the panel.
-- **The call-out draws each direction of a route separately.** Where a route
-  runs a one-way pair the panel draws two lines a block apart and prints a
-  badge column beside each, so a shape — which is one direction — must not take
-  both: `uncrossed_badges` gives a contested stretch to the badge nearest it,
-  and `branch_anchors`, run again over the variants' inset-px warps, hands the
-  rest to the variant that runs their street. With both columns in hand the fit
-  weaves the line between the two, once per pair down the corridor. Out on the
-  schematic the pair is one line carrying both directions' badges, which is
-  `anchor_slide`'s case and not this one. Both rules keep the constants they
-  were given for the main map: the panel magnifies downtown severalfold but the
-  sheet draws its lines at a legible width either way, so parallel drawn lines
-  sit ~30-40 px apart in both and `CROSSED_APART` and `BRANCH_FLOOR` mean the
-  same thing there.
+- **The call-out has a transform of its own shape.** It redraws the rotated
+  downtown grid square and spaces the streets to suit the page, which no
+  polynomial in lon/lat fits: `georef_inset` calibrates one monotone table per
+  grid axis instead, on the streets the sheet names, and `to_inset_px` reads
+  them. Every named street therefore lands on its own ink, and the model says
+  nothing about the corner by Union Station, where the panel gives the square
+  grid up — that corner is extrapolated off the last breakpoint and is the one
+  part of the panel the warp is still tens of px out in.
+- **The call-out does not anchor on badges.** Anchors pull a shape onto its
+  street where the warp is out by more than the streets are apart, and down
+  there it isn't: a chip is printed *beside* its line, so anchoring on one now
+  drags the line off ink it was already sitting on. It cost three quarters of
+  the panel's `path_check --inset` score to stop. If the warp there ever gets
+  worse again this is the first thing to reconsider — and the reason to keep an
+  eye on the panel's own residual, which `georef_inset` prints.
 - **A corridor walk far longer than the shape is usually going round a hole.**
   The sheet knocks its own line out for a station marker or a chip, and
   `mask_path` bridges a hole only where the mask connects nothing at all — so
