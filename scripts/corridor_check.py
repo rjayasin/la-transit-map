@@ -39,9 +39,9 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 sys.path.insert(0, "scripts")
-from build_data import (FEEDS, FEED_NAMES, LEGEND_SEEDS, densify, mask_tree,  # noqa: E402
-                        mask_path, read_cols, read_csv, refine_color,
-                        stroke_color, to_px)
+from build_data import (FEEDS, FEED_NAMES, INK_SNAP, LEGEND_INK, LEGEND_SEEDS,  # noqa: E402
+                        densify, ink_tree, mask_tree, mask_path, read_cols,
+                        read_csv, refine_color, stroke_color, to_px)
 
 SCHEDULE = "schedule.json"
 REACH = 150.0   # px a shape may pass from an end of the corridor and still be
@@ -52,7 +52,16 @@ STEP = 1.0      # px; sampling pitch for both curves
 
 
 def agency_tree(feed):
-    """The feed's colour mask, refined the way the build refines it."""
+    """What to walk the corridor on: the feed's strokes where the build snaps
+    on them, and its colour mask otherwise, refined the way the build refines
+    it. drift_check chooses between the two the same way, and for the same
+    reason — where an agency's line is thin its mask can be more lettering than
+    line, and a walk then follows the words across the block instead of the
+    corridor, which is the one thing this tool must not do."""
+    if feed in INK_SNAP and feed in LEGEND_INK:
+        tree = ink_tree([LEGEND_INK[feed]])
+        if tree is not None:
+            return tree
     used = {row["shape_id"] for row in read_csv(feed, "trips.txt")}
     tmp = {}
     for sid, seq, lon, lat in read_cols(

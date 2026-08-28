@@ -1008,8 +1008,8 @@ LEGEND_INK = {
 #
 # The PDF has the same lines as vectors, thin and thick alike, complete under
 # every label painted over them and with no chips or lettering in them at all.
-# drift_check measures this agency on those strokes for the same reason.
-INK_SNAP = {"montebello"}
+# drift_check measures these agencies on those strokes for the same reason.
+INK_SNAP = {"montebello", "bigbluebus"}
 
 
 def refine_color(shape_pts, seed, r2=55 * 55, need=250):
