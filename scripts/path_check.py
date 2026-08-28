@@ -18,11 +18,13 @@ and scores nothing; only the hairpins and the sewing do.
 
 Points inside the Downtown call-out are dropped before scoring: the panel
 ghosts every route for ~200 px and the warp is all there is there, so a zigzag
-inside it is expected and not the snapper's fault.
+inside it is expected and not the snapper's fault. The panel redraws those
+routes on its own artwork, and --inset scores that drawing instead.
 
     scripts/path_check.py                 # rank every route, worst first
     scripts/path_check.py --top 40        # only the 40 most suspect
     scripts/path_check.py --system Metro  # one system
+    scripts/path_check.py --inset         # the Downtown call-out's own paths
     scripts/path_check.py 690             # detail for one route: every kink
 
 The `worst` column is a map-pixel location; feed it to debug_line.py (or crop
@@ -185,6 +187,8 @@ def main():
     ap.add_argument("--top", type=int, default=30, help="rows to print (default 30)")
     ap.add_argument("--min-trips", type=int, default=1,
                     help="ignore routes with fewer than this many daily trips")
+    ap.add_argument("--inset", action="store_true",
+                    help="score the Downtown panel's paths instead")
     a = ap.parse_args()
 
     d = load()
@@ -202,13 +206,18 @@ def main():
         if trips < a.min_trips:
             continue
         best = (0.0, 0, 0.0, None, [], None)
-        total_kinks = 0
+        total_kinks, drawn = 0, 0
         for si, ntr in shapes.items():
-            sc, kinks, worst, worst_xy, detail = score_shape(
-                np.array(d["shapes"][si], dtype=float).reshape(-1, 2))
-            total_kinks += kinks
-            if sc > best[0]:
-                best = (sc, kinks, worst, worst_xy, detail, si)
+            polys = (d["insets"][si] or []) if a.inset else [d["shapes"][si]]
+            drawn += len(polys)
+            for pts in polys:
+                sc, kinks, worst, worst_xy, detail = score_shape(
+                    np.array(pts, dtype=float).reshape(-1, 2))
+                total_kinks += kinks
+                if sc > best[0]:
+                    best = (sc, kinks, worst, worst_xy, detail, si)
+        if not drawn:
+            continue                  # the panel doesn't reach this route
         rows.append({"n": route["n"], "sy": system, "trips": trips,
                      "score": best[0], "cusp": best[2], "kinks": total_kinks,
                      "worst": best[3], "shape": best[5], "detail": best[4]})
