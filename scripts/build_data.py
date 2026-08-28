@@ -2552,7 +2552,8 @@ def bridges(C, free, tree, step, gap=BRIDGE_MAX):
     return (np.asarray(rows, int), np.asarray(cols, int), np.asarray(w, float))
 
 
-def mask_path(a, b, tree, step=TRACE_STEP, pad=TRACE_PAD, reach=TRACE_REACH):
+def mask_path(a, b, tree, step=TRACE_STEP, pad=TRACE_PAD, reach=TRACE_REACH,
+              over_holes=False):
     """(polyline, length) of the shortest route from a to b that stays on the
     drawn mask, or (None, None) if the mask doesn't connect them.
 
@@ -2567,8 +2568,12 @@ def mask_path(a, b, tree, step=TRACE_STEP, pad=TRACE_PAD, reach=TRACE_REACH):
     tool: at 6 px the lattice steps onto the glyphs beside a line and comes back
     with a shortcut through the words. A bridge crosses blank page only where
     the line resumes on the same
-    heading, which is what an interruption looks like and a shortcut doesn't."""
-    key = (id(tree), round(a[0]), round(a[1]), round(b[0]), round(b[1]))
+    heading, which is what an interruption looks like and a shortcut doesn't.
+
+    over_holes offers them from the start, for a caller that can judge the
+    answer's length: where a block closes round a hole the drawing still
+    connects, so the ordering above never asks for a bridge."""
+    key = (id(tree), round(a[0]), round(a[1]), round(b[0]), round(b[1]), over_holes)
     if key in _PATHS:                  # a route's variants share their badges
         return _PATHS[key]
     a, b = np.asarray(a, float), np.asarray(b, float)
@@ -2598,8 +2603,8 @@ def mask_path(a, b, tree, step=TRACE_STEP, pad=TRACE_PAD, reach=TRACE_REACH):
                               shape=(nx * ny, nx * ny))
         return dijkstra(G + G.T, indices=ia, return_predecessors=True)
 
-    dist, pred = solve()
-    if not np.isfinite(dist[ib]):
+    dist, pred = solve(bridges(C, free, tree, step) if over_holes else None)
+    if not np.isfinite(dist[ib]) and not over_holes:
         # Only now, and this ordering is the whole safety of it. A bridge is for
         # a corridor the drawing does not connect at all; where it does connect,
         # the drawn way round is the one to take. Offered as an ordinary edge
@@ -2765,6 +2770,14 @@ def trace_anchors(s, D, A, P, cum, tree):
         ds = s[i + 1] - s[i]
         if ds > 0 and TRACE_SPAN[0] < math.dist(A[i], A[i + 1]) < TRACE_SPAN[1]:
             walk, length = mask_path(A[i], A[i + 1], tree)
+            if walk is not None and not (TRACE_DETOUR[0] * ds < length
+                                         < TRACE_DETOUR[1] * ds):
+                # Out of band may be a walk round a hole rather than along the
+                # drawing. Ask again across the holes; the band is what keeps
+                # the corner-cutting bridges out.
+                w2, l2 = mask_path(A[i], A[i + 1], tree, over_holes=True)
+                if w2 is not None and TRACE_DETOUR[0] * ds < l2 < TRACE_DETOUR[1] * ds:
+                    walk, length = w2, l2
             if walk is None:
                 pass
             elif TRACE_DETOUR[0] * ds < length < TRACE_DETOUR[1] * ds:
@@ -2922,6 +2935,22 @@ def crossed_badges(A, cum, j):
     s, pos = cum[j][order], A[order]
     return bool(((np.diff(s) < CROSSED_SPAN) &
                  (np.hypot(*np.diff(pos, axis=0).T) > CROSSED_APART)).any())
+
+
+def uncrossed_badges(A, cum, j, P):
+    """Which badge hits survive where a slide has left two badges a street
+    apart still claiming the same stretch of shape. A slide needs a leg for
+    each badge to land on, and a shape drawn as one of a pair of one-way lines
+    has one — so the nearest badge takes the stretch and the rest are left to
+    the shape drawn on the other line."""
+    keep = np.ones(len(j), dtype=bool)
+    for a in np.argsort(np.hypot(*(A - P[j]).T)):   # nearest claims the stretch
+        if not keep[a]:
+            continue
+        keep &= ~(keep & (np.arange(len(j)) != a)
+                  & (np.abs(cum[j] - cum[j[a]]) < CROSSED_SPAN)
+                  & (np.hypot(*(A - A[a]).T) > CROSSED_APART))
+    return keep
 
 
 def anchor_slide(P, A, gate):
@@ -3122,6 +3151,11 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
                 hit = badge_passes(P, cum, S, anchor_gate)
                 ai = np.array([h[0] for h in hit], dtype=int)
                 j = np.array([h[1] for h in hit], dtype=int)
+                # Call-out only: on the schematic a one-way pair is one line
+                # carrying both directions' badges, which is the slide's case.
+                if region == "inset" and len(ai):
+                    k = uncrossed_badges(A[ai], cum, j, P)
+                    ai, j = ai[k], j[k]
             if not len(ai):
                 break
             order = np.argsort(cum[j], kind="stable")
@@ -4450,6 +4484,43 @@ def main():
     # DTLA inset: per-shape downtown runs in inset px, computed on demand
     shape_runs = {}                 # si -> runs or None
 
+    # The shapes competing for one set of badges, for branch_anchors in the
+    # space the panel is drawn in. In-frame stretches only: the poly2 folds
+    # distant geography back inside the rect, and a run out to the coast would
+    # line up under a downtown badge.
+    inset_kin = defaultdict(list)
+    for k, (_c, _t, _toks) in shape_isnap.items():
+        if k in shape_ll:
+            inset_kin[(k[0], frozenset(_toks))].append(k)
+    _ikd, _islide = {}, {}
+
+    def inset_kd(key):
+        if key not in _ikd:
+            ll = np.asarray(shape_ll[key], dtype=float)
+            ix, iy = to_inset_px(ll[:, 0], ll[:, 1])
+            keep = (outside_inset(ix, iy, ll) <= INSET_SLACK)
+            _ikd[key] = (cKDTree(np.asarray(densify(list(zip(ix[keep], iy[keep])), 4.0),
+                                            dtype=float))
+                         if keep.sum() > 1 else None)
+        return _ikd[key]
+
+    def inset_slide(keys, A):
+        k = tuple(keys)
+        if k not in _islide:
+            span = np.hypot(*(A.max(0) - A.min(0))) if len(A) else 0.0
+            _islide[k] = (anchor_slide(np.vstack([inset_kd(s).data for s in keys]),
+                                       A, ANCHOR_GATE)
+                          if span <= SLIDE_SPAN else np.zeros(2))
+        return _islide[k]
+
+    def inset_branch(anc, key, toks):
+        """`anc` less the badges another variant of the route explains better."""
+        kin = [k for k in inset_kin.get((key[0], frozenset(toks)), ())
+               if inset_kd(k) is not None]
+        if not anc or key not in kin or len(kin) < 2:
+            return anc
+        return branch_anchors(anc, key, kin, inset_kd, inset_slide)
+
     def runs_for(key, si):
         if si not in shape_runs:
             ll = shape_ll.get(key)
@@ -4468,7 +4539,9 @@ def main():
                         else mask_tree(cols, tol, region="inset") if cols else None)
                 gate = None if key[0] in ("gtfs_bus", "gtfs_rail") else cols
                 anc = ([] if (key[0], shape_route.get(key)) in INSET_UNANCHORED
-                       else route_anchors(toks, tree, region="inset", colors=gate))
+                       else inset_branch(
+                           route_anchors(toks, tree, region="inset", colors=gate),
+                           key, toks))
                 runs = inset_runs(ll, lambda px: main_dist(key, si, px), tree, anc,
                                   sole=key[0] == "gtfs_rail")
             shape_runs[si] = runs
