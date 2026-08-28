@@ -2570,11 +2570,9 @@ def mask_path(a, b, tree, step=TRACE_STEP, pad=TRACE_PAD, reach=TRACE_REACH,
     the line resumes on the same
     heading, which is what an interruption looks like and a shortcut doesn't.
 
-    over_holes offers those bridges from the start, for a caller that already
-    knows how long the walk should come out and can throw the answer away when
-    it doesn't. That is the only way past a hole the drawing closes round: the
-    walk the block offers is a connection, so the ordering above never asks for
-    a bridge, and the way through is never found."""
+    over_holes offers them from the start, for a caller that can judge the
+    answer's length: where a block closes round a hole the drawing still
+    connects, so the ordering above never asks for a bridge."""
     key = (id(tree), round(a[0]), round(a[1]), round(b[0]), round(b[1]), over_holes)
     if key in _PATHS:                  # a route's variants share their badges
         return _PATHS[key]
@@ -2774,13 +2772,9 @@ def trace_anchors(s, D, A, P, cum, tree):
             walk, length = mask_path(A[i], A[i + 1], tree)
             if walk is not None and not (TRACE_DETOUR[0] * ds < length
                                          < TRACE_DETOUR[1] * ds):
-                # A walk much longer than the shape says may be going round a
-                # hole rather than along the drawing: the sheet knocks its own
-                # line out for a station marker or a chip, and where the block
-                # closes the lattice takes it, no bridge being offered while
-                # some connection exists. Ask again across the holes, and keep
-                # that answer only if it comes back the length the shape says —
-                # which is the test the corner-cutting bridges would fail.
+                # Out of band may be a walk round a hole rather than along the
+                # drawing. Ask again across the holes; the band is what keeps
+                # the corner-cutting bridges out.
                 w2, l2 = mask_path(A[i], A[i + 1], tree, over_holes=True)
                 if w2 is not None and TRACE_DETOUR[0] * ds < l2 < TRACE_DETOUR[1] * ds:
                     walk, length = w2, l2
@@ -2945,16 +2939,10 @@ def crossed_badges(A, cum, j):
 
 def uncrossed_badges(A, cum, j, P):
     """Which badge hits survive where a slide has left two badges a street
-    apart still claiming the same stretch of shape.
-
-    `crossed_badges` is the diagnosis and `anchor_slide` the cure, but the cure
-    needs the shape to have a leg for each badge to belong to. Where the sheet
-    draws a route's two directions as two lines a block apart and badges each of
-    them, a shape is one of those directions and has one leg: no translation
-    puts a badge on each, and fitting both drags the stretch off towards the
-    other street and back, once per pair down the corridor. The shape runs a
-    stretch once, so the nearest badge takes it and its rivals are left to the
-    shape drawn on the other line."""
+    apart still claiming the same stretch of shape. A slide needs a leg for
+    each badge to land on, and a shape drawn as one of a pair of one-way lines
+    has one — so the nearest badge takes the stretch and the rest are left to
+    the shape drawn on the other line."""
     keep = np.ones(len(j), dtype=bool)
     for a in np.argsort(np.hypot(*(A - P[j]).T)):   # nearest claims the stretch
         if not keep[a]:
@@ -3163,11 +3151,8 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
                 hit = badge_passes(P, cum, S, anchor_gate)
                 ai = np.array([h[0] for h in hit], dtype=int)
                 j = np.array([h[1] for h in hit], dtype=int)
-                # Only in the call-out, where the two directions of a route are
-                # two drawn lines a block apart and a shape is one of them. Out
-                # on the schematic they are one line carrying both directions'
-                # badges, and a badge a street away is another stretch of this
-                # same shape — the slide's case, not this one.
+                # Call-out only: on the schematic a one-way pair is one line
+                # carrying both directions' badges, which is the slide's case.
                 if region == "inset" and len(ai):
                     k = uncrossed_badges(A[ai], cum, j, P)
                     ai, j = ai[k], j[k]
@@ -4499,13 +4484,10 @@ def main():
     # DTLA inset: per-shape downtown runs in inset px, computed on demand
     shape_runs = {}                 # si -> runs or None
 
-    # The shapes competing for one set of badges, and their warps in inset px.
-    # The call-out draws a route's two directions as two lines a block apart and
-    # prints a badge column beside each, so a badge belongs to the variant that
-    # runs its street — which is branch_anchors, in the space the panel is drawn
-    # in. Only the stretch inside the frame: the poly2 is a fit to the panel and
-    # folds distant geography back into it, so a variant's run out to the coast
-    # would otherwise line up under a downtown badge.
+    # The shapes competing for one set of badges, for branch_anchors in the
+    # space the panel is drawn in. In-frame stretches only: the poly2 folds
+    # distant geography back inside the rect, and a run out to the coast would
+    # line up under a downtown badge.
     inset_kin = defaultdict(list)
     for k, (_c, _t, _toks) in shape_isnap.items():
         if k in shape_ll:

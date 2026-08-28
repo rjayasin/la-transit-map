@@ -18,13 +18,8 @@ and scores nothing; only the hairpins and the sewing do.
 
 Points inside the Downtown call-out are dropped before scoring: the panel
 ghosts every route for ~200 px and the warp is all there is there, so a zigzag
-inside it is expected and not the snapper's fault.
-
-The Downtown call-out is a second drawing of the same routes, snapped on its
-own artwork, and --inset scores that instead: the panel magnifies downtown
-several times over, so a stretch that reads as a wobble on the main map is a
-line crossing the blocks there. It is the same measure and the same blind spot
-— a path smoothly on the wrong street scores nothing either way.
+inside it is expected and not the snapper's fault. The panel redraws those
+routes on its own artwork, and --inset scores that drawing instead.
 
     scripts/path_check.py                 # rank every route, worst first
     scripts/path_check.py --top 40        # only the 40 most suspect
@@ -213,8 +208,6 @@ def main():
         best = (0.0, 0, 0.0, None, [], None)
         total_kinks, drawn = 0, 0
         for si, ntr in shapes.items():
-            # one polyline per shape on the main map; in the panel a shape can
-            # enter it more than once, and each run is scored on its own
             polys = (d["insets"][si] or []) if a.inset else [d["shapes"][si]]
             drawn += len(polys)
             for pts in polys:
