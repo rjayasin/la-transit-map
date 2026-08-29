@@ -244,6 +244,10 @@ MAP_LABELS = {
     ("ladot", "798"): "NR",         # DASH Northridge
     ("ladot", "799"): "VS",         # DASH Van Nuys/Studio City, clockwise
     ("ladot", "800"): "VS",         # DASH Van Nuys/Studio City, counterclockwise
+    ("ladot", "6768"): "PA",        # DASH Pacoima, clockwise
+    ("ladot", "6770"): "PA",        # DASH Pacoima, counter-clockwise
+    ("ladot", "801"): "PV",         # DASH Panorama City/Van Nuys, clockwise
+    ("ladot", "804"): "PV",         # DASH Panorama City/Van Nuys, counterclockwise
 }
 
 
@@ -1705,6 +1709,7 @@ PINNED_ANCHORS = {
     ("ladot", "798"): [(645, 1236), (652, 1140)],
     ("ladot", "799"): [(1032, 1472), (999, 1336), (1180, 1507)],
     ("ladot", "800"): [(1032, 1472), (999, 1336), (1180, 1507)],
+    ("norwalk", "7"): [(2447.7, 2436.0)],
     ("gtrans", "7X"): [(1400.0, 2489.5), (1440.0, 2514.5), (1500.0, 2514.5),
                        (1560.0, 2514.5), (1584.0, 2552.0), (1584.0, 2590.0),
                        (1569.0, 2640.0), (1569.0, 2680.0), (1569.0, 2748.0)],
@@ -1868,6 +1873,19 @@ OVERRIDE_PATHS = {
         "path": [
             (1396.0, 3132.5), (1408.0, 3132.5), (1421.0, 3132.5),
             (1433.0, 3132.5),
+        ],
+    },
+    ("torrance", "8"): {
+        "box": (1150, 2400, 1245, 2660),
+        "path": [
+            (1231.3, 2392.5), (1231.3, 2474.0), (1230.8, 2476.3),
+            (1229.5, 2478.2), (1227.6, 2479.5), (1225.3, 2480.0),
+            (1179.1, 2480.0), (1177.8, 2480.3), (1176.6, 2481.0),
+            (1175.9, 2482.2), (1175.6, 2483.5), (1175.6, 2552.1),
+            (1176.1, 2554.4), (1177.4, 2556.3), (1179.3, 2557.6),
+            (1181.6, 2558.1), (1217.7, 2558.1), (1220.0, 2558.6),
+            (1221.9, 2559.9), (1223.2, 2561.8), (1223.7, 2564.1),
+            (1223.6, 2660.0),
         ],
     },
     ("longbeach", "1"): {
@@ -3065,6 +3083,18 @@ def anchor_slide(P, A, gate):
     stub the sheet actually draws, and terminus scars get traded for smaller ones
     path_check prices higher. Read drift alongside it."""
     kd = cKDTree(P)
+    # Badges the search cannot reach at any offset it could accept are dropped
+    # rather than clamped. An accepted slide is shorter than the gate, so one
+    # standing further off than twice it stays past the gate however the shape
+    # moves — and clamped in, its constant leaks into both refusals: it is
+    # charged to every candidate through the drag term's badge count, and it
+    # inflates `base` and `resid` alike, so a slide clearing most of what the
+    # reachable badges asked for reads as one that cleared almost nothing. A
+    # two-letter designation printed as a street label on the far side of the
+    # sheet is enough to do it.
+    A = A[kd.query(A)[0] < 3 * gate]
+    if not len(A):
+        return np.zeros(2)
     base = np.minimum(kd.query(A)[0], gate).sum()
     t, resid = np.zeros(2), base
     span = gate
