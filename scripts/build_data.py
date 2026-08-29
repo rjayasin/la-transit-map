@@ -3083,6 +3083,18 @@ def anchor_slide(P, A, gate):
     stub the sheet actually draws, and terminus scars get traded for smaller ones
     path_check prices higher. Read drift alongside it."""
     kd = cKDTree(P)
+    # Badges the search cannot reach at any offset it could accept are dropped
+    # rather than clamped. An accepted slide is shorter than the gate, so one
+    # standing further off than twice it stays past the gate however the shape
+    # moves — and clamped in, its constant leaks into both refusals: it is
+    # charged to every candidate through the drag term's badge count, and it
+    # inflates `base` and `resid` alike, so a slide clearing most of what the
+    # reachable badges asked for reads as one that cleared almost nothing. A
+    # two-letter designation printed as a street label on the far side of the
+    # sheet is enough to do it.
+    A = A[kd.query(A)[0] < 3 * gate]
+    if not len(A):
+        return np.zeros(2)
     base = np.minimum(kd.query(A)[0], gate).sum()
     t, resid = np.zeros(2), base
     span = gate
