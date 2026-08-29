@@ -150,6 +150,20 @@ can be scored without a build. Read its walked-against-straight line first: a
 walk that went round something is scoring everything below it against the
 detour.
 
+**Walk the strokes, not the mask, where the drawing encloses a small space.**
+A colour mask carries the route-number chips as well as the line, and a chip is
+a filled block of the line's own colour standing off the line. Where the
+drawing encloses a space no wider than a chip, the chips inside it join across
+it and the walk cuts the block the drawing goes round — so the traced corridor
+*is* the shortcut, and a shape taking that shortcut scores clean against it.
+The trace agreeing with the fault it was asked about is the one failure that
+leaves nothing to notice, and it hides under a small absolute drift: an
+enclosure a couple of dozen px across cannot put a path further than that from
+the drawing however wrongly it cuts. `--ink` walks the sheet's vector strokes
+instead, for any agency the legend names an ink for. The strokes are the
+centreline alone, with no chips and no lettering in them, so the way round is
+the only way there is.
+
 **Find the variant against that trace**, not against the other variants.
 Comparing variants with each other has two traps: stored shapes keep only the
 points `simplify` left, so vertex-to-vertex distance reports the gap to the

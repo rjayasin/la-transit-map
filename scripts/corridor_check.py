@@ -27,7 +27,15 @@ scored against the detour rather than against the corridor, so pick a pair that
 doesn't straddle the interruption and ask again. The interruption may of course
 be the fault you are chasing; see implementation_notes.md.
 
+--ink walks the sheet's vector strokes instead of the colour mask. Reach for it
+where the drawing encloses a space no wider than a route-number chip: the chips
+are filled with the line's own colour and stand off the line, so on a mask they
+join across the enclosure and the walk cuts the block the drawing goes round.
+The corridor is then the shortcut, and a shape taking that shortcut scores
+clean against it — the yardstick agreeing with the fault it was asked about.
+
     scripts/corridor_check.py bigbluebus 9 --from 697,2065.7 --to 775.3,2166.4
+    scripts/corridor_check.py foothill 861 --from 2737.8,1590 --to 2773.4,1559.1 --ink
     scripts/corridor_check.py gtfs_bus 720 --from ... --to ... --schedule s.json
 """
 import argparse
@@ -51,17 +59,30 @@ COVER = 6.0     # px within which a shape counts as covering the corridor
 STEP = 1.0      # px; sampling pitch for both curves
 
 
-def agency_tree(feed):
+def agency_tree(feed, ink=False):
     """What to walk the corridor on: the feed's strokes where the build snaps
     on them, and its colour mask otherwise, refined the way the build refines
     it. drift_check chooses between the two the same way, and for the same
     reason — where an agency's line is thin its mask can be more lettering than
     line, and a walk then follows the words across the block instead of the
-    corridor, which is the one thing this tool must not do."""
-    if feed in INK_SNAP and feed in LEGEND_INK:
+    corridor, which is the one thing this tool must not do.
+
+    `ink` takes the strokes for any agency the legend names one for, whatever
+    the build snaps on. A mask carries the route-number chips as well as the
+    line, and a chip is a filled block of the line's own colour standing off
+    the line — so where the drawing encloses a space smaller than a chip is
+    wide, the chips inside it join up and the walk crosses the block instead of
+    going round. The strokes are the centreline alone and have no chips in
+    them, so the way round is the only way there is."""
+    if (ink or feed in INK_SNAP) and feed in LEGEND_INK:
         tree = ink_tree([LEGEND_INK[feed]])
         if tree is not None:
             return tree
+        if ink:
+            sys.exit(f"the sheet strokes too little of {feed} to walk on")
+    if ink:
+        sys.exit(f"no legend ink for {feed} "
+                 f"({', '.join(sorted(LEGEND_INK))})")
     used = {row["shape_id"] for row in read_csv(feed, "trips.txt")}
     tmp = {}
     for sid, seq, lon, lat in read_cols(
@@ -137,6 +158,9 @@ def main():
     ap.add_argument("--system",
                     help="substring of the system name (default: the feed's own, "
                          "so a designation several operators use stays this one's)")
+    ap.add_argument("--ink", action="store_true",
+                    help="walk the sheet's own strokes rather than the colour "
+                         "mask, for an agency the build masks — see agency_tree")
     ap.add_argument("--schedule", default=SCHEDULE,
                     help=f"read shapes from this instead of {SCHEDULE} — "
                          "a build_data.py --only refit writes one")
@@ -151,17 +175,23 @@ def main():
     # scored for all of them against one agency's corridor.
     system = a.system or FEED_NAMES.get(a.feed, "")
 
-    tree = agency_tree(a.feed)
+    tree = agency_tree(a.feed, a.ink)
     walk, length = mask_path(pa, pb, tree)
     if walk is None:
-        sys.exit(f"the {a.feed} mask does not connect {pa} to {pb} — "
+        sys.exit(f"the {a.feed} drawing does not connect {pa} to {pb} — "
                  "either a point is off the drawn line, or the drawing is broken "
                  "between them by more than a bridge will cross")
     straight = float(np.hypot(*(np.asarray(pb) - np.asarray(pa))))
+    # On a mask a walk much longer than the straight line is a symptom: the
+    # drawing was interrupted and the way round was the only way through. On
+    # the strokes it is the answer — the drawn line does go round — so the same
+    # ratio is reported without the suspicion.
+    detour = length > 1.35 * straight
     print(f"corridor: {len(walk)} steps, {length:.0f} px walked against "
           f"{straight:.0f} px straight"
-          + ("   <-- went round something; check the two points"
-             if length > 1.35 * straight else ""))
+          + ("" if not detour else
+             "   <-- the drawing goes round" if a.ink else
+             "   <-- went round something; check the two points"))
     print("  " + ", ".join(f"({x:.1f},{y:.1f})" for x, y in walk))
 
     ref = np.asarray(densify([tuple(p) for p in walk], STEP), dtype=float)
