@@ -244,6 +244,10 @@ MAP_LABELS = {
     ("ladot", "798"): "NR",         # DASH Northridge
     ("ladot", "799"): "VS",         # DASH Van Nuys/Studio City, clockwise
     ("ladot", "800"): "VS",         # DASH Van Nuys/Studio City, counterclockwise
+    ("ladot", "6768"): "PA",        # DASH Pacoima, clockwise
+    ("ladot", "6770"): "PA",        # DASH Pacoima, counter-clockwise
+    ("ladot", "801"): "PV",         # DASH Panorama City/Van Nuys, clockwise
+    ("ladot", "804"): "PV",         # DASH Panorama City/Van Nuys, counterclockwise
 }
 
 
