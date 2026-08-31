@@ -1708,8 +1708,12 @@ PINNED_ANCHORS = {
                             (2699.5, 2045.3), (2788.5, 2101.0)],
     ("foothill", "20272"): [(2826.0, 1656.0)],
     ("metrolink", "Riverside Line"): [(1860, 2077.4)],
-    ("ladot", "573"): [(1299, 2095)],
-    ("ladot", "589"): [(1299, 2095)],
+    ("ladot", "573"): [(1299, 2080), (1310, 2103), (1313, 2117), (1322, 2130),
+                       (1336, 2133), (1348, 2112), (1370, 2124), (1387, 2134),
+                       (1417, 2134)],
+    ("ladot", "589"): [(1299, 2080), (1310, 2103), (1313, 2117), (1322, 2130),
+                       (1336, 2133), (1348, 2112), (1370, 2124), (1387, 2134),
+                       (1417, 2134)],
     ("ladot", "798"): [(645, 1236), (652, 1140)],
     ("ladot", "799"): [(1032, 1472), (999, 1336), (1180, 1507)],
     ("ladot", "800"): [(1032, 1472), (999, 1336), (1180, 1507)],
@@ -1735,6 +1739,10 @@ TRIM_TERMINI = {
 
 TERMINUS_REACH = 35.0   # px a shape must pass within of a pin to be cut to it
 TERMINUS_TAIL = 110.0   # px of overshoot past the pin that gets trimmed off
+CIRCUIT_GAP = 14.0      # px between a shape's two ends before it is a circuit
+                        # rather than a line. Nothing sits between: a route that
+                        # closes comes back within a few px, and the nearest one
+                        # that merely starts and finishes nearby is 250 away
 
 
 def trim_terminus(pts, pins):
@@ -1750,9 +1758,18 @@ def trim_terminus(pts, pins):
     rather than each against what the last one left. Trimming in sequence lets
     the cuts compound: a first cut brings a pin further into the route — one
     that is no kind of terminus — inside the tail limit as measured from the new
-    end, and the next pass cuts the route back to that as well."""
+    end, and the next pass cuts the route back to that as well.
+
+    A shape that finishes where it started has no overshoot to cut: its two ends
+    are one point of a circuit, passed through mid-journey as much as at either
+    end, and the stretch either side of them is the route rather than a layover
+    tail. Cutting there would take a piece out of the circuit and leave the last
+    point short of the first. It also puts the whole of a circulator's first and
+    last `TERMINUS_TAIL` px of arc — a quarter of a small loop — beyond what a
+    pin can hold, which is the difference between anchoring one and needing an
+    override for it."""
     P = np.asarray(densify(pts, 4.0), dtype=float)
-    if len(P) < 2:
+    if len(P) < 2 or float(np.hypot(*(P[0] - P[-1]))) <= CIRCUIT_GAP:
         return [tuple(p) for p in P]
     cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(P, axis=0).T))])
     lo, hi = 0, len(P) - 1
@@ -3352,7 +3369,13 @@ JITTER_SPAN = 28.0    # px of line a fitted shape is averaged over. Long enough
                       # corner between two straight runs where the sheet put it.
 
 
-def unjitter(P, span=JITTER_SPAN):
+JITTER_KEEP = 6.0     # px of drawing the smoothing may give up before it is
+                      # charged for it. Above the wander's own amplitude, so
+                      # removing the wander is never what gets vetoed, and well
+                      # under the legs of a drawn detour, so a corner is.
+
+
+def unjitter(P, span=JITTER_SPAN, tree=None):
     """A fitted shape with the feed's own tracing wander taken out of it.
 
     A GTFS shape is a driven trace, and at map scale its vertices wander a
@@ -3364,14 +3387,30 @@ def unjitter(P, span=JITTER_SPAN):
     which scores turning past a square corner.
 
     Averaging the line over a stretch longer than the wander is what removes
-    it. The span is a length rather than a count of points — see span_points."""
+    it. The span is a length rather than a count of points — see span_points.
+
+    `tree` is the drawing this shape was fitted on, and it is what tells a
+    wander from a corner: a span long enough to outrun the one is longer than
+    the legs of a detour the schematic draws tight — a circulator's few
+    blocks — and averaging across those rounds the corners off the artwork.
+    So the average is taken as far as it does not cost the line its drawing:
+    each point keeps whatever share of the correction leaves it no further
+    from the ink than the wander it removes, and a corner where the smoothed
+    line would leave the drawing keeps its own place instead. The share falls
+    off smoothly rather than switching, since a step in the correction is a
+    kink in the line. Off the drawing entirely — a stretch the sheet doesn't
+    draw — there is nothing to give up and the average stands."""
     P = np.asarray(P, dtype=float)
     w = span_points(P, span)
     k = np.ones(w) / w
     out = np.empty_like(P)
     for c in (0, 1):
         out[:, c] = np.convolve(np.pad(P[:, c], w // 2, mode="edge"), k, "valid")
-    return out
+    if tree is None:
+        return out
+    lost = tree.query(out)[0] - np.maximum(tree.query(P)[0], JITTER_KEEP)
+    share = 1.0 / (1.0 + np.maximum(lost, 0.0) / JITTER_KEEP)
+    return P + share[:, None] * (out - P)
 
 
 def densify(pts, max_step=6.0):
@@ -3942,7 +3981,7 @@ def inset_runs(ll, main_dist, snap_tree=None, anchors=None, sole=False,
                                win=INSET_WIN, anchors=anchors, anchor_gate=75.0,
                                min_frac=0.35, region="inset", sole=sole)
             if sc is not None:
-                pts = unjitter(np.asarray(sc))
+                pts = unjitter(np.asarray(sc), tree=snap_tree)
         # drop edge-hugging slivers that never meaningfully enter the frame
         vis = ((pts[:, 0] > x0 + 8) & (pts[:, 0] < x1 - 8) &
                (pts[:, 1] > y0 + 8) & (pts[:, 1] < y1 - 8))
@@ -4748,7 +4787,7 @@ def main():
             # which one ships, so it smooths after. An override's path is drawn
             # by hand, so it goes on after this rather than through it.
             if out_pts is not None:
-                full = unjitter(full)
+                full = unjitter(full, tree=line_ink)
             override = OVERRIDE_PATHS.get((feed, (rid or "").split("-")[0]))
             if override is not None and len(full) == len(base):
                 full = np.asarray(apply_override(full, base, override), dtype=float)
