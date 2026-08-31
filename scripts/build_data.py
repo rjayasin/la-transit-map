@@ -241,6 +241,10 @@ MAP_LABELS = {
     ("ladot", "4868"): "SC",        # DASH El Sereno/City Terrace
     ("ladot", "1757"): "SE",        # DASH Southeast, clockwise
     ("ladot", "1758"): "SE",        # DASH Southeast, counterclockwise
+    ("ladot", "6768"): "PA",        # DASH Pacoima, clockwise
+    ("ladot", "6770"): "PA",        # DASH Pacoima, counter-clockwise
+    ("ladot", "801"): "PV",         # DASH Panorama City/Van Nuys, clockwise
+    ("ladot", "804"): "PV",         # DASH Panorama City/Van Nuys, counterclockwise
     ("ladot", "798"): "NR",         # DASH Northridge
     ("ladot", "799"): "VS",         # DASH Van Nuys/Studio City, clockwise
     ("ladot", "800"): "VS",         # DASH Van Nuys/Studio City, counterclockwise
@@ -3075,6 +3079,17 @@ def anchor_slide(P, A, gate):
     stub the sheet actually draws, and terminus scars get traded for smaller ones
     path_check prices higher. Read drift alongside it."""
     kd = cKDTree(P)
+    # A badge no offset in the search can bring within the gate scores the gate
+    # in `base` and in every candidate alike. It cannot say which slide is
+    # better, and the constant it adds to both sides is enough on its own to
+    # fail the gain test — one such badge, and no slide is believed however
+    # squarely it puts every other badge on its line. So only the badges a slide
+    # could reach are scored, and the bound is twice the gate: the gate itself,
+    # plus the furthest the search may carry the shape.
+    A = np.asarray(A, dtype=float)
+    A = A[kd.query(A)[0] < 2 * gate]
+    if len(A) < 2:
+        return np.zeros(2)
     base = np.minimum(kd.query(A)[0], gate).sum()
     t, resid = np.zeros(2), base
     span = gate
@@ -3310,6 +3325,49 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
     for c in (0, 1):
         P[:, c] = np.convolve(np.pad(P[:, c], 3, mode="edge"), k, "valid")
     return [tuple(p) for p in P]
+
+
+def span_points(P, span):
+    """`span` px of line, as an odd number of points of the polyline `P`.
+
+    A window over a fitted shape is a length of line, but the arrays are
+    indexed by point, and how much line a point stands for is the feed's
+    business rather than ours: densify() puts a ceiling on the step and nothing
+    under it, so a feed drawing its shapes finely keeps its own spacing — under
+    a px for some feeds, three for others. A window counted in points is
+    therefore a different window on every feed."""
+    if len(P) < 3:
+        return 3
+    step = float(np.hypot(*np.diff(P, axis=0).T).mean())
+    w = int(round(span / max(step, 1e-6))) | 1
+    return max(3, min(w, (len(P) // 2) * 2 - 1))
+
+
+JITTER_SPAN = 28.0    # px of line a fitted shape is averaged over. Long enough
+                      # to outrun the tracing wander, short enough to leave the
+                      # corner between two straight runs where the sheet put it.
+
+
+def unjitter(P, span=JITTER_SPAN):
+    """A fitted shape with the feed's own tracing wander taken out of it.
+
+    A GTFS shape is a driven trace, and at map scale its vertices wander a
+    couple of px either side of the street. That is inside the width of the
+    line the sheet draws, so the fit carries the whole wander onto the drawn
+    line rather than flattening it, and a corridor drawn dead straight ships as
+    a zigzag. Nothing else takes it out and no check reports it: every reversal
+    is wide enough for simplify() to keep, and far too shallow for path_check,
+    which scores turning past a square corner.
+
+    Averaging the line over a stretch longer than the wander is what removes
+    it. The span is a length rather than a count of points — see span_points."""
+    P = np.asarray(P, dtype=float)
+    w = span_points(P, span)
+    k = np.ones(w) / w
+    out = np.empty_like(P)
+    for c in (0, 1):
+        out[:, c] = np.convolve(np.pad(P[:, c], w // 2, mode="edge"), k, "valid")
+    return out
 
 
 def densify(pts, max_step=6.0):
@@ -3880,7 +3938,7 @@ def inset_runs(ll, main_dist, snap_tree=None, anchors=None, sole=False,
                                win=INSET_WIN, anchors=anchors, anchor_gate=75.0,
                                min_frac=0.35, region="inset", sole=sole)
             if sc is not None:
-                pts = np.asarray(sc)
+                pts = unjitter(np.asarray(sc))
         # drop edge-hugging slivers that never meaningfully enter the frame
         vis = ((pts[:, 0] > x0 + 8) & (pts[:, 0] < x1 - 8) &
                (pts[:, 1] > y0 + 8) & (pts[:, 1] < y1 - 8))
@@ -4681,6 +4739,12 @@ def main():
                     _k = _lo + int(np.argmax(np.hypot(*(full - base).T)[_lo:_hi + 1]))
                     DETOUR_AUDIT.append((_pk, feed, rid or "?",
                                          int(full[_k][0]), int(full[_k][1])))
+            # The ballot above picks between fits on how sharply they turn,
+            # and a smoothed line reads differently enough there to change
+            # which one ships, so it smooths after. An override's path is drawn
+            # by hand, so it goes on after this rather than through it.
+            if out_pts is not None:
+                full = unjitter(full)
             override = OVERRIDE_PATHS.get((feed, (rid or "").split("-")[0]))
             if override is not None and len(full) == len(base):
                 full = np.asarray(apply_override(full, base, override), dtype=float)
