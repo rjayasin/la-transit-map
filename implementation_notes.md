@@ -94,7 +94,13 @@ A DASH is a special case of the first row: it is named rather than numbered,
 so the designation its name yields is one the sheet never prints, and
 `ladot_livery` will anchor it on nothing else. Without a `MAP_LABELS` row a
 DASH therefore has no anchors at all, and its shape is whatever the warp and an
-unanchored snap make of it. `orphan_check` lists them.
+unanchored snap make of it. `orphan_check` lists them — but only the ones whose
+guessed designation the sheet prints *nowhere*. It asks whether the token
+appears on the sheet at all, not whether it appears anywhere near this route,
+so an initialism landing on a code the cartographer used for something else
+half the map away reads as correctly labelled and never appears in the report.
+Measuring each route's label against the distance to the nearest place the
+sheet prints it is what finds those.
 
 Three recurring reasons a pin doesn't work, worth recognising before reaching
 for an override:
@@ -113,6 +119,13 @@ for an override:
   stretch it was meant to anchor. A limb shorter than that tail therefore
   cannot be pinned at all without losing the terminus beyond it: pinning the
   end and pinning the limb are the same choice, and only an override has both.
+  A shape that finishes where it started is exempt — a circuit has no overshoot
+  — which is what leaves a small circulator pinnable all the way round.
+
+A route the sheet draws as a trunk rather than as the loop the feed drives is
+not a case for an override either. Only the drawn stretch can be held to the
+drawing; the rest has no ink under it and keeps the warp, and one pin on the
+trunk is what stops the loop being walked onto a neighbouring route's line.
 
 All three are one measurement: the distance from the intended pin to the
 nearest warp point, and to the nearest point on any *other* leg of the same
@@ -123,6 +136,14 @@ new place — so it is worth checking before a rebuild rather than after.
 
 Snapping strategy per agency is set by the `STREET_SNAP` / `INK_SNAP` /
 `SYMBOL_FEEDS` sets and `DRAWN_COLORS`.
+
+A route's drawn line is not one stroke. The PDF splits it at corners and where
+another line crosses, and the pieces stop a few px short of each other, so
+following it by chaining strokes end to end reads it far shorter than it is —
+a loop can come back as the bare L of its trunk. Collect every stroke of the
+agency's colour whose bounding box meets the area and draw them each in their
+own colour over the tiles instead; which pieces are this route's is then a
+question the picture answers, and the answer is the yardstick for the fit.
 
 ## Chasing a divergent path
 
@@ -440,6 +461,15 @@ fold that scores everything, without either leg having moved a street.
   a feed drawing its shapes finely keeps its own spacing — under a px for some
   feeds, three for others, against the 4 the constants read as. Anything meant
   as a length of line wants `span_points`, not a count.
+- **A smoothing window is longer than a schematic's own corners.** `unjitter`
+  averages over more line than the wander it removes, which is also more line
+  than the legs of a detour the sheet draws tight — a circulator's few blocks,
+  a jog round a block. Averaging across those rounds the corners off the
+  artwork, so the average is charged for what it costs in *drawing*:
+  `JITTER_KEEP` is how far a point may be carried from its ink before it starts
+  keeping its own place instead. Read tight enough to bite on ordinary wander
+  (2-3 px, the wander's own amplitude) it costs more turning than it saves
+  drift; the room between that and a drawn corner is where it belongs.
 - **Smoothing a shape before the cleanup ballot moves routes off their line.**
   `settle` picks between fits by how sharply each turns, so a smoother line can
   hand the ballot to a different candidate — one that flattens a real jog, or a
