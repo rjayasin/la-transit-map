@@ -94,7 +94,13 @@ A DASH is a special case of the first row: it is named rather than numbered,
 so the designation its name yields is one the sheet never prints, and
 `ladot_livery` will anchor it on nothing else. Without a `MAP_LABELS` row a
 DASH therefore has no anchors at all, and its shape is whatever the warp and an
-unanchored snap make of it. `orphan_check` lists them.
+unanchored snap make of it. `orphan_check` lists them — but only the ones whose
+guessed designation the sheet prints *nowhere*. It asks whether the token
+appears on the sheet at all, not whether it appears anywhere near this route,
+so an initialism landing on a code the cartographer used for something else
+half the map away reads as correctly labelled and never appears in the report.
+Measuring each route's label against the distance to the nearest place the
+sheet prints it is what finds those.
 
 Three recurring reasons a pin doesn't work, worth recognising before reaching
 for an override:
@@ -113,6 +119,11 @@ for an override:
   stretch it was meant to anchor. A limb shorter than that tail therefore
   cannot be pinned at all without losing the terminus beyond it: pinning the
   end and pinning the limb are the same choice, and only an override has both.
+
+A route the sheet draws as a trunk rather than as the loop the feed drives is
+not a case for an override either. Only the drawn stretch can be held to the
+drawing; the rest has no ink under it and keeps the warp, and one pin on the
+trunk is what stops the loop being walked onto a neighbouring route's line.
 
 All three are one measurement: the distance from the intended pin to the
 nearest warp point, and to the nearest point on any *other* leg of the same

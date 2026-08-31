@@ -241,6 +241,8 @@ MAP_LABELS = {
     ("ladot", "4868"): "SC",        # DASH El Sereno/City Terrace
     ("ladot", "1757"): "SE",        # DASH Southeast, clockwise
     ("ladot", "1758"): "SE",        # DASH Southeast, counterclockwise
+    ("ladot", "573"): "CR",         # DASH Crenshaw, clockwise
+    ("ladot", "589"): "CR",         # DASH Crenshaw, counter-clockwise
     ("ladot", "6768"): "PA",        # DASH Pacoima, clockwise
     ("ladot", "6770"): "PA",        # DASH Pacoima, counter-clockwise
     ("ladot", "801"): "PV",         # DASH Panorama City/Van Nuys, clockwise
@@ -1706,6 +1708,8 @@ PINNED_ANCHORS = {
                             (2699.5, 2045.3), (2788.5, 2101.0)],
     ("foothill", "20272"): [(2826.0, 1656.0)],
     ("metrolink", "Riverside Line"): [(1860, 2077.4)],
+    ("ladot", "573"): [(1299, 2095)],
+    ("ladot", "589"): [(1299, 2095)],
     ("ladot", "798"): [(645, 1236), (652, 1140)],
     ("ladot", "799"): [(1032, 1472), (999, 1336), (1180, 1507)],
     ("ladot", "800"): [(1032, 1472), (999, 1336), (1180, 1507)],
