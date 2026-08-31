@@ -241,6 +241,10 @@ MAP_LABELS = {
     ("ladot", "4868"): "SC",        # DASH El Sereno/City Terrace
     ("ladot", "1757"): "SE",        # DASH Southeast, clockwise
     ("ladot", "1758"): "SE",        # DASH Southeast, counterclockwise
+    ("ladot", "6768"): "PA",        # DASH Pacoima, clockwise
+    ("ladot", "6770"): "PA",        # DASH Pacoima, counter-clockwise
+    ("ladot", "801"): "PV",         # DASH Panorama City/Van Nuys, clockwise
+    ("ladot", "804"): "PV",         # DASH Panorama City/Van Nuys, counterclockwise
     ("ladot", "798"): "NR",         # DASH Northridge
     ("ladot", "799"): "VS",         # DASH Van Nuys/Studio City, clockwise
     ("ladot", "800"): "VS",         # DASH Van Nuys/Studio City, counterclockwise
@@ -3075,6 +3079,17 @@ def anchor_slide(P, A, gate):
     stub the sheet actually draws, and terminus scars get traded for smaller ones
     path_check prices higher. Read drift alongside it."""
     kd = cKDTree(P)
+    # A badge no offset in the search can bring within the gate scores the gate
+    # in `base` and in every candidate alike. It cannot say which slide is
+    # better, and the constant it adds to both sides is enough on its own to
+    # fail the gain test — one such badge, and no slide is believed however
+    # squarely it puts every other badge on its line. So only the badges a slide
+    # could reach are scored, and the bound is twice the gate: the gate itself,
+    # plus the furthest the search may carry the shape.
+    A = np.asarray(A, dtype=float)
+    A = A[kd.query(A)[0] < 2 * gate]
+    if len(A) < 2:
+        return np.zeros(2)
     base = np.minimum(kd.query(A)[0], gate).sum()
     t, resid = np.zeros(2), base
     span = gate
