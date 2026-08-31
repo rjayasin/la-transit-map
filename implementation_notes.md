@@ -15,7 +15,7 @@ what the project does; this covers what will bite you.
 | PDF strokes | `pdf_ink`, `ink_tree`, `*_INK` constants |
 | Anchors | `badge_words`, `route_anchors`, `trace_anchors`, `anchor_slide` |
 | Corridor walks | `mask_path`, `bridges`, `align_walk` |
-| Cleanup | `despike`, `unfold`, `undetour`, `trim_terminus` |
+| Cleanup | `despike`, `unfold`, `undetour`, `unjitter`, `trim_terminus` |
 | Emit | `main` — builds `schedule.json` and prints a stats dict |
 
 ## When a line leaves its drawing
@@ -89,6 +89,12 @@ fix — try them in this order, least invasive first:
 | `TRIM_TERMINI` | A pin can't both anchor and trim; give the terminus in *warp* px for the trim alone |
 | `OVERRIDE_PATHS` | Nothing above can reach it. A corridor drawn by hand, spliced into the snapped shape. Last resort |
 | `INSET_DIVERSIONS` | The feed routes some workings off the line the sheet draws, and only the call-out is magnified enough to show it. A box in inset px; the run inside it is flattened onto its chord |
+
+A DASH is a special case of the first row: it is named rather than numbered,
+so the designation its name yields is one the sheet never prints, and
+`ladot_livery` will anchor it on nothing else. Without a `MAP_LABELS` row a
+DASH therefore has no anchors at all, and its shape is whatever the warp and an
+unanchored snap make of it. `orphan_check` lists them.
 
 Three recurring reasons a pin doesn't work, worth recognising before reaching
 for an override:
@@ -275,8 +281,13 @@ color it measures against, and before/after totals from two different runs are
 not comparable. Compare both shapes against one tree, refined the way the build
 refines it — off the warps.
 
-Three blind spots to know about, since a fix can look like a no-op:
+Four blind spots to know about, since a fix can look like a no-op:
 
+- Nothing scores a line for *wobble*. A shape that sews a couple of px either
+  side of the corridor it is on is inside its own line's width, so `drift_check`
+  reads it as on the drawing and `path_check` as never turning past a corner,
+  and it is still an obvious zigzag at map zoom. Total turning per px of arc is
+  what shows it, and `unjitter` is what takes it out.
 - `drift_check` scores by color, so a route sitting on a *sibling* route's ink
   of the same color scores clean.
 - `path_check` scores by straightness, so a smoothly cut corner scores zero.
@@ -295,7 +306,9 @@ Three blind spots to know about, since a fix can look like a no-op:
 A change can legitimately make `path_check` rank a route *worse* — an exact
 retrace is a true 180° fold where a wrong-but-smooth path was a shallow cusp.
 Check what the shape actually does before treating a rank increase as a
-regression.
+regression. The same holds for a one-way pair the sheet draws as one line:
+straightening the two legs onto it turns a pair that scored nothing into a
+fold that scores everything, without either leg having moved a street.
 
 ## Gotchas
 
@@ -373,6 +386,15 @@ regression.
 - **Trips start at the origin's departure time**, not its arrival — some feeds
   time origins up to two hours early, and using arrival pools whole fleets into
   motionless clusters at their terminals.
+- **A badge the shape cannot reach still has a vote on the slide.** Every
+  badge past `ANCHOR_GATE` scores the gate, in the slide's baseline and in
+  every candidate offset alike, so it says nothing about which offset is best
+  while adding the same constant to both sides of the gain test. One badge far
+  enough away is enough to hold that test above its threshold on its own, and
+  no slide is then believed however squarely it puts the rest on their lines —
+  which is why `anchor_slide` scores only the badges an offset could bring
+  within reach. A route sharing its designation with a word printed on the far
+  side of the sheet is where this bites.
 - **Badges are read against the route slid onto them.** Which variant a badge
   anchors is settled after the warp's local error is taken off (`slide_for`):
   where the warp is out by about half the distance between two parallel drawn
@@ -413,6 +435,17 @@ regression.
   pins the route to it. `trace_anchors` asks again with `over_holes=True` and
   keeps that answer only when it comes back the length the shape says, which is
   the test a corner-cutting bridge fails.
+- **A window counted in points is a different window on every feed.**
+  `densify` puts a ceiling on the step between points and nothing under it, so
+  a feed drawing its shapes finely keeps its own spacing — under a px for some
+  feeds, three for others, against the 4 the constants read as. Anything meant
+  as a length of line wants `span_points`, not a count.
+- **Smoothing a shape before the cleanup ballot moves routes off their line.**
+  `settle` picks between fits by how sharply each turns, so a smoother line can
+  hand the ballot to a different candidate — one that flattens a real jog, or a
+  refit that took another corridor. Movements of tens of px on routes nowhere
+  near the change are the tell. `unjitter` runs after the ballot for this
+  reason; anything else that touches the geometry should too.
 - **Stop distances ride on the stored arc.** `main_dist` places the stops on the
   warp and carries that parameterization onto the stored shape point for point,
   so whatever shortens the line compresses the stops with it. `unfold` is what
