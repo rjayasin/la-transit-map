@@ -267,7 +267,10 @@ MAP_LABELS = {
 # that no working is badged as both: put the two parts' badges over the fitted
 # shapes and look at whether the corridors they stand on are disjoint.
 SPLIT_LABELS = {
-    ("gtfs_bus", "236-13201"): ("235", "236"),
+    ("gtfs_bus", "236-13201"): ("235", "236"),   # Balboa north / Rinaldi
+    ("gtfs_bus", "242-13201"): ("242", "243"),   # Tampa / Winnetka
+    ("gtfs_bus", "260-13201"): ("260", "261"),   # Imperial / Atlantic south
+    ("gtfs_bus", "487-13201"): ("487", "489"),   # San Gabriel / Rosemead
 }
 SPLIT_NEAR = 25.0   # px a badge may stand from a fitted shape and speak for it
 
