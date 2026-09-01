@@ -302,6 +302,12 @@ color it measures against, and before/after totals from two different runs are
 not comparable. Compare both shapes against one tree, refined the way the build
 refines it — off the warps.
 
+Moving an agency into `INK_SNAP` moves the yardstick too: `--ink` prints a row
+only for the agencies the strokes can settle, so the run before the change has
+no row for the agency at all. Score both schedules with the *changed* checker —
+swap `schedule.json` between two runs of it — or the comparison is against
+nothing.
+
 Four blind spots to know about, since a fix can look like a no-op:
 
 - Nothing scores a line for *wobble*. A shape that sews a couple of px either

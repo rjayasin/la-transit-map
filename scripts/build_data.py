@@ -1012,10 +1012,19 @@ LEGEND_INK = {
 # missed readings smear pale with no cluster in them, and a seed wide enough to
 # cover the strokes takes the page with it (167k mask pixels to 977k).
 #
+# Foothill's evergreen has the same shape of fault over less of the network: its
+# shared corridors mask solidly and the stretches one route runs alone thin out
+# into the page, so the mask breaks in the middle of a drawn line with no label
+# over it to blame — and a break is where a snap leaves for whichever parallel
+# corridor is unbroken. The cost of the strokes is that they are centrelines
+# with nothing either side, so where a warp runs between two of the agency's
+# own corridors nothing widens the near one's pull; the pin and the overrides
+# below settle the few junctions where that decides the wrong way.
+#
 # The PDF has the same lines as vectors, thin and thick alike, complete under
 # every label painted over them and with no chips or lettering in them at all.
 # drift_check measures these agencies on those strokes for the same reason.
-INK_SNAP = {"montebello", "bigbluebus"}
+INK_SNAP = {"montebello", "bigbluebus", "foothill"}
 
 
 def refine_color(shape_pts, seed, r2=55 * 55, need=250):
@@ -1707,6 +1716,7 @@ PINNED_ANCHORS = {
     ("foothill", "20493"): [(1878.2, 1918.7), (1950.0, 1889.6), (2022.8, 1860.2),
                             (2699.5, 2045.3), (2788.5, 2101.0)],
     ("foothill", "20272"): [(2826.0, 1656.0)],
+    ("foothill", "20185"): [(2785.4, 2218.4)],
     ("metrolink", "Riverside Line"): [(1860, 2077.4)],
     ("ladot", "573"): [(1299, 2080), (1310, 2103), (1313, 2117), (1322, 2130),
                        (1336, 2133), (1348, 2112), (1370, 2124), (1387, 2134),
@@ -1840,6 +1850,30 @@ OVERRIDE_PATHS = {
             (3795.5, 1690), (3795.5, 1712), (3795.5, 1728), (3795, 1733),
             (3793, 1736.5), (3790, 1738), (3782, 1738), (3772, 1738),
             (3761, 1738),
+        ],
+    },
+    ("foothill", "10285"): {
+        "box": (2895, 2125, 2960, 2180),
+        "path": [
+            (2895.8, 2128.9), (2898.4, 2130.4), (2901.0, 2131.9),
+            (2903.1, 2133.2), (2905.6, 2134.3), (2908.5, 2135.2),
+            (2912.4, 2135.9), (2919.2, 2135.9), (2928.2, 2135.9),
+            (2937.0, 2135.9), (2946.0, 2135.9), (2954.0, 2135.9),
+            (2956.3, 2136.4), (2958.1, 2137.8), (2959.2, 2139.8),
+            (2959.4, 2144.4), (2959.4, 2153.4), (2959.4, 2162.4),
+            (2959.4, 2171.4), (2959.4, 2180.1),
+        ],
+    },
+    ("foothill", "10282"): {
+        "box": (2800, 2150, 2870, 2200),
+        "path": [
+            (2822.9, 2153.4), (2819.9, 2158.6), (2816.9, 2163.8),
+            (2813.9, 2169.0), (2810.9, 2174.2), (2807.9, 2179.4),
+            (2804.9, 2184.6), (2801.9, 2189.8), (2798.9, 2195.0),
+            (2796.2, 2199.7), (2795.0, 2204.9), (2796.6, 2207.6),
+            (2798.7, 2208.8), (2801.6, 2209.2), (2810.6, 2209.2),
+            (2822.6, 2209.2), (2834.6, 2209.2), (2846.6, 2209.2),
+            (2858.6, 2209.2), (2867.6, 2209.2),
         ],
     },
     ("foothill", "10197"): {
