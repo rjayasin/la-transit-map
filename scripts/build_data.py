@@ -253,6 +253,43 @@ MAP_LABELS = {
 }
 
 
+# Feed routes whose paired short name is two drawn lines, not one line renamed
+# along its length; those ship as two routes, split by badge. A pair left out
+# keeps route_label's first half, which is what 14/37 wants — one line, badged
+# 14 at one end and 37 at the other. Add a row only where no working is badged
+# as both.
+SPLIT_LABELS = {
+    ("gtfs_bus", "236-13201"): ("235", "236"),   # Balboa north / Rinaldi
+    ("gtfs_bus", "242-13201"): ("242", "243"),   # Tampa / Winnetka
+    ("gtfs_bus", "260-13201"): ("260", "261"),   # Imperial / Atlantic south
+    ("gtfs_bus", "487-13201"): ("487", "489"),   # San Gabriel / Rosemead
+}
+SPLIT_NEAR = 25.0   # px a badge may stand from a fitted shape and speak for it
+
+
+def split_variants(parts, shapes):
+    """Which paired designation each variant of a route is drawn as, given
+    {shape id: fitted points}, or None where the badges don't separate it.
+
+    A badge near every variant is on the trunk they share and says nothing; one
+    near some of them names those."""
+    trees = {s: cKDTree(np.asarray(densify([tuple(q) for q in p], 4.0), dtype=float))
+             for s, p in shapes.items()}
+    votes = {s: Counter() for s in shapes}
+    for part in parts:
+        for xy in badge_words("main").get(part, ()):
+            near = [s for s, t in trees.items() if t.query(xy)[0] < SPLIT_NEAR]
+            if not near or len(near) == len(shapes):
+                continue
+            for s in near:
+                votes[s][part] += 1
+    won = {}
+    for s, c in votes.items():
+        top = c.most_common(2)
+        won[s] = top[0][0] if top and (len(top) == 1 or top[0][1] > top[1][1]) else None
+    return won
+
+
 def printed_on_map(token):
     """Whether the sheet prints this token anywhere — the test of whether a
     rider could look a vehicle's label up."""
@@ -4215,7 +4252,7 @@ def store_used_shapes(feed, used):
 
 
 def write_refit(path, feed, shapes_raw, route_by_shape, route_idx, routes,
-                systems, trip_counts):
+                systems, trip_counts, split_route=()):
     """The refitted shapes as the keys `debug_line.py` reads, and no others: a
     refit has no timetable, so the stop distances are empty and the call-out
     runs are absent. Trip counts come from trips.txt, which is enough to keep
@@ -4226,7 +4263,8 @@ def write_refit(path, feed, shapes_raw, route_by_shape, route_idx, routes,
         P = np.asarray(shapes_raw[key])
         shapes.append([round(v, 1) for xy in P for v in xy])
         patterns.append({"s": i, "d": []})
-        ridx = route_idx.get((feed, route_by_shape.get(key[1])))
+        ridx = (split_route or {}).get(
+            key[1], route_idx.get((feed, route_by_shape.get(key[1]))))
         if ridx is not None:
             trips += [[ridx, i, 0]] * max(1, trip_counts.get(key[1], 1))
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
@@ -4894,6 +4932,35 @@ def main():
             shapes_raw[(feed, sid)] = stored
             p = tmp[sid]
             shape_ll[(feed, sid)] = [(q[1], q[2]) for q in p]
+        # Here rather than where the routes are registered: the badges are read
+        # against the fitted shapes, which do not exist until now.
+        split_route = {}                 # shape id -> the route it moved to
+        for rid in [r for r in route_sids if (feed, r) in SPLIT_LABELS]:
+            base = route_idx.get((feed, rid))
+            drawn = {s: shapes_raw[(feed, s)] for s in route_sids[rid]
+                     if (feed, s) in shapes_raw}
+            if base is None or len(drawn) < 2:
+                continue
+            label = routes[base]["n"]
+            won = split_variants(SPLIT_LABELS[(feed, rid)], drawn)
+            moved = {s: t for s, t in won.items() if t and t != label}
+            # every variant moving is one line under the other designation,
+            # which is MAP_LABELS' question rather than the badges' answer
+            if not moved or len(moved) == len(won):
+                continue
+            idx = {}
+            for tok in set(moved.values()):
+                # off the route's own entry, which carries the agency recolour
+                idx[tok] = len(routes)
+                routes.append(dict(routes[base], n=tok))
+            split_route = {s: idx[t] for s, t in moved.items()}
+            for k in range(n_before, len(trips_out)):
+                ridx, pkey, times, dow = trips_out[k]
+                if ridx == base and pkey[1] in split_route:
+                    trips_out[k] = (split_route[pkey[1]], pkey, times, dow)
+            print(f"  {feed} {label}: "
+                  + ", ".join(f"{s}->{t}" for s, t in sorted(moved.items())))
+
         n_trips = len(trips_out) - n_before
         stats[feed] = n_trips
         picked = [d for d in days if d]
@@ -4901,7 +4968,7 @@ def main():
             print(f"{feed}: {snapped}/{fitted} shapes snapped, {anchored} anchored")
             write_refit(refit_out, feed, shapes_raw, route_by_shape, route_idx,
                         routes, systems,
-                        Counter(s for _, s in trip_info.values()))
+                        Counter(s for _, s in trip_info.values()), split_route)
             return
         print(f"{feed}: {n_trips} trips over {min(picked)}..{max(picked)} "
               f"({snapped}/{len(warped)} shapes snapped, {anchored} anchored)")
