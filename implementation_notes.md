@@ -82,6 +82,7 @@ fix — try them in this order, least invasive first:
 | Table | Use it when |
 |---|---|
 | `MAP_LABELS` | The sheet badges a route differently from the feed's `route_short_name` (or the name is prose, as for a DASH). Also fixes `orphan_check` rows |
+| `SPLIT_LABELS` | The feed pairs two designations under one route (`235/236`) and the sheet draws them as two lines rather than one line renamed along its length |
 | `SYMBOL_OWNERS` | The sheet symbolises by *operator*, so a shared symbol must be assigned to a specific route by hand |
 | `BADGE_FILLS` | An agency's badge chips are its saturated legend ink, far enough from its washed line color that the color gate rejects its own badges |
 | `LEGEND_SEEDS` | A refined line color has drifted somewhere the artwork isn't; name the stroke the legend actually uses |
