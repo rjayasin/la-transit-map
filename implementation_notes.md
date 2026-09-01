@@ -317,7 +317,11 @@ Four blind spots to know about, since a fix can look like a no-op:
   what shows it, and `unjitter` is what takes it out.
 - `drift_check` scores by color, so a route sitting on a *sibling* route's ink
   of the same color scores clean.
-- `path_check` scores by straightness, so a smoothly cut corner scores zero.
+- `path_check` scores by straightness, so a smoothly cut corner scores zero —
+  and putting a shape back on a corner it was cutting scores *worse*, since an
+  out-and-back whose legs both sit on the one drawn line is a true fold where
+  the cut version was a shallow cusp. Read the `sharp` column against the kink
+  count before calling a rank increase a regression.
   It also reads the main map alone unless asked for `--inset`: the call-out is
   a second, separately snapped drawing of the same routes, and its runs are
   stored apart from the shapes.
@@ -468,14 +472,15 @@ fold that scores everything, without either leg having moved a street.
   feeds, three for others, against the 4 the constants read as. Anything meant
   as a length of line wants `span_points`, not a count.
 - **A smoothing window is longer than a schematic's own corners.** `unjitter`
-  averages over more line than the wander it removes, which is also more line
-  than the legs of a detour the sheet draws tight — a circulator's few blocks,
-  a jog round a block. Averaging across those rounds the corners off the
-  artwork, so the average is charged for what it costs in *drawing*:
-  `JITTER_KEEP` is how far a point may be carried from its ink before it starts
-  keeping its own place instead. Read tight enough to bite on ordinary wander
-  (2-3 px, the wander's own amplitude) it costs more turning than it saves
-  drift; the room between that and a drawn corner is where it belongs.
+  averages over more line than the wander it removes, and an average pulls
+  every bend inside the window toward the inside of the turn — so a corner the
+  sheet draws rounded ships cut across. The average is re-seated on the drawing
+  afterwards: each point's offset from the ink, smoothed over `SEAT_SPAN`, and
+  taken across the line only, since the along-line half of that offset carries
+  the ink's own sampling back in as wobble. `JITTER_KEEP` then charges for
+  whatever the re-seating could not reach. Tightening `JITTER_KEEP` alone is
+  the trade the re-seating exists to avoid: read tight enough to bite on
+  ordinary wander it costs more turning than it saves drift.
 - **Smoothing a shape before the cleanup ballot moves routes off their line.**
   `settle` picks between fits by how sharply each turns, so a smoother line can
   hand the ballot to a different candidate — one that flattens a real jog, or a
