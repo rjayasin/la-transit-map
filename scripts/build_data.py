@@ -3439,6 +3439,11 @@ SEAT_CAP = 8.0        # px the drawing may stand from the smoothed line and
                       # still be what it is seated on. Below the spacing of
                       # neighbouring drawn streets, so this refines within the
                       # corridor the fit chose rather than choosing one.
+SEAT_PASSES = 2       # the correction is smoothed like the line it corrects,
+                      # which hands back about half of what the average took;
+                      # asking again off the moved line recovers most of the
+                      # rest. Self-limiting — a line on its ink has nothing
+                      # left to give back — so this is a count, not a cap.
 
 
 def unjitter(P, span=JITTER_SPAN, tree=None):
@@ -3464,6 +3469,10 @@ def unjitter(P, span=JITTER_SPAN, tree=None):
     corrects, and taken across the line only. The drawing says how far off a
     point sits, not where along it the point belongs, and carrying the
     along-line half of the offset brings the ink's own sampling in with it.
+    Smoothing the correction also halves it, so the line is seated
+    `SEAT_PASSES` times, each pass asking the drawing again from where the last
+    one left it — which is what brings back a jog the sheet draws in a couple
+    of blocks, where one pass only meets it halfway.
 
     What that leaves is charged for: each point keeps whatever share of the
     whole correction leaves it no further from the ink than the wander it
@@ -3485,13 +3494,14 @@ def unjitter(P, span=JITTER_SPAN, tree=None):
     out = smooth(P, span_points(P, span))
     if tree is None:
         return out
-    d, j = tree.query(out)
-    off = np.where((d < SEAT_CAP)[:, None], tree.data[j] - out, 0.0)
-    tan = np.gradient(out, axis=0)
-    tan /= np.maximum(np.hypot(*tan.T), 1e-9)[:, None]
-    across = np.c_[-tan[:, 1], tan[:, 0]]
-    out = out + smooth((off * across).sum(1)[:, None] * across,
-                       span_points(P, SEAT_SPAN))
+    seat_w = span_points(P, SEAT_SPAN)
+    for _ in range(SEAT_PASSES):
+        tan = np.gradient(out, axis=0)
+        tan /= np.maximum(np.hypot(*tan.T), 1e-9)[:, None]
+        across = np.c_[-tan[:, 1], tan[:, 0]]
+        d, j = tree.query(out)
+        off = np.where(d < SEAT_CAP, ((tree.data[j] - out) * across).sum(1), 0.0)
+        out = out + smooth(off[:, None], seat_w) * across
     lost = tree.query(out)[0] - np.maximum(tree.query(P)[0], JITTER_KEEP)
     share = 1.0 / (1.0 + np.maximum(lost, 0.0) / JITTER_KEEP)
     return P + share[:, None] * (out - P)

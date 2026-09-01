@@ -320,8 +320,11 @@ Four blind spots to know about, since a fix can look like a no-op:
 - `path_check` scores by straightness, so a smoothly cut corner scores zero —
   and putting a shape back on a corner it was cutting scores *worse*, since an
   out-and-back whose legs both sit on the one drawn line is a true fold where
-  the cut version was a shallow cusp. Read the `sharp` column against the kink
-  count before calling a rank increase a regression.
+  the cut version was a shallow cusp, and a corner turned where the sheet turns
+  it is a kink where the chord across it was none. Read the `sharp` column
+  against the kink count before calling a rank increase a regression, and read
+  both against turning measured on the stretches the *drawing* runs straight,
+  which is the only wobble number a corner cannot move.
   It also reads the main map alone unless asked for `--inset`: the call-out is
   a second, separately snapped drawing of the same routes, and its runs are
   stored apart from the shapes.
@@ -477,10 +480,12 @@ fold that scores everything, without either leg having moved a street.
   sheet draws rounded ships cut across. The average is re-seated on the drawing
   afterwards: each point's offset from the ink, smoothed over `SEAT_SPAN`, and
   taken across the line only, since the along-line half of that offset carries
-  the ink's own sampling back in as wobble. `JITTER_KEEP` then charges for
-  whatever the re-seating could not reach. Tightening `JITTER_KEEP` alone is
-  the trade the re-seating exists to avoid: read tight enough to bite on
-  ordinary wander it costs more turning than it saves drift.
+  the ink's own sampling back in as wobble. Smoothing the correction halves it,
+  so it is applied `SEAT_PASSES` times — one pass only meets a jog the sheet
+  draws in a couple of blocks halfway — and `JITTER_KEEP` charges for whatever
+  is still left. Tightening `JITTER_KEEP` alone is the trade the re-seating
+  exists to avoid: read tight enough to bite on ordinary wander it costs more
+  turning than it saves drift.
 - **Smoothing a shape before the cleanup ballot moves routes off their line.**
   `settle` picks between fits by how sharply each turns, so a smoother line can
   hand the ballot to a different candidate — one that flattens a real jog, or a
