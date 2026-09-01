@@ -3431,6 +3431,21 @@ JITTER_KEEP = 6.0     # px of drawing the smoothing may give up before it is
                       # under the legs of a drawn detour, so a corner is.
 
 
+SEAT_SPAN = 14.0      # px of line the re-seating correction is averaged over.
+                      # Half the averaging span: short enough to give a corner
+                      # back most of the way, long enough that the ink's own
+                      # sampling averages out of the correction.
+SEAT_CAP = 8.0        # px the drawing may stand from the smoothed line and
+                      # still be what it is seated on. Below the spacing of
+                      # neighbouring drawn streets, so this refines within the
+                      # corridor the fit chose rather than choosing one.
+SEAT_PASSES = 2       # the correction is smoothed like the line it corrects,
+                      # which hands back about half of what the average took;
+                      # asking again off the moved line recovers most of the
+                      # rest. Self-limiting — a line on its ink has nothing
+                      # left to give back — so this is a count, not a cap.
+
+
 def unjitter(P, span=JITTER_SPAN, tree=None):
     """A fitted shape with the feed's own tracing wander taken out of it.
 
@@ -3445,25 +3460,48 @@ def unjitter(P, span=JITTER_SPAN, tree=None):
     Averaging the line over a stretch longer than the wander is what removes
     it. The span is a length rather than a count of points — see span_points.
 
-    `tree` is the drawing this shape was fitted on, and it is what tells a
-    wander from a corner: a span long enough to outrun the one is longer than
-    the legs of a detour the schematic draws tight — a circulator's few
-    blocks — and averaging across those rounds the corners off the artwork.
-    So the average is taken as far as it does not cost the line its drawing:
-    each point keeps whatever share of the correction leaves it no further
-    from the ink than the wander it removes, and a corner where the smoothed
-    line would leave the drawing keeps its own place instead. The share falls
-    off smoothly rather than switching, since a step in the correction is a
-    kink in the line. Off the drawing entirely — a stretch the sheet doesn't
-    draw — there is nothing to give up and the average stands."""
+    An average over a length of line pulls every bend inside it toward the
+    inside of the turn, and a schematic is nothing but bends: where the sheet
+    rounds a corner the smoothed line cuts the arc off, by several px on a
+    corner drawn tight. So `tree` — the drawing this shape was fitted on —
+    is asked for the corner back afterwards: each point's offset from the ink,
+    averaged over half the span so the correction is as smooth as the line it
+    corrects, and taken across the line only. The drawing says how far off a
+    point sits, not where along it the point belongs, and carrying the
+    along-line half of the offset brings the ink's own sampling in with it.
+    Smoothing the correction also halves it, so the line is seated
+    `SEAT_PASSES` times, each pass asking the drawing again from where the last
+    one left it — which is what brings back a jog the sheet draws in a couple
+    of blocks, where one pass only meets it halfway.
+
+    What that leaves is charged for: each point keeps whatever share of the
+    whole correction leaves it no further from the ink than the wander it
+    removes, so a corner too tight to be seated back onto keeps its own place
+    instead. The share falls off smoothly rather than switching, since a step
+    in the correction is a kink in the line. Off the drawing entirely — a
+    stretch the sheet doesn't draw, or one further than SEAT_CAP from it —
+    there is nothing to seat on and nothing to give up, and the average
+    stands."""
     P = np.asarray(P, dtype=float)
-    w = span_points(P, span)
-    k = np.ones(w) / w
-    out = np.empty_like(P)
-    for c in (0, 1):
-        out[:, c] = np.convolve(np.pad(P[:, c], w // 2, mode="edge"), k, "valid")
+
+    def smooth(A, w):
+        k = np.ones(w) / w
+        out = np.empty_like(A)
+        for c in range(A.shape[1]):
+            out[:, c] = np.convolve(np.pad(A[:, c], w // 2, mode="edge"), k, "valid")
+        return out
+
+    out = smooth(P, span_points(P, span))
     if tree is None:
         return out
+    seat_w = span_points(P, SEAT_SPAN)
+    for _ in range(SEAT_PASSES):
+        tan = np.gradient(out, axis=0)
+        tan /= np.maximum(np.hypot(*tan.T), 1e-9)[:, None]
+        across = np.c_[-tan[:, 1], tan[:, 0]]
+        d, j = tree.query(out)
+        off = np.where(d < SEAT_CAP, ((tree.data[j] - out) * across).sum(1), 0.0)
+        out = out + smooth(off[:, None], seat_w) * across
     lost = tree.query(out)[0] - np.maximum(tree.query(P)[0], JITTER_KEEP)
     share = 1.0 / (1.0 + np.maximum(lost, 0.0) / JITTER_KEEP)
     return P + share[:, None] * (out - P)
