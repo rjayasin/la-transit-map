@@ -253,6 +253,50 @@ MAP_LABELS = {
 }
 
 
+# A feed route whose short name pairs two designations, and which the sheet
+# draws as two lines rather than as one line renamed along its length. The pair
+# then ships as two routes, each variant taking the designation whose badges
+# stand along it — see split_variants, which reads that off the artwork.
+#
+# Only the question is answered by hand, because the artwork answers it the same
+# way whichever it is. 14/37 is one drawn line, badged 14 at one end and 37 at
+# the other, and splitting it labels a short working with a designation its own
+# bus does not carry. 235/236 share Balboa and then part, one going on up to
+# Foothill and the other east along Rinaldi, so shipping both as "235" points a
+# rider at the line the other half of the pair runs. The test for an entry is
+# that no working is badged as both: put the two parts' badges over the fitted
+# shapes and look at whether the corridors they stand on are disjoint.
+SPLIT_LABELS = {
+    ("gtfs_bus", "236-13201"): ("235", "236"),
+}
+SPLIT_NEAR = 25.0   # px a badge may stand from a fitted shape and speak for it
+
+
+def split_variants(parts, shapes):
+    """Which of a route's paired designations each of its variants is drawn as,
+    or None for a variant the badges do not separate.
+
+    `shapes` is {shape id: fitted points}. A badge standing near every variant
+    is on the trunk the pair shares and says nothing about which is which; one
+    standing near some of them names those, and a variant takes whichever part
+    names it the more often."""
+    trees = {s: cKDTree(np.asarray(densify([tuple(q) for q in p], 4.0), dtype=float))
+             for s, p in shapes.items()}
+    votes = {s: Counter() for s in shapes}
+    for part in parts:
+        for xy in badge_words("main").get(part, ()):
+            near = [s for s, t in trees.items() if t.query(xy)[0] < SPLIT_NEAR]
+            if not near or len(near) == len(shapes):
+                continue
+            for s in near:
+                votes[s][part] += 1
+    won = {}
+    for s, c in votes.items():
+        top = c.most_common(2)
+        won[s] = top[0][0] if top and (len(top) == 1 or top[0][1] > top[1][1]) else None
+    return won
+
+
 def printed_on_map(token):
     """Whether the sheet prints this token anywhere — the test of whether a
     rider could look a vehicle's label up."""
@@ -4215,7 +4259,7 @@ def store_used_shapes(feed, used):
 
 
 def write_refit(path, feed, shapes_raw, route_by_shape, route_idx, routes,
-                systems, trip_counts):
+                systems, trip_counts, split_route=()):
     """The refitted shapes as the keys `debug_line.py` reads, and no others: a
     refit has no timetable, so the stop distances are empty and the call-out
     runs are absent. Trip counts come from trips.txt, which is enough to keep
@@ -4226,7 +4270,8 @@ def write_refit(path, feed, shapes_raw, route_by_shape, route_idx, routes,
         P = np.asarray(shapes_raw[key])
         shapes.append([round(v, 1) for xy in P for v in xy])
         patterns.append({"s": i, "d": []})
-        ridx = route_idx.get((feed, route_by_shape.get(key[1])))
+        ridx = (split_route or {}).get(
+            key[1], route_idx.get((feed, route_by_shape.get(key[1]))))
         if ridx is not None:
             trips += [[ridx, i, 0]] * max(1, trip_counts.get(key[1], 1))
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
@@ -4894,6 +4939,39 @@ def main():
             shapes_raw[(feed, sid)] = stored
             p = tmp[sid]
             shape_ll[(feed, sid)] = [(q[1], q[2]) for q in p]
+        # A pair of designations the sheet draws as two lines ships as two
+        # routes, the badges saying which working is which. Done here rather
+        # than where the routes are registered because it is the *fitted*
+        # shapes the badges are read against, and those do not exist until now.
+        split_route = {}                 # shape id -> the route it moved to
+        for rid in [r for r in route_sids if (feed, r) in SPLIT_LABELS]:
+            base = route_idx.get((feed, rid))
+            drawn = {s: shapes_raw[(feed, s)] for s in route_sids[rid]
+                     if (feed, s) in shapes_raw}
+            if base is None or len(drawn) < 2:
+                continue
+            label = routes[base]["n"]
+            won = split_variants(SPLIT_LABELS[(feed, rid)], drawn)
+            moved = {s: t for s, t in won.items() if t and t != label}
+            # Every variant moving is the pair not splitting here after all —
+            # one line under the other designation, which is a question for
+            # MAP_LABELS rather than an answer from the badges.
+            if not moved or len(moved) == len(won):
+                continue
+            idx = {}
+            for tok in set(moved.values()):
+                # off the route's own entry, so the agency recolour above is
+                # carried rather than the feed's branding read again
+                idx[tok] = len(routes)
+                routes.append(dict(routes[base], n=tok))
+            split_route = {s: idx[t] for s, t in moved.items()}
+            for k in range(n_before, len(trips_out)):
+                ridx, pkey, times, dow = trips_out[k]
+                if ridx == base and pkey[1] in split_route:
+                    trips_out[k] = (split_route[pkey[1]], pkey, times, dow)
+            print(f"  {feed} {label}: "
+                  + ", ".join(f"{s}->{t}" for s, t in sorted(moved.items())))
+
         n_trips = len(trips_out) - n_before
         stats[feed] = n_trips
         picked = [d for d in days if d]
@@ -4901,7 +4979,7 @@ def main():
             print(f"{feed}: {snapped}/{fitted} shapes snapped, {anchored} anchored")
             write_refit(refit_out, feed, shapes_raw, route_by_shape, route_idx,
                         routes, systems,
-                        Counter(s for _, s in trip_info.values()))
+                        Counter(s for _, s in trip_info.values()), split_route)
             return
         print(f"{feed}: {n_trips} trips over {min(picked)}..{max(picked)} "
               f"({snapped}/{len(warped)} shapes snapped, {anchored} anchored)")

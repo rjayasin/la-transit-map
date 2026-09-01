@@ -82,6 +82,7 @@ fix — try them in this order, least invasive first:
 | Table | Use it when |
 |---|---|
 | `MAP_LABELS` | The sheet badges a route differently from the feed's `route_short_name` (or the name is prose, as for a DASH). Also fixes `orphan_check` rows |
+| `SPLIT_LABELS` | The feed pairs two designations under one route (`235/236`) and the sheet draws them as two lines rather than one line renamed along its length |
 | `SYMBOL_OWNERS` | The sheet symbolises by *operator*, so a shared symbol must be assigned to a specific route by hand |
 | `BADGE_FILLS` | An agency's badge chips are its saturated legend ink, far enough from its washed line color that the color gate rejects its own badges |
 | `LEGEND_SEEDS` | A refined line color has drifted somewhere the artwork isn't; name the stroke the legend actually uses |
@@ -388,6 +389,18 @@ fold that scores everything, without either leg having moved a street.
   were installed, so the *next* build reads it back and comes out wrong with no
   warning at all. Install pymupdf before building, and clear the cache
   directory if a run printed either "unavailable" line.
+- **A paired short name can be two lines or one.** `route_label` ships a route
+  named `235/236` under the first half the sheet prints, which is right for
+  `14/37` — one drawn line badged 14 at one end and 37 at the other — and wrong
+  for a pair the sheet draws as two corridors, where it points a rider at the
+  half their bus does not run. `SPLIT_LABELS` names the pairs that really are
+  two lines and `split_variants` reads the rest off the artwork: a badge near
+  every variant is on the trunk they share and says nothing, one near some of
+  them names those, and a variant takes whichever half names it more often. The
+  test before adding a row is that no working is badged as both — put the two
+  halves' badges over the fitted shapes and look at whether the corridors are
+  disjoint. The split runs after the fit, since it is the *fitted* shapes the
+  badges are read against, and it changes no geometry at all.
 - **Module docstrings are user-facing.** Several scripts pass `__doc__` as their
   argparse `description`. Trimming one changes `--help`.
 - **`index.html` must stay byte-stable across deploys.** It is the one URL that
