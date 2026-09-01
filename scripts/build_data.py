@@ -253,19 +253,11 @@ MAP_LABELS = {
 }
 
 
-# A feed route whose short name pairs two designations, and which the sheet
-# draws as two lines rather than as one line renamed along its length. The pair
-# then ships as two routes, each variant taking the designation whose badges
-# stand along it — see split_variants, which reads that off the artwork.
-#
-# Only the question is answered by hand, because the artwork answers it the same
-# way whichever it is. 14/37 is one drawn line, badged 14 at one end and 37 at
-# the other, and splitting it labels a short working with a designation its own
-# bus does not carry. 235/236 share Balboa and then part, one going on up to
-# Foothill and the other east along Rinaldi, so shipping both as "235" points a
-# rider at the line the other half of the pair runs. The test for an entry is
-# that no working is badged as both: put the two parts' badges over the fitted
-# shapes and look at whether the corridors they stand on are disjoint.
+# Feed routes whose paired short name is two drawn lines, not one line renamed
+# along its length; those ship as two routes, split by badge. A pair left out
+# keeps route_label's first half, which is what 14/37 wants — one line, badged
+# 14 at one end and 37 at the other. Add a row only where no working is badged
+# as both.
 SPLIT_LABELS = {
     ("gtfs_bus", "236-13201"): ("235", "236"),   # Balboa north / Rinaldi
     ("gtfs_bus", "242-13201"): ("242", "243"),   # Tampa / Winnetka
@@ -276,13 +268,11 @@ SPLIT_NEAR = 25.0   # px a badge may stand from a fitted shape and speak for it
 
 
 def split_variants(parts, shapes):
-    """Which of a route's paired designations each of its variants is drawn as,
-    or None for a variant the badges do not separate.
+    """Which paired designation each variant of a route is drawn as, given
+    {shape id: fitted points}, or None where the badges don't separate it.
 
-    `shapes` is {shape id: fitted points}. A badge standing near every variant
-    is on the trunk the pair shares and says nothing about which is which; one
-    standing near some of them names those, and a variant takes whichever part
-    names it the more often."""
+    A badge near every variant is on the trunk they share and says nothing; one
+    near some of them names those."""
     trees = {s: cKDTree(np.asarray(densify([tuple(q) for q in p], 4.0), dtype=float))
              for s, p in shapes.items()}
     votes = {s: Counter() for s in shapes}
@@ -4942,10 +4932,8 @@ def main():
             shapes_raw[(feed, sid)] = stored
             p = tmp[sid]
             shape_ll[(feed, sid)] = [(q[1], q[2]) for q in p]
-        # A pair of designations the sheet draws as two lines ships as two
-        # routes, the badges saying which working is which. Done here rather
-        # than where the routes are registered because it is the *fitted*
-        # shapes the badges are read against, and those do not exist until now.
+        # Here rather than where the routes are registered: the badges are read
+        # against the fitted shapes, which do not exist until now.
         split_route = {}                 # shape id -> the route it moved to
         for rid in [r for r in route_sids if (feed, r) in SPLIT_LABELS]:
             base = route_idx.get((feed, rid))
@@ -4956,15 +4944,13 @@ def main():
             label = routes[base]["n"]
             won = split_variants(SPLIT_LABELS[(feed, rid)], drawn)
             moved = {s: t for s, t in won.items() if t and t != label}
-            # Every variant moving is the pair not splitting here after all —
-            # one line under the other designation, which is a question for
-            # MAP_LABELS rather than an answer from the badges.
+            # every variant moving is one line under the other designation,
+            # which is MAP_LABELS' question rather than the badges' answer
             if not moved or len(moved) == len(won):
                 continue
             idx = {}
             for tok in set(moved.values()):
-                # off the route's own entry, so the agency recolour above is
-                # carried rather than the feed's branding read again
+                # off the route's own entry, which carries the agency recolour
                 idx[tok] = len(routes)
                 routes.append(dict(routes[base], n=tok))
             split_route = {s: idx[t] for s, t in moved.items()}
