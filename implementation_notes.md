@@ -216,7 +216,7 @@ The route token matches a route id, an id without its variant suffix, or the
 designation the sheet prints, so `--only ladot:437` and `--only bigbluebus:9`
 both work without looking an opaque feed id up.
 
-**Two signatures worth recognising**, each of which names its own fix:
+**Three signatures worth recognising**, each of which names its own fix:
 
 - *A foreign agency's badge chip printed over this agency's line.* It knocks a
   gap in the mask that no bridge will cross, because the block closes round it
@@ -235,6 +235,15 @@ both work without looking an opaque feed id up.
   flat, so the whole unanchored tail inherits a correction pointing the wrong
   way. The tell is two adjacent badges whose fitted displacements disagree by
   more than a street. The fix is a pin in the tail.
+- *A schematic detour bracketed by two badges closer together than
+  `TRACE_SPAN[0]`.* No walk is attempted over a span that short, so the
+  displacement between the two badges is interpolated straight and the shape
+  cuts across whatever the sheet draws between them — the corner of a loop, a
+  jog the sheet swells into a block. It reads like a missing anchor and is not
+  one: adding a pin only shortens the span further, and where the warp runs a
+  corridor's width off the drawing every point of the drawn detour is nearest
+  the same warp point, so the pins all speak for one stretch and fight each
+  other. That is an override.
 
 **Placing a pin is a search with two constraints, both answerable before any
 rebuild.** It has to be on the drawn line — take the coordinates off the trace,
