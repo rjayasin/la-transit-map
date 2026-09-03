@@ -3777,21 +3777,18 @@ _RAIL_DIR = {}     # keyed by tree identity, as _PATHS is and for the same reaso
 
 
 def rail_dir_tree(tree):
-    """A rail mask binned by the direction its ribbon runs, so a line can only
-    be pulled onto track running its own way.
+    """A rail mask binned by the direction its ribbon runs, so a line only
+    matches track running its own way.
 
-    One mask holds one line and nothing else, which is usually enough to say
-    where a shape belongs. It stops being enough where the line turns a corner:
-    the warp's corner and the drawn one can sit a block apart, and then the
-    limb the shape is *not* on is the nearer of the two for the whole run up to
-    the turn. Every point in that run aims at it together, which no amount of
-    smoothing outvotes, and the corner comes out as a chord across the block.
-    Heading tells the limbs apart — track more than ~45 deg off the line's own
-    course is not the stretch it is running.
+    One mask holds one line, which is usually enough to place a shape. It is
+    not enough at a corner: where the warp's corner and the drawn one are a
+    block apart, the limb the shape is not on is the nearer of the two for the
+    whole run up to the turn, every point in that run is pulled to it, and the
+    corner comes out as a chord across the block. Track more than ~45 deg off
+    the shape's own heading is rejected, which separates the two limbs.
 
-    Pixels the ribbon is too tightly curved to give a heading for go into every
-    bin: they are the corners themselves, which is exactly where a line
-    changing course has to be free to land."""
+    Pixels too tightly curved to yield a heading go into every bin. Those are
+    the corners, where a line changing course has to be able to land."""
     key = id(tree)
     if key not in _RAIL_DIR:
         P = np.asarray(tree.data)
@@ -3814,15 +3811,14 @@ def snap_rail(pts, tree, caps=(45.0, 24.0, 12.0), wins=(15, 9, 5), max_gap=45, r
     back as a whole rather than a few points snapping and the rest sagging.
     Snapping each point to its own nearest track pixel leaves hooks where the
     track curves; the passes tighten the cap so the second reels in what the
-    first left bulging, and the third, smoothed over a short window, brings a
-    corner in to the radius the sheet draws rather than the one a wide window
-    leaves. Runs
+    first left bulging, and the third, smoothed over a short window, rounds a
+    corner to the radius the sheet draws rather than the window's. Runs
     longer than `max_gap` densified points keep the raw warp instead — the
     ghosted downtown call-out has no track to snap onto. Corners are rounded
     with Chaikin so turns read as curves, not right angles.
 
-    The mask is read through `rail_dir_tree`, so a limb of the line the shape
-    is not running cannot claim it where the two cross."""
+    The mask is read through `rail_dir_tree`, so where the line crosses itself
+    the limb the shape is not running cannot claim it."""
     P = np.array(densify(pts, 4.0), dtype=float)
     n = len(P)
     idx = np.arange(n)

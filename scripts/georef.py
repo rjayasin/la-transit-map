@@ -85,20 +85,16 @@ SPECK_MAX = 64   # tile px in one connected blob before it counts as a drawn lin
 
 
 def drawn_blobs(pts, limit=SPECK_MAX):
-    """The mask pixels that lie in a drawn ribbon rather than in speckle.
+    """Drop mask pixels in blobs too small to be a drawn ribbon.
 
-    Where two other colors meet, their blend can land inside a line's tolerance
-    for a handful of pixels. A color mask read off the raster shrugs those off,
-    because it snaps under a displacement smoothed over tens of points and one
-    stray pixel is outvoted. A rail mask cannot: the warp sits tens of px off
-    the drawn track, so a speck lying *between* the two is nearer than the line
-    for a whole run of points, they all aim at it together, and the line hooks
-    out to the speck and back.
+    Where two other colors meet, the blend can land inside a line's tolerance
+    for a few pixels. Snapping smooths its displacement over tens of points, so
+    a colour mask ignores a stray pixel, but a rail mask cannot: the rail warp
+    sits tens of px off the track, so a speck between the two is nearer than
+    the line for a whole run of points and pulls all of them.
 
-    Size separates the two outright — no drawn blob on the sheet is under 300
-    px and no stray one over 30 — so the cut has an order of magnitude of slack
-    either side. A ribbon broken into pieces by the labels over it stays well
-    clear of it: the pieces are still hundreds of px each."""
+    Blob size separates the two cleanly. No drawn blob is under 300 px and no
+    stray one is over 30, including where labels break a ribbon into pieces."""
     if not len(pts):
         return pts
     x, y = pts[:, 0].astype(int), pts[:, 1].astype(int)
