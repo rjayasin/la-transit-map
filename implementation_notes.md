@@ -176,7 +176,7 @@ than the route. The checks are the wrong place to start: `drift_check` scores
 by colour, so a route that has wandered onto a sibling of the same agency
 scores clean. Work from the drawing instead, in this order: trace the corridor,
 stand up a harness, then search for the table entry. The first two make the
-third cheap, and skipping them is what makes this slow.
+third cheap, and skipping them makes this slow.
 
 **Trace the corridor first, and trust nothing else as ground truth.** Take two
 points known to be on the drawn line, such as a badge `route_anchors` returned
