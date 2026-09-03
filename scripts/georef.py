@@ -8,6 +8,7 @@ from collections import defaultdict
 
 import numpy as np
 from PIL import Image
+from scipy import ndimage as ndi
 from scipy.spatial import cKDTree
 from scipy.optimize import least_squares
 
@@ -73,11 +74,37 @@ def load_masks(level=MASK_LEVEL, tol=MASK_TOL):
     out = build_data.cached_pixels(("rail", stamp), lambda: _rail_pixels(level, tol))
     trees = {}
     for rid in sorted(ROUTE_COLORS):
-        pts = out[out[:, 2] == int(rid)][:, :2]
+        pts = drawn_blobs(out[out[:, 2] == int(rid)][:, :2])
         print(f"route {rid}: {len(pts)} px")
         if len(pts) > 100:
             trees[rid] = cKDTree(pts / level)
     return trees
+
+
+SPECK_MAX = 64   # tile px in one connected blob before it counts as a drawn line
+
+
+def drawn_blobs(pts, limit=SPECK_MAX):
+    """Drop mask pixels in blobs too small to be a drawn ribbon.
+
+    Where two other colors meet, the blend can land inside a line's tolerance
+    for a few pixels. Snapping smooths its displacement over tens of points, so
+    a colour mask ignores a stray pixel, but a rail mask cannot: the rail warp
+    sits tens of px off the track, so a speck between the two is nearer than
+    the line for a whole run of points and pulls all of them.
+
+    Blob size separates the two cleanly. No drawn blob is under 300 px and no
+    stray one is over 30, including where labels break a ribbon into pieces."""
+    if not len(pts):
+        return pts
+    x, y = pts[:, 0].astype(int), pts[:, 1].astype(int)
+    x0, y0 = x.min(), y.min()
+    grid = np.zeros((y.max() - y0 + 1, x.max() - x0 + 1), bool)
+    grid[y - y0, x - x0] = True
+    lab, _ = ndi.label(grid, structure=np.ones((3, 3)))
+    big = np.bincount(lab.ravel()) >= limit
+    big[0] = False                       # background
+    return pts[big[lab[y - y0, x - x0]]]
 
 
 def tile_scan(colors, level, tol, labels=None):
