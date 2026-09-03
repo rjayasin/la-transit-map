@@ -16,7 +16,7 @@ let staleBuild = null;
 
 const cv = document.getElementById("c"), ctx = cv.getContext("2d");
 // A canvas past a certain size stops being accelerated and falls back to
-// software — a cliff, not a slope. Measured here at a fixed view: 4096x1900
+// software: a cliff, not a slope. Measured here at a fixed view: 4096x1900
 // costs 0.5 ms a frame, 5120x1900 costs 9.7 ms, for 25% more pixels. A 2560 CSS
 // px window at DPR 2 lands the wrong side of it.
 //
@@ -59,7 +59,7 @@ let simT = 0;           // seconds since midnight
 let playing = true;
 let pathTrip = -1;      // index into trips whose path is shown, or -1
 // The sheet already draws every route in its own ink, so tracing a path in that
-// same color loses it in the line underneath — and which line the vehicle is on
+// same color loses it in the line underneath, and which line the vehicle is on
 // is the whole question. A fixed bright stroke reads against the map's muted
 // palette instead; magenta is what scripts/debug_line.py reaches for first, so
 // the browser and the offline tool draw a path the same way.
@@ -84,7 +84,7 @@ function togglePlay() {
 }
 playBtn.onclick = togglePlay;
 scrub.oninput = () => { simT = +scrub.value; };
-// space always plays/pauses — never re-activates the last-clicked control
+// space always plays/pauses, and never re-activates the last-clicked control
 addEventListener("keydown", e => {
   if (e.code !== "Space" || e.metaKey || e.ctrlKey || e.altKey) return;
   e.preventDefault();
@@ -92,13 +92,13 @@ addEventListener("keydown", e => {
 });
 
 // ---- Los Angeles' day ----
-// Both modes play today's timetable — the build carries one per weekday — and
+// Both modes play today's timetable, the build carrying one per weekday, and
 // live additionally holds the clock to Los Angeles' at 1×. No realtime feed
 // behind either, so what they show is where each vehicle is *due*.
 let live = qp.has("live");
 
-// Seconds since midnight in Los Angeles — the schedule's zone, not the
-// viewer's. Through Intl rather than a fixed offset, which is an hour wrong for
+// Seconds since midnight in Los Angeles, which is the schedule's zone rather
+// than the viewer's. Through Intl rather than a fixed offset, which is an hour wrong for
 // half the year.
 const LA_ZONE = "America/Los_Angeles";
 const laParts = new Intl.DateTimeFormat("en-US", {
@@ -139,12 +139,12 @@ function liveClock() {
   const t = (ms / 1000 + laOffset) % 86400;
   return t < 0 ? t + 86400 : t;
 }
-// The weekday it is in Los Angeles, 0 = Sunday — the timetable both modes play.
+// The weekday it is in Los Angeles, 0 = Sunday: the timetable both modes play.
 function laDay() { laResample(); return laDow; }
 
 // Open on the clock rather than at midnight, so the first thing on screen is
 // the network as it is now; ?t= still says otherwise. The scrubber is set from
-// here too — paused, no frame will do it, and it would read midnight.
+// here too, since when paused no frame will do it and it would read midnight.
 if (!qp.get("t")) simT = liveClock();
 scrub.value = simT | 0;
 
@@ -154,7 +154,7 @@ const filtersEl = document.getElementById("filters");
 const sysBtn = document.getElementById("sys");
 let sysOn = [];
 // index.html has to stay byte-identical across deploys, so markup added since
-// brings its own styles — a cached copy would not carry them.
+// brings its own styles, since a cached copy would not carry them.
 sysBtn.title = "view mode & transit systems";
 const panelCss = document.createElement("style");
 panelCss.textContent = `
@@ -182,8 +182,8 @@ sysBtn.onclick = () => {
   }
 };
 
-// Live drives the clock from outside, so the transport controls are disabled —
-// not hidden, since the bar losing half its width reads as breakage. The speed
+// Live drives the clock from outside, so the transport controls are disabled
+// rather than hidden, since the bar losing half its width reads as breakage. The speed
 // would read as wrong rather than inert at 60×, so live lends it a 1× of its own.
 const liveSpeed = new Option("1×", "1");
 let speedWas = "";
@@ -286,7 +286,7 @@ const TILE = 512;
 // in the pyramid, so only a fraction is ever resident.
 //
 // They are ImageBitmaps rather than <img> elements because an <img> does not own
-// its decoded surface — it names one in the browser's image cache, which the
+// its decoded surface. It names one in the browser's image cache, which the
 // document cannot free. Dropping the element only releases a reference, so
 // evictions leaked until the content process died. close() frees the surface
 // then and there, so the live set is what the cache says it is.
@@ -294,13 +294,13 @@ const TILE = 512;
 // The budget must never fall below one frame's working set: the cascade can draw
 // three levels at once, and a budget under that evicts tiles the same frame is
 // still drawing, which reads as stutter rather than as a slow cache. So it
-// follows demand — twice the recent peak, floored, capped. levelsFor() bounds
+// follows demand: twice the recent peak, floored and capped. levelsFor() bounds
 // demand under the cap, so the two never have to fight.
 const TILE_FLOOR = 192;        // tiles; a small viewport still caches usefully
 const TILE_CEIL = 256;         // tiles, and 1 MB each: the live-memory ceiling
 const TILE_HEADROOM = 1.25;    // budget over working set; a frame must never
                                // evict a tile it is itself still drawing
-const TILE_INFLIGHT = 12;      // concurrent decodes — see pumpTiles
+const TILE_INFLIGHT = 12;      // concurrent decodes; see pumpTiles
 const tileCache = new Map();   // "level/c_r" -> tile, held in LRU order
 const tileQueue = [];          // tiles waiting for a decode slot, oldest first
 let tilesDrawn = 0, tileEvictions = 0, tileDemand = 0;
@@ -336,14 +336,14 @@ function evictTiles(budget) {
 // like: levelReady() is all-or-nothing, so one stuck tile keeps its level
 // un-ready forever, and every frame then redraws the base PNG underneath and
 // draws all three tile levels instead of one. It never shows as a slow frame,
-// since the cost lands on the compositor. Hence a bounded retry — a genuinely
+// since the cost lands on the compositor. Hence a bounded retry: a genuinely
 // missing file still gives up rather than becoming a fetch storm.
 const TILE_RETRY_MS = 4000;    // before a failed tile is asked for again
 const TILE_TRIES = 3;          // attempts before it is left alone for good
 
 // Nothing is fetched for a view that is still moving. A zoom gesture walks
 // through every level, each stop asking for a screenful of tiles it will have
-// left before they arrive — measured at ~50 bitmaps created and closed per
+// left before they arrive, measured at ~50 bitmaps created and closed per
 // second, none on screen long enough to be seen. The tile budget bounds what is
 // resident and says nothing about that churn. So the ask is deferred and the
 // view drawn from what is cached, which is what the coarse levels are for.
@@ -392,7 +392,7 @@ function getTile(level, c, r) {
 }
 
 // A pan asks for tiles far faster than they decode, and every decode in flight
-// is another megabyte allocated at once — the peak, not the resident set, is
+// is another megabyte allocated at once. The peak, not the resident set, is
 // what runs a process out of image memory. So decodes are rationed, and the
 // queue is served newest-first: the newest request is what the current view is
 // waiting on, while anything still queued from a view two gestures ago has
@@ -464,7 +464,7 @@ function levelCost(level) {
 // sharp enough, coarsest first, so coarser tiles back-fill while finer ones load.
 //
 // A level costs 4x the one below it, so both bounds here exist to stop the naive
-// rule — take the finest level that isn't too soft — from exhausting graphics
+// rule, take the finest level that isn't too soft, from exhausting graphics
 // memory. SHARP_ENOUGH refuses to trade up for less than a tenth of sharpness.
 // And a tier is most expensive at the moment it engages, while the viewport is
 // still at its widest, at a cost that scales with the window: a tier that
@@ -530,7 +530,7 @@ function drawTiles(g) {
 
 // ---- background compositing ----
 // The background changes only when the view moves or a tile finishes loading,
-// but vehicles move every frame — so recomposing 200+ scaled tile draws inside
+// but vehicles move every frame, so recomposing 200+ scaled tile draws inside
 // every repaint is what makes a large window stutter. It is fill cost, not cache
 // cost. So compose into an offscreen canvas and blit that: a still view pays for
 // the background once instead of 60 times a second.
@@ -539,13 +539,13 @@ const bgCtx = bg.getContext("2d");
 let bgKey = "", bgDirty = true, bgComposes = 0;
 // What the last compose asked the compositor for. The base PNG is the largest
 // single draw this page makes, drawn whenever the tiles don't yet cover, and at
-// the deepest zoom it lands on a 32768 px destination rect — worth recording in
-// a freeze snapshot.
+// the deepest zoom it lands on a 32768 px destination rect, which is worth
+// recording in a freeze snapshot.
 let baseDrawn = false, baseScale = 0;
 
 // Whether the browser took the canvases away. A 2D context is lost when the
 // process holding its surfaces goes (usually the GPU process), and the browser
-// says so with a main-thread event — which these freezes leave running, so this
+// says so with a main-thread event, which these freezes leave running, so this
 // either catches one outright or rules it out.
 //
 // The event is not cancelled, so the browser restores the context itself. What
@@ -557,7 +557,7 @@ for (const c of [cv, bg]) {
   c.addEventListener("contextlost", () => {
     ctxLost++; ctxLostAt = Math.round(performance.now());
     noteEvent("contextlost");
-    console.error("[transit] canvas context lost — the browser took the drawing "
+    console.error("[transit] canvas context lost: the browser took the drawing "
                   + "surfaces away. Recorded; transitFreeze() reads it back.");
   });
   c.addEventListener("contextrestored", () => {
@@ -581,8 +581,8 @@ function composeBackground() {
   bgCtx.setTransform(DPR * view.k, 0, 0, DPR * view.k,
                      -view.x * DPR * view.k, -view.y * DPR * view.k);
   // Draw the base PNG first so tiles land on top of it while they stream in,
-  // then skip it entirely once the tiles are shown to cover the viewport —
-  // scaling a 17-megapixel image under an opaque layer is pure waste.
+  // then skip it entirely once the tiles are shown to cover the viewport.
+  // Scaling a 17-megapixel image under an opaque layer is pure waste.
   if (map) {
     const probe = tilesCover();
     baseDrawn = !probe;
@@ -593,7 +593,7 @@ function composeBackground() {
 }
 
 // Whether the tile pyramid will completely hide the base PNG this frame. It has
-// to ask about the same cascade drawTiles will actually draw — this used to
+// to ask about the same cascade drawTiles will actually draw. This used to
 // repeat the level choice inline, and any disagreement between the two skips the
 // base PNG under tiles that were never drawn, leaving bare canvas.
 function tilesCover() {
@@ -631,7 +631,7 @@ function zoomAt(cx, cy, f) {
 }
 // Trackpad gestures follow Maps.app: two-finger swipe pans, pinch zooms about
 // the pointer. macOS keeps sending wheel events through the momentum phase, so
-// panning glides to a stop on its own — hand-rolled easing would fight the OS.
+// panning glides to a stop on its own; hand-rolled easing would fight the OS.
 //
 // A pinch arrives as a ctrlKey wheel event (Chrome, Firefox, Edge); Safari sends
 // gesture events instead, handled below, so the two paths can't both fire.
@@ -742,7 +742,7 @@ function drawSprite(g, route, px) {
 
 // One reused bitmap per route, resized in place when the size it needs changes.
 //
-// Keyed on the integer pixel size `spriteSize` rounds to — NOT on `view.k`. A
+// Keyed on the integer pixel size `spriteSize` rounds to, NOT on `view.k`. A
 // float key rebuilt every visible route's canvas on every frame of a zoom's
 // momentum tail; canvases look tiny to the JS heap while their buffers are
 // large, so the buffers outran GC until an allocation failed. Reusing the
@@ -761,7 +761,7 @@ function spriteAt(i, px) {
   return s.cv;
 }
 
-// geometry only — the bitmap is made on demand at the size the frame needs
+// geometry only; the bitmap is made on demand at the size the frame needs
 function makeSprite(route) {
   const R = route.rail ? 12 : 9.5;
   return { half: R + 2 };
@@ -785,7 +785,7 @@ const byDay = new Map(); // weekday -> the trips of `allTrips` running that day
 let dayShown = null;     // the weekday now in `trips`
 
 // GTFS times are minute-quantized, so consecutive stops can share a
-// timestamp (or sit 1s apart — a scheduler trick to force ordering) while
+// timestamp (or sit 1s apart, a scheduler trick to force ordering) while
 // the bus travels between them, teleporting the vehicle. Spread each run
 // of (near-)tied times over the adjacent gap, proportional to distance.
 function detie(times, dist) {
@@ -808,7 +808,7 @@ function detie(times, dist) {
   }
 }
 // distance for de-tying: downtown the main map is so compressed that stop
-// distances plateau, which would starve inset-moving segments of time —
+// distances plateau, which would starve inset-moving segments of time, so
 // weigh inset movement (at ~1/5 scale, the inset's magnification) too
 function effDist(pat) {
   const dd = pat.d, ir = pat.ir, id = pat.id;
@@ -886,14 +886,14 @@ function segSpeed(times, d, i) {
 
 // distance along shape at time t within segment [lo, hi], using a monotone
 // cubic Hermite over distance-vs-time. Endpoint slopes are the average of the
-// adjacent segments' speeds, so velocity is continuous across stop times —
-// per-segment easing (the old smoothstep) made every vehicle pulse to a halt
+// adjacent segments' speeds, so velocity is continuous across stop times.
+// Per-segment easing (the old smoothstep) made every vehicle pulse to a halt
 // at each stop, which read as rhythmic jerking at low speed multipliers.
 // `halt` makes the vehicle come to rest at each stop instead of carrying its
 // speed through: zero tangents turn the cubic into a smoothstep, so it pulls
 // away, runs, and brakes to a standstill at the platform, all within the
-// scheduled time. Trains stop at stations you can see on the map — the white
-// circles — and gliding through one at line speed reads as wrong; buses call
+// scheduled time. Trains stop at stations you can see on the map, the white
+// circles, and gliding through one at line speed reads as wrong; buses call
 // at unmarked kerbside stops every couple of blocks, where halting at each
 // would just look like a stutter.
 function distAt(times, d, lo, hi, t, halt) {
@@ -944,7 +944,7 @@ function spriteScale() {
 // Where a trip is on the clock: the stop pair it is between and how far along
 // its shape that puts it, or null if it isn't running. Both the way a vehicle
 // is drawn on the main map and the way it is mirrored into the call-out start
-// here, and so does the picker — a tap testing a position the renderer didn't
+// here, and so does the picker: a tap testing a position the renderer didn't
 // compute the same way is a tap that lands on nothing.
 function tripAt(tr, t) {
   if (t < tr.t0 || t > tr.t1) return null;
@@ -967,8 +967,8 @@ function vehiclePos(tr, t) {
 // inset space, since the schematic main map collapses downtown: each stop knows
 // its run and its distance along that run's inset polyline, and the vehicle's
 // progress through the current segment interpolates between them. Takes the
-// clock position the caller already worked out rather than finding it again —
-// the draw loop runs this for every trip, every frame.
+// clock position the caller already worked out rather than finding it again,
+// since the draw loop runs this for every trip, every frame.
 function insetPosAt(pat, lo, hi, dist, tc, times) {
   const ir = pat.ir;
   if (!ir) return null;
@@ -1004,7 +1004,7 @@ function pickVehicle(cx, cy) {
   // Inside the call-out the panel's own sprites are what the eye sees: they are
   // drawn last and clipped to the frame, over whatever the main map put there.
   // So a tap in the panel is offered them first, and only falls through to the
-  // main map when it hits none — which keeps a tap on blank panel from picking
+  // main map when it hits none, which keeps a tap on blank panel from picking
   // a vehicle hidden underneath it.
   const inPanel = insetRect && mx >= insetRect[0] && mx <= insetRect[2]
                             && my >= insetRect[1] && my <= insetRect[3];
@@ -1026,7 +1026,7 @@ function pickVehicle(cx, cy) {
 
 // path inspector: tapping a vehicle shows the line it runs; tapping another
 // switches to it, tapping empty space hides the path. The selection outlives a
-// pause in both directions — pressing play keeps the path up, which is what
+// pause in both directions: pressing play keeps the path up, which is what
 // makes it useful for watching a vehicle run its variant rather than only for
 // reading a frozen one. Only another tap (or filtering the system out) clears it.
 function handleTap(cx, cy) {
@@ -1039,7 +1039,7 @@ function handleTap(cx, cy) {
 // This page's memory is almost entirely decoded images, so a failed allocation
 // is the likely cause; tiles dominate (see the cache above).
 //
-// A freeze need not come through here at all — the loop can be fine while the
+// A freeze need not come through here at all: the loop can be fine while the
 // content process underneath has run out of image surfaces. So the snapshot
 // leads with fps and live megabytes: a log arriving while fps reads 0 means the
 // loop stopped, one arriving at 60 over a frozen picture means it didn't.
@@ -1048,9 +1048,9 @@ const DEBUG = qp.has("debug");
 const SLOW_FRAME_MS = 500;   // a frame this long is thrashing, not drawing
 let frameErrors = 0, slowFrames = 0, lastSlowLog = -1e9;
 let frames = 0, lastFrameAt = performance.now();
-// A stalled compositor and a backgrounded tab both read as `fps: 0` — rAF stops,
-// timers keep firing — so the rAF gap and the document's visibility are tracked
-// always rather than under a ?trace flag someone must set in advance.
+// A stalled compositor and a backgrounded tab both read as `fps: 0`, since rAF
+// stops while timers keep firing, so the rAF gap and the document's visibility
+// are tracked always rather than under a ?trace flag someone must set first.
 let lastRafAt = 0, rafGapMax = 0;
 let visibleSince = performance.now(), hiddenInWindow = document.hidden;
 // `document.hidden` cannot settle it: on macOS a window behind another window
@@ -1077,9 +1077,9 @@ function visibleMs() {
 // whether it is still producing frames. Nothing this file does can move it.
 //
 // Against `stalledVisibleMs` it splits the freeze in two:
-//   climbing, while the page has no frames — the browser is rendering and this
+//   climbing, while the page has no frames: the browser is rendering and this
 //     page's rAF registration is gone. Re-arming recovers it.
-//   frozen — the browser stopped updating the rendering for a visible document.
+//   frozen: the browser stopped updating the rendering for a visible document.
 //     Nothing drawn here can reach the screen. Not fixable from in here.
 function renderTick() {
   const t = document.timeline && document.timeline.currentTime;
@@ -1109,8 +1109,8 @@ let peakDecodeRate = 0, peakEvictRate = 0;
 // Reset with the rate baselines below, so these describe the window a snapshot
 // covers rather than the whole session.
 let frameCostSum = 0, frameCostN = 0, frameCostMax = 0;
-// And what the frame spent it on. Frame cost is not flat — 3-4 ms zoomed out,
-// 10-16 ms past k≈3 — and a single average can't say which part grows. The three
+// And what the frame spent it on. Frame cost is not flat (3-4 ms zoomed out,
+// 10-16 ms past k≈3) and a single average can't say which part grows. The three
 // candidates fail differently: the compose is one huge draw and only runs when
 // the view moves, the blit is the whole canvas every frame, and the sprites are
 // thousands of small draws whose on-screen size grows as sqrt(k). Timed
@@ -1148,11 +1148,11 @@ function resourceStats() {
     rafGapMax: Math.round(rafGapMax),
     // How many callbacks arrived for a frame already drawn, and how many
     // requests are outstanding. Before the count replaced it, a single dupe was
-    // enough to end the animation — see frame() — so a record with dupes on it
+    // enough to end the animation (see frame()), so a record with dupes on it
     // is a record from a session that used to be one bad frame from a stall.
     rafDupes, rafLive,
     // Whether the *browser* is still producing frames, independent of whether
-    // this page is getting any — see renderTick(). Read it second, right after
+    // this page is getting any; see renderTick(). Read it second, right after
     // stalledVisibleMs, and it names the culprit outright.
     renderTick: renderTick(),
     // The window against the canvas cut for it. These agree unless a resize
@@ -1166,14 +1166,14 @@ function resourceStats() {
     tilesCached: tileCache.size, tilesDrawn, tileDemand: Math.round(tileDemand),
     tileBudget: tileBudget(), tileQueued: tileQueue.length, tileInflight,
     // Every decode is a megabyte allocated, so decodes are the churn that used
-    // to run away invisibly — before tiles owned their surfaces, each one also
+    // to run away invisibly. Before tiles owned their surfaces, each one also
     // stayed allocated. Over a still view both rates should fall to zero; if
     // decodesPerSec tracks evictsPerSec instead, the cache is re-fetching tiles
     // it just dropped and the budget is under the working set.
     tileDecodes, decodesPerSec: rate(tileDecodes - statsDecodes),
     tileEvictions, evictsPerSec: rate(tileEvictions - statsEvictions),
-    // The rates above are since the last snapshot, so at a freeze they read 0 —
-    // nothing is happening, which is the point. These are the worst the session
+    // The rates above are since the last snapshot, so at a freeze they read 0,
+    // nothing happening being the point. These are the worst the session
     // ever saw, and are what the churn actually looked like on the way in: the
     // 13:21 freeze was ~48 decodes and ~50 evictions a second, sustained for 26
     // seconds of zooming, while every instantaneous reading looked healthy.
@@ -1192,7 +1192,7 @@ function resourceStats() {
     costBlit: frameCostN ? +(costBlitSum / frameCostN).toFixed(1) : 0,
     costSprites: frameCostN ? +(costSpriteSum / frameCostN).toFixed(1) : 0,
     spriteDraws,
-    // Whether the last compose drew the base PNG, and at what scale — see
+    // Whether the last compose drew the base PNG, and at what scale; see
     // composeBackground. tileHoldFrames counts frames drawn while tile loading
     // was deliberately held off because the view was still moving.
     baseDrawn, baseScale, tileHoldFrames,
@@ -1238,7 +1238,7 @@ function noteSlowFrame(ms, at) {
   if (slowFrames > 6 || at - lastSlowLog < 3000) return;
   lastSlowLog = at;
   console.warn(`[transit] frame took ${ms | 0} ms. If this keeps climbing the tab is `
-             + "thrashing on decoded image memory — check tileMB and decodesPerSec. "
+             + "thrashing on decoded image memory; check tileMB and decodesPerSec. "
              + "Snapshot:", resourceStats());
 }
 window.transitDebug = resourceStats;
@@ -1246,15 +1246,15 @@ window.transitDebug = resourceStats;
 function noteFrameError(err) {
   frameErrors++;
   if (frameErrors > 3) return;          // a bad frame usually repeats; don't spam
-  console.error("[transit] frame aborted — the simulation would have stopped here:", err);
+  console.error("[transit] frame aborted; the simulation would have stopped here:", err);
   console.warn("[transit] probable cause: graphics memory exhausted by decoded image "
-             + "surfaces — tiles dominate, so read tileMB and peakTileMB first. "
+             + "surfaces. Tiles dominate, so read tileMB and peakTileMB first. "
              + "Snapshot:", resourceStats());
   if (frameErrors === 3) console.warn("[transit] further frame errors suppressed");
 }
 
 if (DEBUG) {
-  console.log("[transit] debug on — transitDebug() for live resource stats. "
+  console.log("[transit] debug on. transitDebug() gives live resource stats. "
             + `Tile budget tracks demand, ${TILE_FLOOR}-${TILE_CEIL} tiles at 1 MB each; `
             + "if tileDemand ever reaches tileBudget the cache is thrashing and evictions "
             + "and decodes will run away together.");
@@ -1262,7 +1262,7 @@ if (DEBUG) {
 }
 
 // Without ?debug nothing is logged at all, and running out of image memory
-// doesn't announce itself — the frame loop stays clean right up to the freeze.
+// doesn't announce itself; the frame loop stays clean right up to the freeze.
 // So one cheap watchdog runs always and says the only thing worth saying
 // beforehand: how much decoded image memory is live, and what is holding it.
 // Under ?debug the 5-second log above owns the rate baselines instead.
@@ -1282,8 +1282,8 @@ setInterval(() => {
 // page asks: version.json carries the published build, the query string gets
 // past the CDN's ten-minute cache, and no-store keeps it out of the browser's.
 //
-// It never reloads by itself — this is a simulation someone watches at a zoom
-// and a clock they chose. It offers, in the bar, and says so on the console.
+// It never reloads by itself, this being a simulation someone watches at a
+// zoom and a clock they chose. It offers, in the bar, and says so on the console.
 const VERSION_POLL_MS = 300000;   // 5 min; a deploy is not an urgent event
 const updEl = document.getElementById("upd");
 updEl.addEventListener("click", () => location.reload());
@@ -1298,7 +1298,7 @@ async function checkVersion() {
     staleBuild = v.build;
     updEl.hidden = false;
     console.warn(`[transit] this tab is running build ${BUILD}; ${v.build} is live. `
-               + "Nothing is wrong with it — but a freeze reported from this tab is a "
+               + "Nothing is wrong with it, but a freeze reported from this tab is a "
                + "freeze in the older code. The update button in the bar reloads.");
   } catch (e) { /* offline, or the deploy is mid-flight; ask again next time */ }
 }
@@ -1314,29 +1314,29 @@ checkVersion();
 // session. So the page watches itself, always, and records the moment.
 //
 // The condition is the visible clock above: visible and no frame for
-// STALL_VISIBLE_MS. There is no legitimate way to sit that long — a slow frame
+// STALL_VISIBLE_MS. There is no legitimate way to sit that long: a slow frame
 // is still a frame, a hidden tab doesn't advance the clock, and a frame that
 // threw still scheduled its successor.
 //
 // The record goes to localStorage because the only known cure is closing the
 // tab, which takes the console with it. Written once, at detection, so nothing
 // touches storage on the hot path. This cannot catch a main thread wedged
-// outright, since the timer would be wedged too — that is the ?trace worker's case.
+// outright, since the timer would be wedged too; that is the ?trace worker's case.
 const STALL_VISIBLE_MS = 4000;   // visible, and not drawn, for this long
 const STALL_TICK_MS = 1000;      // so the record lands within a second of that
 const STALL_KEY = "transit.freeze";
 const STALL_PREV_KEY = "transit.freeze.prev";
 const STALL_RUNUP = 30;          // cheap liveness samples kept before the stall
 // Which run of the page wrote the record. "Keep the first stall of the session"
-// needs to know what the session is, and localStorage outlives it — testing
+// needs to know what the session is, and localStorage outlives it. Testing
 // "is there a record already" keeps the first freeze ever recorded forever and
 // drops every later run's verdict, since neither is written unless this run owns
 // the record.
 const STALL_SESSION = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 let stallRunup = [], inStall = false;   // stalls/firstStallAt live with the clock
 
-// What the page was being asked to do on the way in — a ring of the input events
-// themselves, which says what no counter reflects: a resize, a display change,
+// What the page was being asked to do on the way in: a ring of the input events
+// themselves, which says what no counter reflects, such as a resize, a display change,
 // the browser freezing or resuming the page.
 //
 // Runs of one kind are coalesced, since a pinch is hundreds of wheel events and
@@ -1351,7 +1351,7 @@ const stallEvents = [], stallEventsDuring = [];
 function noteEvent(kind) {
   // A frozen page gets poked, and the poking was drowning out the run-up: the
   // whole ring of the 21:46 record is twelve pointerdown/pointerup pairs in two
-  // seconds — someone clicking at a picture that had stopped — and they had
+  // seconds, someone clicking at a picture that had stopped, and they had
   // pushed out every event from before the stall, which is the half worth
   // having. The observer tripping the thing it observes, again. So events that
   // arrive while the page is not drawing go to their own ring: the run-up
@@ -1370,8 +1370,8 @@ for (const ev of ["pointerdown", "pointerup", "wheel", "keydown", "resize",
 }
 
 // The wall clock against the monotonic one. They diverge when the process is
-// suspended rather than wedged — a laptop lid, a sleeping machine, a tab the
-// browser froze — which reproduces the freeze signature exactly and is the
+// suspended rather than wedged, as with a laptop lid, a sleeping machine or a
+// tab the browser froze, which reproduces the freeze signature exactly and is the
 // first thing to rule out. The ?trace worker has reported this all along and
 // the freeze record never has.
 const CLOCK_SKEW0 = Date.now() - performance.now();
@@ -1424,8 +1424,8 @@ function amendRecord(fields) {
 
 setInterval(() => {
   // A resize event that was never delivered leaves the canvas cut for a window
-  // that no longer exists, and it stays that way until the next resize — the
-  // drawing buffer permanently the wrong size for the CSS box, which stretches
+  // that no longer exists, and it stays that way until the next resize, with
+  // the drawing buffer the wrong size for the CSS box, which stretches
   // everything drawn into it. That is not hypothetical: the freeze this
   // watchdog caught reported a 2560x1331 canvas in a 2560x1081 window, because
   // resize steps ride the same "update the rendering" pass as rAF and stopped
@@ -1462,17 +1462,17 @@ setInterval(() => {
     armFrame();
     // One tick after detection, still stalled: the browser's frame clock has
     // had a full second to move, and whether it did is the whole diagnosis.
-    // Recorded once — after that there is nothing further to learn by watching.
+    // Recorded once; after that there is nothing further to learn by watching.
     if (verdictPending) {
       verdictPending = false;
       const browserRendering = sample.tick > stallTick;
       console.error(browserRendering
         ? "[transit] the browser is still producing frames and this page is not being "
-        + "called — the rAF registration was lost. Re-armed; if this line is followed "
+        + "called. The rAF registration was lost. Re-armed; if this line is followed "
         + "by a resume, that was it."
         : "[transit] the browser has produced no frames for a second while this document "
         + "is visible and asking to draw. The stall is below the page: nothing drawn from "
-        + "here can reach the screen. Reopen the tab — a reload keeps the same process.");
+        + "here can reach the screen. Reopen the tab; a reload keeps the same process.");
       amendRecord({ verdict: {
         browserRendering, tickAtStall: stallTick, tickAfter: sample.tick,
         framesAfter: frames - stallFrames, winH: innerHeight, cvH: cv.height,
@@ -1489,9 +1489,9 @@ setInterval(() => {
   // The verdict below is written a tick *after* detection, and a stall that
   // recovers inside that second never gets one: the 2026-07-29 record has seven
   // stalls and no verdict at all, because every one of them came back the tick
-  // after it was caught. The same comparison is already available at detection —
-  // the run-up's previous sample carries the browser's frame clock from a second
-  // ago — so it is taken here too, and this one cannot be outrun.
+  // after it was caught. The same comparison is already available at detection,
+  // since the run-up's previous sample carries the browser's frame clock from a
+  // second ago, so it is taken here too and this one cannot be outrun.
   const prevSample = stallRunup[stallRunup.length - 2];
   const atStall = prevSample ? {
     browserRendering: sample.tick > prevSample.tick,
@@ -1505,13 +1505,13 @@ setInterval(() => {
   stallTick = sample.tick; stallFrames = frames; stallAtVis = sample.vis;
   verdictPending = true;
   console.error(`[transit] the page has been visible and not drawing for `
-              + `${sample.stalled} ms — this is the freeze, recorded. `
+              + `${sample.stalled} ms. This is the freeze, recorded. `
               + "transitFreeze() reads it back, and survives closing the tab.", snap);
   // The tab strip is painted by the browser, not by this document, so the title
   // still reaches the user when nothing drawn here can. It is the only channel
-  // left when the rendering pass itself has stopped — an overlay would sit in
-  // the same dead pass as the canvas.
-  document.title = "⚠ frozen — " + PAGE_TITLE;
+  // left when the rendering pass itself has stopped, since an overlay would
+  // sit in the same dead pass as the canvas.
+  document.title = "⚠ frozen: " + PAGE_TITLE;
   // And ask for a frame again. If the loop merely lost its registration this
   // recovers it within a frame and costs one call; if the browser has stopped
   // rendering, it is ignored along with the registration already outstanding.
@@ -1522,8 +1522,8 @@ setInterval(() => {
     // Keep the first stall of *this* session: it is the one with the healthy-to-
     // stalled transition in front of it. Later ones in the same session only
     // bump the count. A record from an earlier run is superseded rather than
-    // preserved — a fresh freeze, carrying its own run-up and its own verdict,
-    // is worth more than an old one — but it steps back one slot first, so
+    // preserved, since a fresh freeze carrying its own run-up and verdict is
+    // worth more than an old one, but it steps back one slot first, so
     // nothing that has not been read yet disappears without warning.
     if (prior && prior.session === STALL_SESSION) {
       prior.stalls = stalls;
@@ -1552,14 +1552,14 @@ window.transitFreeze = (back = 0) => {
 
 // And say at load that there is one. Reading the record takes knowing to ask for
 // it, and the whole reason it is in storage is that the tab it describes is
-// gone — so the session after a freeze is exactly when nobody is thinking about
+// gone, so the session after a freeze is exactly when nobody is thinking about
 // the console. Announcing it also dates the code: a record from a run older than
 // the fix being tested says so, instead of being read as a result of it.
 {
   const rec = window.transitFreeze();
   if (rec) console.warn(
     `[transit] a freeze was recorded ${new Date(rec.at).toLocaleString()}`
-    + `${rec.session === STALL_SESSION ? "" : " (an earlier run)"} — `
+    + `${rec.session === STALL_SESSION ? "" : " (an earlier run)"}: `
     + `${rec.stalls} stall${rec.stalls === 1 ? "" : "s"}, `
     + `${rec.verdict ? "verdict: " + (rec.verdict.browserRendering
         ? "the page lost its rAF registration"
@@ -1577,9 +1577,9 @@ window.transitFreeze = (back = 0) => {
 // wedged and still holds the last snapshot handed to it.
 //
 // It tells apart the three failures that look identical from inside:
-//   - main thread blocked        — samples stop, the worker keeps posting
-//   - compositor stopped         — samples continue, rafGapMax climbs
-//   - content process gone       — the posts stop too, and the last record is
+//   - main thread blocked        samples stop, the worker keeps posting
+//   - compositor stopped         samples continue, rafGapMax climbs
+//   - content process gone       the posts stop too, and the last record is
 //                                  the epitaph
 //
 // scripts/freeze_log.py receives the posts and writes them to
@@ -1600,7 +1600,7 @@ let longTasks = 0, longTaskMs = 0, evWheel = 0, evPointer = 0, canvasesMade = 0;
 let lastWall = Date.now(), lastMono = performance.now(), lastTick = performance.now();
 
 // Called from frame(). Two numbers, no allocation beyond the push: the cost of
-// the frame itself, and the gap since the previous one — which is the only way
+// the frame itself, and the gap since the previous one, which is the only way
 // to see rAF being throttled or dropped, as opposed to running slowly. Both are
 // measured in frame() now, since the snapshot reports the gap too; this only
 // keeps the distribution the trace records over each interval.
@@ -1618,8 +1618,8 @@ function pct(a, p) {
 
 const TRACE_WORKER_SRC = `
 // Runs on its own thread. Holds the newest sample, notices when they stop, and
-// posts everything it has to the recorder — including, and especially, while
-// the main thread is not answering.
+// posts everything it has to the recorder, including and especially while the
+// main thread is not answering.
 let last = null, lastAt = 0, stalledSince = 0, queue = [], busy = false, tick = 0;
 let hidden = false, throttledAt = 0;
 const STALL_MS = 1600;        // silence longer than three sample periods
@@ -1666,8 +1666,8 @@ setInterval(() => {
     // A hidden tab is quiet because the browser clamped its timers, not because
     // anything is wrong: Chrome holds a background tab to one wake a second and,
     // after a few minutes, to one a minute. Measured on this page, a backgrounded
-    // tab produced 83 "stalls" up to 12.8 s long with the worker never once late
-    // — every one of them an artifact. Calling that a blocked main thread would
+    // tab produced 83 "stalls" up to 12.8 s long with the worker never once
+    // late, every one of them an artifact. Calling that a blocked main thread would
     // bury a real freeze under noise, so it is reported as what it is.
     push(hidden
       ? (now - throttledAt < THROTTLE_EVERY ? null : (throttledAt = now,
@@ -1709,7 +1709,7 @@ function traceSample(kind) {
     hidden: document.hidden, playing, speed: +speedSel.value,
     // Canvases are counted as they are *made*, not as they are found. A sprite
     // canvas is never appended to the document, so the DOM knows nothing about
-    // it — the DOM count read 1 on a page holding 324 of them. Creation is the
+    // it: the DOM count read 1 on a page holding 324 of them. Creation is the
     // number that matters anyway: this page has frozen once before because the
     // sprite cache built a fresh canvas per zoom step and their buffers outran
     // collection, and that shows up here as canvasesMade climbing without end.
@@ -1732,7 +1732,7 @@ if (TRACE) {
     // cannot resolve a relative one: its self.location is the blob URL, and
     // resolving "/_trace" against that throws inside URL() and inside fetch().
     // The throw is caught by the worker's own try/catch, so the failure is
-    // completely silent — the recorder simply records nothing, which is the one
+    // completely silent: the recorder records nothing, which is the one
     // way this could fail that would waste a whole reproduction.
     traceWorker = new Worker(URL.createObjectURL(new Blob(
       [`const ENDPOINT = ${JSON.stringify(location.origin + "/_trace")};\n`,
@@ -1773,12 +1773,12 @@ if (TRACE) {
     try { localStorage.setItem(TRACE_KEY, JSON.stringify(traceRing.slice(-TRACE_KEEP))); }
     catch (e) { /* quota or private mode; the POSTs are the real channel */ }
   }, 2000);
-  // What the tab holds by type. Chrome only, and only when cross-origin-isolated
-  // — which is what freeze_log.py's headers are for. Slow, so rarely.
+  // What the tab holds by type. Chrome only, and only when cross-origin-
+  // isolated, which is what freeze_log.py's headers are for. Slow, so rarely.
   //
   // Read it next to imageMB, not instead of it: canvas backing stores and
   // decoded image surfaces are outside its scope (27.8 MB reported for a page
-  // holding 102 MB of images). The gap is the useful part — this number staying
+  // holding 102 MB of images). The gap is the useful part: this number staying
   // put while the tab dies says the memory is somewhere it cannot see.
   if (performance.measureUserAgentSpecificMemory) {
     setInterval(async () => {
@@ -1801,7 +1801,7 @@ if (TRACE) {
       try { navigator.sendBeacon("/_trace", JSON.stringify(rec)); } catch (e) {}
     });
   }
-  console.log("[transit] tracing to /_trace and localStorage — transitTrace() "
+  console.log("[transit] tracing to /_trace and localStorage. transitTrace() "
             + "reads the tail back after a reload, even if the tab was closed.");
 }
 
@@ -1812,7 +1812,7 @@ window.transitTrace = () => {
 };
 
 // The next frame is scheduled first, before any of the work, so nothing in the
-// body of this function can end the loop — including the reporting that sits
+// body of this function can end the loop, including the reporting that sits
 // outside the try, which allocates and so fails exactly when memory is short.
 //
 // Callbacks registered for the same frame share a timestamp, so a second one for
@@ -1838,7 +1838,7 @@ function frame(now) {
   armFrame();
   const t0 = performance.now();
   frames++;
-  // Liveness, so a snapshot can report real fps — and the gap since the previous
+  // Liveness, so a snapshot can report real fps, and the gap since the previous
   // callback, which is the one number that separates a loop running slowly from
   // a loop not being called at all.
   const gap = lastRafAt ? t0 - lastRafAt : 0;
@@ -1857,7 +1857,7 @@ function frame(now) {
   // thread and the canvas is too big for it, while a page spending 3 ms and
   // still getting 43 callbacks is being given fewer frames than it could use,
   // and its own drawing is not what to look at. slowFrames cannot tell them
-  // apart — it only fires past 500 ms, and has read 0 in all seven reports.
+  // apart: it only fires past 500 ms, and has read 0 in all seven reports.
   frameCostSum += cost; frameCostN++;
   if (cost > frameCostMax) frameCostMax = cost;
   // The same millisecond, split three ways. Charged after the fact so a frame
@@ -1874,7 +1874,7 @@ function frame(now) {
 
 // The gap since the previous frame, in seconds, but never more than a beat: the
 // first frame after a backgrounded tab carries the whole absence, which at 400x
-// advances the simulation by hours and lands the clock outside [0, 86400) —
+// advances the simulation by hours and lands the clock outside [0, 86400),
 // emptying the map for that frame. Clamping is right rather than wrapping
 // properly, since nothing was drawn for the missed time and there is no sense in
 // which it should be played.
@@ -1901,7 +1901,7 @@ function drawFrame(now) {
     scrub.value = simT | 0;
   }
   showDay(laDay());   // both modes play today, whichever day today has become
-  // Whether tiles may be fetched this frame — see getTile. Decided once, here,
+  // Whether tiles may be fetched this frame; see getTile. Decided once, here,
   // so every lookup in the frame agrees, and so the moment the view lands can be
   // seen: nothing has changed at that instant, so composeBackground would skip,
   // and the frame that would have asked for the tiles never runs. One forced
@@ -1963,7 +1963,7 @@ function drawFrame(now) {
   // What the window can actually show, in map px. Culling against the drawn map
   // instead leaves nearly every sprite off-canvas at any real zoom (at k=4 a
   // 2560 px window holds 0.8% of the sheet), and Firefox charges for those
-  // rejected draws where Chrome does not — which is why headless measurement
+  // rejected draws where Chrome does not, which is why headless measurement
   // missed it. The margin is one generous sprite, so a vehicle straddling the
   // edge still draws.
   const vm = 24 * s;
@@ -1992,9 +1992,9 @@ function drawFrame(now) {
     const dist = distAt(times, d, lo, hi, tc, data.routes[tr.r].rail);
     const [x, y] = posAlong(shapes[pat.s], dist);
     if (x < -15 || x > map.width + 15 || y < 708 || y > map.height + 15) continue;  // off the drawn map (708 = under the title banner)
-    // Counted wherever it is — the figure beside the clock is how many vehicles
-    // are running on the network, not how many the window happens to frame — and
-    // drawn only where it can be seen.
+    // Counted wherever it is: the figure beside the clock is how many vehicles
+    // are running on the network, not how many the window happens to frame.
+    // Drawn only where it can be seen.
     if (present) active++;
     if (x >= vx0 && x <= vx1 && y >= vy0 && y <= vy1) {
       const sp = sprites[tr.r];
@@ -2008,7 +2008,7 @@ function drawFrame(now) {
       }
       if (a < 1) ctx.globalAlpha = 1;
     }
-    // mirror into the DTLA inset panel — see insetPosAt, which the picker goes
+    // mirror into the DTLA inset panel; see insetPosAt, which the picker goes
     // through too so a tap in the panel tests the position drawn there
     if (insetVisible) {
       const ip = insetPosAt(pat, lo, hi, dist, tc, times);
@@ -2035,7 +2035,7 @@ function drawFrame(now) {
     }
     ctx.restore();
   }
-  // How many draws the sprite phase above actually made — on-screen ones only
+  // How many draws the sprite phase above actually made: on-screen ones only
   // since the viewport cull, so this reads as a few dozen at deep zoom against
   // `active` in the thousands. The pair is the cull working, and the number to
   // read `costSprites` against.
