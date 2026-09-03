@@ -1,31 +1,30 @@
 """Score a route's shapes against one stretch of drawn line, traced off the
 artwork rather than inferred from a colour.
 
-This is the yardstick `drift_check` cannot be. Drift is measured against an
-agency's whole mask, so a shape that has wandered onto a *sibling* route drawn
-in the same ink scores clean — which is exactly the case a route reported off
-its line usually is. Here the target is one corridor: `mask_path` walks the
-agency's drawn pixels between two points known to be on it, and every shape is
-measured against that walk.
+`drift_check` cannot do this. Drift is measured against an agency's whole mask,
+so a shape that has wandered onto a *sibling* route drawn in the same ink
+scores clean, which is what a route reported off its line usually is. Here the
+target is one corridor: `mask_path` walks the agency's drawn pixels between two
+points known to be on it, and every shape is measured against that walk.
 
-Give it two points on the drawn line — a badge the sheet prints, a drawn
-terminus, a coordinate read off the tiles. It prints the walk (paste-ready for
-a pin or an override), then per shape:
+Give it two points on the drawn line: a badge the sheet prints, a drawn
+terminus, a coordinate read off the tiles. It prints the walk, ready to paste
+into a pin or an override, then per shape:
 
   off     distance from the shape to the corridor, over the window
   cover   how much of the corridor the shape comes within COVER px of
 
 Both matter. A path that cuts the corner off a loop can sit a few px from the
-corridor at its worst and still be obviously wrong, and it shows up as ground
-it never covers — which is also what the stops ride on.
+corridor at its worst and still be obviously wrong. It shows up as ground the
+shape never covers, which is also what the stops ride on.
 
 A walk much longer than the straight distance between the two points means it
-went round a block rather than along the line: the drawing is interrupted
-between them — a chip printed over it, most often — and the walk has taken the
-way round. It says so when it does, and everything under that line is then
-scored against the detour rather than against the corridor, so pick a pair that
-doesn't straddle the interruption and ask again. The interruption may of course
-be the fault you are chasing; see implementation_notes.md.
+went round a block rather than along the line, because the drawing is
+interrupted between them, usually by a chip printed over it. It says so when
+that happens, and everything below that line is then scored against the detour
+rather than the corridor, so pick a pair that doesn't straddle the interruption
+and ask again. The interruption may itself be the fault you are chasing; see
+implementation_notes.md.
 
     scripts/corridor_check.py bigbluebus 9 --from 697,2065.7 --to 775.3,2166.4
     scripts/corridor_check.py gtfs_bus 720 --from ... --to ... --schedule s.json
@@ -54,8 +53,8 @@ STEP = 1.0      # px; sampling pitch for both curves
 def agency_tree(feed):
     """What to walk the corridor on: the feed's strokes where the build snaps
     on them, and its colour mask otherwise, refined the way the build refines
-    it. drift_check chooses between the two the same way, and for the same
-    reason — where an agency's line is thin its mask can be more lettering than
+    it. drift_check chooses between the two the same way and for the same
+    reason: where an agency's line is thin, its mask can be more lettering than
     line, and a walk then follows the words across the block instead of the
     corridor, which is the one thing this tool must not do."""
     if feed in INK_SNAP and feed in LEGEND_INK:
@@ -138,7 +137,7 @@ def main():
                     help="substring of the system name (default: the feed's own, "
                          "so a designation several operators use stays this one's)")
     ap.add_argument("--schedule", default=SCHEDULE,
-                    help=f"read shapes from this instead of {SCHEDULE} — "
+                    help=f"read shapes from this instead of {SCHEDULE}; "
                          "a build_data.py --only refit writes one")
     a = ap.parse_args()
     if a.feed not in FEEDS:
@@ -147,14 +146,14 @@ def main():
         sys.exit(f"missing {a.schedule} (run from the repo root)")
     pa, pb = (tuple(float(v) for v in s.split(",")) for s in (a.a, a.b))
     # The feed picks the mask; without this it would not also pick the route,
-    # and a designation half the county's operators use — 2, 4, 7 — would be
+    # and a designation half the county's operators use (2, 4, 7) would be
     # scored for all of them against one agency's corridor.
     system = a.system or FEED_NAMES.get(a.feed, "")
 
     tree = agency_tree(a.feed)
     walk, length = mask_path(pa, pb, tree)
     if walk is None:
-        sys.exit(f"the {a.feed} mask does not connect {pa} to {pb} — "
+        sys.exit(f"the {a.feed} mask does not connect {pa} to {pb}: "
                  "either a point is off the drawn line, or the drawing is broken "
                  "between them by more than a bridge will cross")
     straight = float(np.hypot(*(np.asarray(pb) - np.asarray(pa))))

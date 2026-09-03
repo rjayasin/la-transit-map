@@ -1,11 +1,11 @@
 """Render one route's cached (post-snap) path on top of the map, for eyeballing
 where vehicles diverge from the drawn artwork.
 
-The paths drawn are exactly what schedule.json feeds the animation — the poly2
-warp plus whatever line snapping build_data.py managed — so anything that looks
-off here is off in the browser too. Where each vehicle halts is marked, and for
-a rail line the platforms the map draws are outlined around them, since a stop
-landing beside its platform is as much a fault as a path on the wrong street.
+The paths drawn are what schedule.json feeds the animation: the poly2 warp plus
+whatever line snapping build_data.py managed. Anything that looks off here is
+off in the browser too. Where each vehicle halts is marked, and for a rail line
+the platforms the map draws are outlined around them, since a stop landing
+beside its platform is as much a fault as a path on the wrong street.
 --no-stops leaves just the path.
 
 The background is drawn from the high-resolution WebP tile pyramid (tiles/),
@@ -86,7 +86,7 @@ def pick_system(d, label, hits):
     flags and exiting when there's nobody to ask (piped, redirected, CI)."""
     names = [d["systems"][d["routes"][i]["sy"]] for i in hits]
     if not (sys.stdin.isatty() and sys.stderr.isatty()):
-        print(f"{label!r} exists in several systems — pass --system:", file=sys.stderr)
+        print(f"{label!r} exists in several systems; pass --system:", file=sys.stderr)
         for n in names:
             print(f"  --system {n!r}", file=sys.stderr)
         sys.exit(2)
@@ -172,7 +172,7 @@ def draw_dot(dr, xy, color, r):
 def choose_level(box, forced=None):
     """Deepest tile level whose rendered crop stays under OUT_CAP px on its
     long edge, or None to signal the map.png fallback (tiles missing, --png,
-    or a crop so large that even the shallowest level is oversized — e.g.
+    or a crop so large that even the shallowest level is oversized, as with
     --full, where PDF-crisp detail isn't the point)."""
     if forced == 1 or not os.path.isdir(TILEDIR):
         return None
@@ -214,11 +214,11 @@ def main():
     ap.add_argument("line", help="route label as shown on the map, e.g. 720, A, R10")
     ap.add_argument("--system", help="substring of the system name, to disambiguate")
     ap.add_argument("--schedule", default=SCHEDULE,
-                    help=f"read shapes from this file instead of {SCHEDULE} — "
+                    help=f"read shapes from this file instead of {SCHEDULE}; "
                          "a build_data.py --only refit writes one")
     ap.add_argument("--shape", type=int, help="draw only the Nth variant (see stdout)")
     ap.add_argument("--no-stops", dest="stops", action="store_false",
-                    help="just the path — omit the stop marks and the outlines "
+                    help="just the path: omit the stop marks and the outlines "
                          "of the platforms the map draws")
     ap.add_argument("--inset", action="store_true",
                     help="only the DTLA inset panel (default draws it too, as a second file)")
@@ -257,11 +257,11 @@ def main():
     while "--" in slug:
         slug = slug.replace("--", "-")
 
-    # A route through downtown is drawn twice on the sheet — once on the main
-    # map and once, at a different scale and rotation, inside the call-out
-    # panel — and the two are snapped separately, so a path can be right on one
-    # and wrong on the other. Draw whichever panels this route actually appears
-    # in, so a plain invocation never silently omits half the evidence.
+    # A route through downtown is drawn twice on the sheet: once on the main
+    # map, and once at a different scale and rotation inside the call-out
+    # panel. The two are snapped separately, so a path can be right on one and
+    # wrong on the other. Draw whichever panels this route appears in, so a
+    # plain invocation never omits half the evidence.
     panels = [True] if a.inset else [False]
     if not a.inset and any(d["insets"][si] for si, _ in variants):
         panels.append(True)
@@ -315,7 +315,7 @@ def render(d, a, variants, inset, out):
                     dots.append((point_at(pts, dist), color))
 
     if not drawn:
-        sys.exit("nothing to draw" + (" — this route has no inset runs" if inset else ""))
+        sys.exit("nothing to draw" + (": this route has no inset runs" if inset else ""))
 
     W, H = 4096, 4139
     if inset:
@@ -330,7 +330,7 @@ def render(d, a, variants, inset, out):
         # A path entirely off the sheet clamps to an empty box, and the crop
         # then fails deep inside PIL on a negative size. Say what is actually
         # wrong instead: a route out here has nothing to do with snapping, and
-        # a whole feed out here is the wrong feed — the Norwalk Transit GTFS
+        # a whole feed out here is the wrong feed. The Norwalk Transit GTFS
         # catalogued as Californian was Connecticut's, and warped to y≈320000.
         if box[2] - box[0] < 1 or box[3] - box[1] < 1:
             sys.exit(f"{a.line}'s path is not on the sheet: "

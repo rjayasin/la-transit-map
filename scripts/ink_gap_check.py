@@ -6,13 +6,13 @@
 
 PT is the one agency the build never snaps: its ink is plain gray, identical to
 the street art, so LEGEND_SEEDS has no entry for it and the shapes keep the raw
-polynomial warp. That makes "is it on the artwork at all" a question nobody has
-asked, because the detour metric measures departures *from* the warp and here
-the path *is* the warp — it scores zero by construction.
+polynomial warp. Nothing else asks whether those shapes are on the artwork at
+all, because the detour metric measures departures from the warp, and here the
+path is the warp, so it scores zero by construction.
 
-So this asks the cruder question the eye asks: is the bus on a drawn line of any
-kind, or on blank paper? A path on the wrong line is a different fault and this
-will not catch it; a path on no line is unambiguous.
+This asks a cruder question instead: is the bus on a drawn line of any kind, or
+on blank paper? A path on the wrong line is a different fault and this will not
+catch it. A path on no line is unambiguous.
 
 Ink here is gray line work: low saturation, and mid-toned so that neither the
 cream background nor the near-black label text counts.

@@ -2,7 +2,7 @@
 leaves evidence somewhere other than the tab that froze.
 
 The freeze this exists for takes the tab with it: the console stops, the
-devtools pane stops, and the only cure is closing the tab — which throws away
+devtools pane stops, and the only cure is closing the tab, which discards
 everything that would say why. So the page ships its telemetry out of the
 process as it goes, and this server writes it to a file. Whatever is in that
 file when the tab dies is the record, and it is still there afterwards.
@@ -18,9 +18,9 @@ the repo the same way and adds one endpoint.
 
 Every response also carries the two headers that make the page
 cross-origin-isolated, which is what unlocks
-performance.measureUserAgentSpecificMemory() — a breakdown of what the tab is
-actually holding, by type, which is the one measurement that would have settled
-this in the first place. Chrome only; harmless elsewhere.
+performance.measureUserAgentSpecificMemory(). That is a breakdown of what the
+tab is holding, by type, and the one measurement that would have settled this
+in the first place. Chrome only; harmless elsewhere.
 """
 import argparse
 import datetime

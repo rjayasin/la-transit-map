@@ -2,7 +2,7 @@
 
 The interesting record is always the last one, and the interesting question is
 always what was climbing before it. So this prints the run's shape, then the
-stalls, then the samples either side of the worst one — which is the state the
+stalls, then the samples either side of the worst one, which is the state the
 tab was in when it went.
 
     .venv/bin/python scripts/freeze_report.py                 # summarize
@@ -22,7 +22,7 @@ What to read, in order:
   tickLateMs / workerLateMs climbing together
       The whole process is being starved, which is memory pressure or the OS.
   driftMs jumping
-      The tab was suspended, not wedged — a different problem entirely.
+      The tab was suspended, not wedged, which is a different problem.
 """
 import argparse
 import datetime
@@ -42,7 +42,7 @@ COLS = ["n", "fps", "frames", "frameP50", "frameP95", "frameMax", "rafGapMax",
 
 def load(path):
     if not os.path.exists(path):
-        sys.exit(f"no {path} — run scripts/freeze_log.py and reproduce the freeze")
+        sys.exit(f"no {path}: run scripts/freeze_log.py and reproduce the freeze")
     out = []
     with open(path) as f:
         for line in f:
@@ -93,7 +93,7 @@ def main():
         sys.exit(f"{a.file} is empty")
     # One page load per session id. A reload beacons its own last record into
     # the file just before the next run starts writing to it, and those two
-    # runs' clocks both start at zero — so read one session unless asked
+    # runs' clocks both start at zero, so read one session unless asked
     # otherwise, or the seam between them looks like a fault.
     sids = [s for s in dict.fromkeys(r.get("sid") for r in every) if s]
     recs = every if a.all or not sids else [r for r in every if r.get("sid") == sids[-1]]
@@ -122,7 +122,7 @@ def main():
         share = 100 * hid / len(samples)
         print(f"\n!! the tab was in the background for {share:.0f}% of this session. "
               "Every browser clamps a hidden tab's timers, so sparse samples and "
-              "long quiet periods there are the browser, not the page — and rAF "
+              "long quiet periods there are the browser, not the page, and rAF "
               "is throttled, so nothing was really being presented. Read the "
               "foreground samples; the rest say nothing about a freeze.")
     for o in opens:
@@ -145,7 +145,7 @@ def main():
     # The whole point: did the worker outlive the main thread, and by how long?
     if stalls:
         worst = max(stalls, key=lambda r: r.get("silentMs", 0))
-        print(f"\n{len(stalls)} stall reports — worst {worst.get('silentMs')} ms of "
+        print(f"\n{len(stalls)} stall reports; worst {worst.get('silentMs')} ms of "
               f"main-thread silence at {worst.get('rx','?')}")
         print("  the worker kept running while the main thread did not, so this is a "
               "blocked or dead main thread, not a dead process")
@@ -156,23 +156,23 @@ def main():
     elif throttled and not stalls:
         worst = max(throttled, key=lambda r: r.get("silentMs", 0))
         print(f"\nno stalls. {len(throttled)} quiet periods, worst "
-              f"{worst.get('silentMs')} ms, all while the tab was hidden — that is "
+              f"{worst.get('silentMs')} ms, all while the tab was hidden. That is "
               "the browser's background throttling, not the page.")
     elif samples and samples[-1].get("t") == "final":
         print(f"\nno stalls; the session ended cleanly "
               f"({samples[-1].get('reason', 'final')}).")
     elif quiet_for is not None and quiet_for < DEAD_AFTER_S:
-        print(f"\nno stalls, and the trace is still arriving — this session is "
+        print(f"\nno stalls, and the trace is still arriving; this session is "
               f"healthy so far. Reproduce the freeze, then read it again.")
     else:
         print("\nno stall reports and nothing since: the samples simply stop. The "
               "worker went quiet *with* the main thread, which is the content "
-              "process dying rather than a script hanging — read the last samples "
+              "process dying rather than a script hanging; read the last samples "
               "below for what was climbing on the way out.")
 
     if lates:
         worst = max(lates, key=lambda r: r.get("lateMs", 0))
-        print(f"\n{len(lates)} worker-late reports — worst {worst.get('lateMs')} ms. "
+        print(f"\n{len(lates)} worker-late reports; worst {worst.get('lateMs')} ms. "
               "The worker's own thread was starved too, so this is process-wide.")
 
     if mem:
