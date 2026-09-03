@@ -5,11 +5,11 @@ A bus route on this map is meant to read as straight segments with the
 occasional rounded corner. The snapper can leave three kinds of scar when it
 puts a shape on the wrong ink and jumps back:
 
-  - a *cusp* — the path turns hard one way and immediately hard back, a hairpin
-    a road never makes. This is the loudest signal that something is wrong.
-  - a *zigzag* — a run of sharp turns alternating in direction, the path sewing
+  - a *cusp*: the path turns hard one way and immediately hard back, a hairpin
+    a road never makes. This is the strongest signal something is wrong.
+  - a *zigzag*: a run of sharp turns alternating in direction, the path sewing
     between two parallel streets.
-  - general *roughness* — many small kinks where the artwork is smooth.
+  - general *roughness*: many small kinks where the artwork is smooth.
 
 The score measures turning over a short physical window (so it is blind to how
 finely a shape happens to be sampled) and counts only turns sharper than a
@@ -42,12 +42,12 @@ import numpy as np
 SCHEDULE = "schedule.json"
 
 STEP = 2.0        # px between resampled points; metrics are measured on this grid
-WIN = 12.0        # px on each side of a point — the window a turn is measured over
+WIN = 12.0        # px on each side of a point: the window a turn is measured over
 CORNER = 92.0     # deg; a turn up to a square street corner is normal, scores 0
 ZIG = 45.0        # deg; two consecutive turns this sharp in opposite directions
                   # are a zigzag, whatever their individual excess over CORNER
 RETRACE = 12.0    # px. A sharp turn only counts against a route when the path
-                  # nearly doubles back on itself — when the point WIN px before
+                  # nearly doubles back on itself, i.e. when the point WIN px before
                   # the turn and the point WIN px after land within this of each
                   # other. That is the signature of the snapper jutting off the
                   # line and back. A real turnaround loop reaches the same angle
@@ -117,7 +117,7 @@ def score_shape(P):
     """(score, kinks, worst_cusp_deg, worst_xy, detail) for one polyline.
 
     score is the total 'excess turning' the path has beyond what straight runs
-    and square corners would need — the currency the ranking sorts on."""
+    and square corners would need, which is what the ranking sorts on."""
     R, _ = resample(P)
     if len(R) < 5:
         return 0.0, 0, 0.0, None, []
