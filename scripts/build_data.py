@@ -3772,7 +3772,40 @@ def rail_tail(pts, tree, end, limit=TAIL_LIMIT):
     return centre_on_ink(cells[walk[-2::-1]], tree)
 
 
-def snap_rail(pts, tree, caps=(45.0, 24.0), wins=(15, 9), max_gap=45, rnd=2):
+RAIL_HOOD = 7.0    # px of ribbon read to say which way the track runs there
+_RAIL_DIR = {}     # keyed by tree identity, as _PATHS is and for the same reason
+
+
+def rail_dir_tree(tree):
+    """A rail mask binned by the direction its ribbon runs, so a line can only
+    be pulled onto track running its own way.
+
+    One mask holds one line and nothing else, which is usually enough to say
+    where a shape belongs. It stops being enough where the line turns a corner:
+    the warp's corner and the drawn one can sit a block apart, and then the
+    limb the shape is *not* on is the nearer of the two for the whole run up to
+    the turn. Every point in that run aims at it together, which no amount of
+    smoothing outvotes, and the corner comes out as a chord across the block.
+    Heading tells the limbs apart — track more than ~45 deg off the line's own
+    course is not the stretch it is running.
+
+    Pixels the ribbon is too tightly curved to give a heading for go into every
+    bin: they are the corners themselves, which is exactly where a line
+    changing course has to be free to land."""
+    key = id(tree)
+    if key not in _RAIL_DIR:
+        P = np.asarray(tree.data)
+        head = line_headings(P, tree, hood=RAIL_HOOD)
+        known = np.hypot(*head.T) > 0
+        ang = np.mod(np.arctan2(head[known, 1], head[known, 0]), np.pi)
+        b = np.minimum((ang / (np.pi / DIR_BINS)).astype(np.int64), DIR_BINS - 1)
+        rows = [np.c_[P[known], b]]
+        rows += [np.c_[P[~known], np.full((~known).sum(), k)] for k in range(DIR_BINS)]
+        _RAIL_DIR[key] = DirectionalTree(np.vstack(rows))
+    return _RAIL_DIR[key]
+
+
+def snap_rail(pts, tree, caps=(45.0, 24.0, 12.0), wins=(15, 9, 5), max_gap=45, rnd=2):
     """Snap a warped rail polyline onto its drawn-track mask, coherently.
 
     Each pass pins points within `cap` of the track to it, interpolates that
@@ -3781,22 +3814,28 @@ def snap_rail(pts, tree, caps=(45.0, 24.0), wins=(15, 9), max_gap=45, rnd=2):
     back as a whole rather than a few points snapping and the rest sagging.
     Snapping each point to its own nearest track pixel leaves hooks where the
     track curves; the passes tighten the cap so the second reels in what the
-    first left bulging. Runs
+    first left bulging, and the third, smoothed over a short window, brings a
+    corner in to the radius the sheet draws rather than the one a wide window
+    leaves. Runs
     longer than `max_gap` densified points keep the raw warp instead — the
     ghosted downtown call-out has no track to snap onto. Corners are rounded
-    with Chaikin so turns read as curves, not right angles."""
+    with Chaikin so turns read as curves, not right angles.
+
+    The mask is read through `rail_dir_tree`, so a limb of the line the shape
+    is not running cannot claim it where the two cross."""
     P = np.array(densify(pts, 4.0), dtype=float)
     n = len(P)
     idx = np.arange(n)
+    aimed = rail_dir_tree(tree)          # the ends still read the plain mask
     for pass_i, (cap, win) in enumerate(zip(caps, wins)):
-        dist, j = tree.query(P)
+        dist, j = aimed.query(P)
         ok = dist < cap
         if ok.sum() < 4:
             if pass_i == 0:
                 return [tuple(p) for p in P]    # nothing drawn here: keep the warp
             break
         disp = np.full((n, 2), np.nan)
-        disp[ok] = tree.data[j[ok]] - P[ok]
+        disp[ok] = aimed.data[j[ok]] - P[ok]
         i = 0                                    # keep the warp through long gaps
         while i < n:
             if not ok[i]:
@@ -3814,9 +3853,9 @@ def snap_rail(pts, tree, caps=(45.0, 24.0), wins=(15, 9), max_gap=45, rnd=2):
             col = np.interp(idx, idx[known], disp[known, c])
             disp[:, c] = np.convolve(np.pad(col, win // 2, mode="edge"), kern, "valid")
         P = P + disp
-    dist, j = tree.query(P)                      # final tight re-snap on the track
+    dist, j = aimed.query(P)                     # final tight re-snap on the track
     close = dist < 8
-    P[close] = tree.data[j[close]]
+    P[close] = aimed.data[j[close]]
     return [tuple(p) for p in chaikin(simplify(square_ends(P, tree), 1.0), rnd)]
 
 

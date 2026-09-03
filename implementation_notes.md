@@ -73,6 +73,27 @@ machinery moves every color-masked feed at once, so diff the two builds' shapes
 per system, score both against the strokes, and look at the largest movers by
 eye. A total that improves can still hide a route that got worse.
 
+## A rail line has none of the tables
+
+Metro rail goes through `snap_rail`, not the machinery above. It has no badges,
+so no anchors and no `PINNED_ANCHORS`; and `OVERRIDE_PATHS` cannot reach it
+either, since an override needs the snapped and warped shapes index-aligned and
+`snap_rail` resamples. The mask and the pass ladder are the whole of it, so a
+rail line off its drawing is always one of three things:
+
+- **The mask holds something that is not the ribbon.** `drawn_blobs` keeps it
+  to connected blobs of a drawn size. This matters more here than on a colour
+  mask: the rail warp sits tens of px off the track, so a speck *between* the
+  two is nearer than the line for a whole run of points and the smoothing has
+  nothing to outvote it with.
+- **The line's own other limb claims it.** Where the warp's corner and the
+  drawn one sit a block apart, the limb the shape is not on is the nearer of
+  the two all the way up to the turn, and the corner comes out as a chord.
+  `rail_dir_tree` settles that by heading.
+- **A corner is rounded wider than the sheet draws it.** The displacement is
+  smoothed along the line, so the corner's radius is the window's, not the
+  drawing's. That is what the last, tightest pass of the ladder is for.
+
 ## Hand-tuned tables
 
 Everything the artwork can't settle on its own is named in a table near the code
