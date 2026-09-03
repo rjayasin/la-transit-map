@@ -822,7 +822,7 @@ DRAWN_COLORS = {
 #
 # So the ink is binned by the direction it runs, and a point may only be claimed
 # by ink going roughly its own way. For a coloured livery this would be pointless;
-# for the grid it is what makes the mask usable at all.
+# for the grid it is what makes the mask usable.
 DIR_BINS = 6                # 30 deg apart; a line has no sense, so 0..180
 DIR_SLACK = 1               # bins either side: accept within ~45 deg
 
@@ -2952,7 +2952,7 @@ def align_walk(walk, seg):
     """Where each point of `walk` sits along `seg`, as a fraction of `seg`.
 
     The walk and the shape's own stretch run over the same ground at different
-    rates, which is the whole difficulty. The rate is not constant either: the
+    rates, which is the difficulty here. The rate is not constant either: the
     sheet compresses one street and stretches the next, so no single scale
     relates them. What survives is the *order* of the turns, because the warp is
     smooth: it can put a corner in the wrong place but not in the wrong order.
@@ -3128,7 +3128,7 @@ def badge_passes(P, cum, A, gate, slack=PASS_SLACK, rise=PASS_RISE):
     """(badge index, shape index) for every pass the shape makes at each badge.
 
     A badge belongs to the point of the shape nearest it, and for almost every
-    route that is the whole story. A route running the same drawn corridor twice
+    route that is enough. A route running the same drawn corridor twice
     is nearest it twice, at two places far apart along its own length, and
     pinning only the nearer leaves the other pass unanchored, free to be walked
     onto a neighbouring route drawn in the same ink.
