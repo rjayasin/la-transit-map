@@ -1783,6 +1783,15 @@ PINNED_ANCHORS = {
 }
 
 
+# Badges the sheet prints for a route on a stretch its GTFS shapes don't run,
+# in map px. Standing within ANCHOR_GATE of an end of the shape, they anchor it
+# and pull that end onto a corridor the route never covers.
+SKIP_ANCHORS = {
+    ("foothill", "10195"): [(3463.6, 1865.9), (3478.7, 1888.5)],
+}
+SKIP_NEAR = 6.0   # px a listed point may stand from the badge it names
+
+
 # Termini given in *warp* px instead of on the drawing, for trimming only. They
 # are never read as anchors. A pin in PINNED_ANCHORS does both jobs at once, and
 # that works only where the warp lands near enough the drawn terminus for one
@@ -2642,8 +2651,9 @@ SLIDE_SPAN = 800.0     # px across a route's badges that one slide can stand for
                        # different vector at each end
 
 
-def branch_anchors(anchors, sid, sids, kd_for, slide_for):
-    """The badges that belong to *this* variant of a route.
+def branch_anchors(anchors, sid, sids, kd_for, slide_for, skip=()):
+    """The badges that belong to *this* variant of a route, less any the route
+    is not to anchor on at all (SKIP_ANCHORS).
 
     route_anchors finds every badge the sheet prints for a route, and a shape
     gets all of them. But a shape is one variant, and where a route forks, the
@@ -2671,6 +2681,9 @@ def branch_anchors(anchors, sid, sids, kd_for, slide_for):
     every badge. The error is common to the variants, so taking it off first
     leaves the comparison to be decided by the distance between the drawn lines,
     which is wider than the slack."""
+    if skip:
+        anchors = [a for a in anchors
+                   if all(math.dist(a, q) > SKIP_NEAR for q in skip)]
     if not anchors or len(sids) < 2:
         return anchors
     A = np.asarray(anchors, dtype=float)
@@ -4670,6 +4683,7 @@ def main():
             shape_route[(feed, sid)] = (rid or "").split("-")[0]
             toks = badge_tokens.get(rid, set())
             pins = PINNED_ANCHORS.get((feed, (rid or "").split("-")[0]), [])
+            skips = SKIP_ANCHORS.get((feed, (rid or "").split("-")[0]), ())
             cuts = pins + TRIM_TERMINI.get((feed, (rid or "").split("-")[0]), [])
             if cuts:
                 pts = trim_terminus(pts, cuts)   # end at the drawn hub, not past it
@@ -4746,7 +4760,7 @@ def main():
                     # turn back at Harbor Gateway must not be dragged 640 px
                     # south onto it.
                     anc = branch_anchors(anc, sid, route_sids[rid], kd_for,
-                                         slide_for)
+                                         slide_for, skips)
                     anchored += bool(anc)
                     can_refit = not busway
                     out_pts = snap_recording(pts, snap_tree, anchors=anc,
@@ -4824,7 +4838,7 @@ def main():
                 # twice on the whole sheet if at all, is the case with least
                 # else to go on.
                 anc = branch_anchors(anc + pins, sid, route_sids[rid], kd_for,
-                                     slide_for)
+                                     slide_for, skips)
                 anchored += bool(anc)
                 if tree is not None:
                     can_refit = True
@@ -4845,7 +4859,7 @@ def main():
                     anc = branch_anchors(
                         anc, sid,
                         label_sids[rmeta[rid][0] if rid in rmeta else rid], kd_for,
-                        slide_for)
+                        slide_for, skips)
                 else:
                     # Named by hand, so `branch_anchors` has nothing left to
                     # decide. See SYMBOL_OWNERS, which exists because the
@@ -4878,7 +4892,7 @@ def main():
                 gate_cols = anchor_cols + LEGEND_SEEDS.get(feed, [])
                 anc = branch_anchors(
                     route_anchors(toks, anchor_tree, colors=gate_cols) + pins,
-                    sid, route_sids[rid], kd_for, slide_for)
+                    sid, route_sids[rid], kd_for, slide_for, skips)
                 anchored += bool(anc)
                 can_refit = True
                 # Snap on the strokes where the sheet's vectors can be trusted
