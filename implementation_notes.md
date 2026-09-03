@@ -53,6 +53,12 @@ What the answer means:
   the fit to the best rival's), so print them for the pixels sitting on the
   ink. The gate that rejects them names the fix, and that fix applies to every
   line under every name rather than to one route.
+- **A hole with nothing printed over it.** A stretch one route runs alone is
+  drawn thin, and a thin line at 4096 px is a blend with what it is drawn on.
+  `unfade` cannot reach it, since there is no label over it to recover it
+  under, and the colour tests reject the blend outright where a background fill
+  explains it better. The agency belongs in `INK_SNAP`, where the PDF strokes
+  the thin lines the same as the thick ones.
 - **The mask holds the line and the path still leaves it.** That is an anchor
   question, not a mask one: nothing tells the snap which end of the drawing
   this leg belongs to. See `PINNED_ANCHORS` and the pin failures below.
