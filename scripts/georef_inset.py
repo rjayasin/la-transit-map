@@ -3,7 +3,7 @@
 The panel is not a picture of downtown, it is a *rectified* drawing of it: the
 real grid is rotated some 36 degrees off north and the sheet redraws it square,
 spacing the streets to suit the page rather than the ground. No affine can do
-that, and a poly2 fitted on the rail lines only bends where the rail is — it
+that, and a poly2 fitted on the rail lines only bends where the rail is. It
 came out a whole block off along 5th and 6th, which is enough to put an
 east-west route on the wrong one of a one-way pair.
 
@@ -36,12 +36,12 @@ GTFS = "data/gtfs"
 # inset frame content area on the map, px (inside black border/banner)
 RECT = (3292, 2506, 3850, 3706)
 # station-platform legend box inside the frame: contains sample rail-line
-# artwork in the real line colors — must not attract the fit.
+# artwork in the real line colors, which must not attract the fit.
 #
 # Measured off the tile pyramid rather than eyeballed: the box's white interior
 # is x 3663.5-3808.6, y 3471.4-3649.4, and this is that plus its black border
 # and two px of slack. It used to run to (3850, 3675), the frame's own right
-# edge and 26 px below the box, and what that swallowed was live artwork — the
+# edge and 26 px below the box, and what that swallowed was live artwork: the
 # A Line's run east along Washington Blvd sits at y 3663, and the "San Pedro"
 # platform east of the box at x 3820. With them cut out of the mask the A had
 # nothing to snap its south-east end onto, and every point of it piled up on
@@ -125,7 +125,7 @@ def ink_runs(mask, axis):
 
 def line_of(fits, label, words, ink_xy, axis):
     """The drawn line the sheet writes `label` alongside, refitted over all the
-    ink lying along it — the opening leaves a street in fragments, and a
+    ink lying along it. The opening leaves a street in fragments, and a
     fragment is too short to say which way the whole line runs."""
     best = None
     for lx, ly in words.get(label, ()):
@@ -184,8 +184,8 @@ def cross(fs, fa):
 def stop_words():
     """(word set, lon, lat) for every stop downtown.
 
-    The feeds name a corner half a dozen ways — "6TH / MAIN", "MAIN ST & 6TH
-    ST", "CESAR E CHAVEZ / BROADWAY", some with a direction in brackets — so a
+    The feeds name a corner half a dozen ways ("6TH / MAIN", "MAIN ST & 6TH
+    ST", "CESAR E CHAVEZ / BROADWAY", some with a direction in brackets), so a
     corner is matched on the words a stop name uses rather than on its form.
     Downtown only: half the county has a 1st and a Main."""
     out = []
@@ -266,7 +266,7 @@ def interp(v, table):
     """A grid coordinate through the breakpoints, in pixels.
 
     Linear past either end on the spacing of the last pair, which keeps the
-    edge of the frame finite — the builder rejects anything past GEO anyway,
+    edge of the frame finite. The builder rejects anything past GEO anyway,
     and a curve fitted here would fold distant ground back inside the rect."""
     c = np.array([r[0] for r in table]); p = np.array([r[1] for r in table])
     out = np.interp(v, c, p)

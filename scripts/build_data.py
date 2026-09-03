@@ -21,8 +21,8 @@ for looking at what a table entry did:
     scripts/build_data.py --only bigbluebus:9
     scripts/debug_line.py 9 --schedule scratch/refit_bigbluebus.json --no-stops
 
-It fits nothing else and writes no schedule.json, so the checks — drift_check,
-path_check, speed_check — still want a full build before you commit.
+It fits nothing else and writes no schedule.json, so drift_check, path_check
+and speed_check still need a full build before you commit.
 """
 import argparse, colorsys, csv, hashlib, inspect, json, math, os, re, sys
 from collections import Counter, defaultdict
@@ -71,7 +71,7 @@ FEED_NAMES = {
 
 # Metrolink trips.txt leaves shape_id empty; shapes.txt carries per-line
 # in/out geometry instead. direction_id orientation is not uniform across
-# lines — this mapping was measured by monotone-fitting each direction's
+# lines, so this mapping was measured by monotone-fitting each direction's
 # stop sequence against both shapes (wrong one fits ~1000 px off, right
 # one <1 px).
 METROLINK_SHAPES = {
@@ -113,8 +113,8 @@ def _grid_axis(v, table):
 
 def to_inset_px(lon, lat):
     """The call-out is a rectified drawing of a rotated grid, so the transform
-    is separable in that grid's own axes rather than a polynomial in lon/lat —
-    see georef_inset."""
+    is separable in that grid's own axes rather than a polynomial in lon/lat.
+    See georef_inset."""
     e = np.asarray(TR_INSET["along"])
     g = np.c_[(np.asarray(lon) - TR_INSET["lon0"]) * TR_INSET["lon_scale"],
               np.asarray(lat) - TR_INSET["lat0"]]
@@ -207,7 +207,7 @@ def pick_dates(feed, trips_per_service):
     return [pick_date(feed, trips_per_service, sunday + timedelta(days=i)) for i in range(7)]
 
 
-@lru_cache(maxsize=None)   # called once per stop time — millions of them, over
+@lru_cache(maxsize=None)   # called once per stop time: millions of them, over
                            # a few tens of thousands of distinct clock readings
 def parse_time(s):
     parts = s.split(":")
@@ -222,7 +222,7 @@ def parse_time(s):
 # Three cases. A route branded rather than numbered carries the brand nowhere in
 # its GTFS. A whole agency can be designated by one symbol for the operator, with
 # no route number printed anywhere. And a named route (a DASH) has prose in
-# route_short_name, which route_label initialises its own way — often onto a code
+# route_short_name, which route_label initialises its own way, often onto a code
 # the sheet prints for some other route entirely, which is worse than landing on
 # nothing. Only a designation read off the artwork can settle any of them.
 #
@@ -255,7 +255,7 @@ MAP_LABELS = {
 
 # Feed routes whose paired short name is two drawn lines, not one line renamed
 # along its length; those ship as two routes, split by badge. A pair left out
-# keeps route_label's first half, which is what 14/37 wants — one line, badged
+# keeps route_label's first half, which is what 14/37 wants: one line, badged
 # 14 at one end and 37 at the other. Add a row only where no working is badged
 # as both.
 SPLIT_LABELS = {
@@ -291,8 +291,8 @@ def split_variants(parts, shapes):
 
 
 def printed_on_map(token):
-    """Whether the sheet prints this token anywhere — the test of whether a
-    rider could look a vehicle's label up."""
+    """Whether the sheet prints this token anywhere, i.e. whether a rider
+    could look a vehicle's label up."""
     return any(token in badge_words(r) for r in ("main", "inset"))
 
 
@@ -302,14 +302,14 @@ def route_label(short, long_name):
     A paired short name is badged on the map as its parts: 14/37 is printed
     "14" here and "37" there, never "1437", so running the halves together
     labels every one of those buses with something no rider can find. Where a
-    designation splits, prefer whichever form the map actually prints — that
-    keeps 14/37 as "14" while leaving Metrolink's IE-OC alone, since the sheet
+    designation splits, prefer whichever form the map prints. That keeps
+    14/37 as "14" while leaving Metrolink's IE-OC alone, since the sheet
     prints neither "IE" nor "IEOC" and the joined form at least reads as the
     line's name.
 
     A lettered working of a numbered route goes the same way: where the feed
     suffixes a number and the sheet draws one line under the bare number, the
-    suffix costs twice over, exactly as a split designation does — a label no
+    suffix costs twice over, exactly as a split designation does: a label no
     rider can find, and no badges to anchor the shape with."""
     s = (short or long_name or "?").strip()
     for pre in ("Metro ", "Metrolink "):
@@ -376,8 +376,8 @@ FADE_MARGIN = 6.0   # how much better this agency's blend must fit than a rival'
 
 def box_dilate(m, radius):
     """Binary dilation by a (2*radius+1)² box. Separable running sums, so the
-    cost doesn't grow with the radius the way a flat structuring element does —
-    these radii are tens of pixels across the whole sheet."""
+    cost doesn't grow with the radius the way a flat structuring element does.
+    These radii are tens of pixels across the whole sheet."""
     f = m.astype(np.float32)
     for axis in (0, 1):
         f = ndi.uniform_filter1d(f, 2 * radius + 1, axis=axis, mode="constant")
@@ -389,8 +389,9 @@ _GLYPHS = {}
 
 def glyphs(sub):
     """Pixels that look like label text: near-gray and dark enough. Keyed by
-    region shape and cached — it costs a full-sheet dilation and is the same
-    for every agency, only the "not this agency's own color" part differs."""
+    region shape and cached: it costs a full-sheet dilation and is the same
+    for every agency, with only the "not this agency's own color" part
+    differing."""
     key = sub.shape
     if key not in _GLYPHS:
         mx, mn = sub.max(axis=2), sub.min(axis=2)
@@ -409,9 +410,9 @@ def knockout_panels():
     A place name set across the drawing gets one of these behind it, and what
     it covers survives at a fraction of its ink rather than at the ~40% a
     label's halo leaves. They are a few hundred small fills of the page's own
-    color in the PDF — which is named by the fill color the page reads as,
-    rather than by a constant of ours — and the page itself is the one fill of
-    it too big to be a panel. Without pymupdf there are no panels and the
+    color in the PDF, named by the fill color the page reads as rather than by
+    a constant of ours. The page itself is the one fill of that color too big
+    to be a panel. Without pymupdf there are no panels and the
     deep-knockback rule below simply never fires."""
     global _PANELS
     if _PANELS is None:
@@ -447,7 +448,7 @@ def unfade(m, sub, d2a, tol, colors):
     """Re-add drawn-line pixels that a place-name label has dimmed.
 
     Labels sit on top of the artwork, and a color mask breaks wherever a name
-    crosses a line — a long place name can knock a ~45 px hole in one, and the
+    crosses a line. A long place name can knock a ~45 px hole in one, and the
     snap then locks onto whichever parallel street stays unbroken. But the label
     isn't painting the line out: under its halo the map knocks the artwork back
     toward the page, and a place name set over the artwork adds a page-colored
@@ -457,9 +458,9 @@ def unfade(m, sub, d2a, tol, colors):
     So inside the halo, take a pixel that reads as this agency's color painted
     over the page at partial opacity: near the segment from the page color to
     the line color, and at least FADE_MIN of the way along it. Muted line
-    colors dim into ordinary map grays, so — as in the mask itself — a pixel
+    colors dim into ordinary map grays, so, as in the mask itself, a pixel
     counts only when this agency's blend explains it better than any background
-    or rival agency's does; without that test a gray livery claims every light
+    or rival agency's does. Without that test a gray livery claims every light
     gray on the sheet. Under a knockout panel that margin has to be read
     against the ink that is left: every blend line converges on the page color,
     so where the panel leaves a third of the ink the distance between this
@@ -497,7 +498,8 @@ def unfade(m, sub, d2a, tol, colors):
         d2, a = fit(c)
         take = d2 < own
         own, own_a = np.where(take, d2, own), np.where(take, a, own_a)
-    # One independent fit per rival color, min-reduced — the bulk of the build.
+    # One independent fit per rival color, min-reduced. This is the bulk of
+    # the build's cost.
     # numpy drops the GIL for work this size, so threads give real parallelism
     # and, unlike splitting the pixels up, every fit sees the same arithmetic
     # it would have alone.
@@ -539,9 +541,9 @@ def code_stamp(*fns):
 def cached_pixels(key, build):
     """Coordinates from `build()`, memoized on disk under a digest of `key`.
 
-    The masks depend only on the artwork and the code that reads it — never on
-    a GTFS feed — so they come out identical on every run, and rebuilding all
-    28 of them was ~80% of the build. Only the coordinate array is stored; the
+    The masks depend only on the artwork and the code that reads it, never on
+    a GTFS feed, so they come out identical on every run. Rebuilding all 28 of
+    them was ~80% of the build. Only the coordinate array is stored; the
     KD-tree is rebuilt from it in well under the time it takes to read one."""
     h = hashlib.blake2b(repr(key).encode(), digest_size=16).hexdigest()
     path = f"{MASK_CACHE}/{h}.npy"
@@ -566,8 +568,8 @@ def mask_tree(colors, tol=38.0, region="main"):
     (minus its legend), which the main masks deliberately exclude.
 
     Everything is computed on the region's bounding box rather than the whole
-    sheet — the inset is 2% of the map's area and there is one mask per
-    agency color per shape, so full-image passes dominated the build."""
+    sheet: the inset is 2% of the map's area and there is one mask per agency
+    color per shape, so full-image passes dominated the build."""
     key = (tuple(map(tuple, colors)), tol, region)
     if key not in _TREES:
         pts = cached_pixels(
@@ -587,13 +589,13 @@ def station_markers(level=MASK_LEVEL):
     """Centres of the station markers the map draws, as an Nx3 array of
     (x, y, area) in map pixels.
 
-    A station is a white shape with a black stroke — usually a circle, a pair
+    A station is a white shape with a black stroke: usually a circle, a pair
     of conjoined circles where lines meet, an oblong where more do, and odder
     oblongs again inside the Downtown panel. All of them share the same two
     properties, so the shape itself needn't be classified: the fill is pure
     white where the page around it is cream, and the border is stroke. Nothing
-    else on the sheet is both, at this size — label halos are white but
-    unstroked, and a freeway shield is stroked but is nowhere near a rail line,
+    else on the sheet is both at this size: label halos are white but
+    unstroked, and a freeway shield is stroked but nowhere near a rail line,
     which is what the caller matches against."""
     def build():
         band = []
@@ -685,9 +687,9 @@ _INSET_TREES = {}
 # A route chip printed inside a station's label plate is filled with the line's
 # own colour, so no colour mask can tell it from the line. In the magnified
 # call-out it is a solid disc of that colour sitting a few tens of px off the
-# ribbon — near enough to capture a shape whose warp passes closer to it than
-# to the line, so a route dives into its own chip and comes back out. A drawn
-# line is longer than a chip is wide whichever way it runs, though: every ribbon
+# ribbon, near enough to capture a shape whose warp passes closer to it than to
+# the line, so a route dives into its own chip and comes back out. A drawn line
+# is longer than a chip is wide whichever way it runs, though: every ribbon
 # component in the panel spans at least 19 map px along its length while the
 # chips all measure 8-9 square. So
 # a component that fits inside a chip's own footprint in both axes is not a line.
@@ -700,16 +702,16 @@ def inset_tile_tree(colors, tol=MASK_TOL, level=MASK_LEVEL):
 
     Rail on the main map has always been masked this way. The call-out was not,
     and it is where it matters most, because the panel is the one place the
-    sheet redraws every downtown line at a legible size — so a line that misses
+    sheet redraws every downtown line at a legible size, so a line that misses
     its mask there misses it in the only view that shows the difference.
     The 4096 px reduction shifts a printed colour far enough that a line can
     land exactly on the rail tolerance and match not one pixel of itself in the
     whole panel, keeping its raw warp and cutting diagonally across the blocks
     it is drawn along. On the pyramid the same colour sits 0.0 from its own.
 
-    The scan is the call-out only, which `tile_tree` cannot do — EXCLUDE cuts
-    this rectangle out of the sheet, being a redrawing of a network that is
-    also drawn elsewhere on it, and every other caller wants that."""
+    The scan is the call-out only, which `tile_tree` cannot do: EXCLUDE cuts
+    this rectangle out of the sheet, being a redrawing of a network drawn
+    elsewhere on it, and every other caller wants that."""
     key = (tuple(map(tuple, colors)), tol, level)
     if key not in _INSET_TREES:
         def build():
@@ -754,7 +756,7 @@ def mask_pixels(colors, tol, region):
         d2a = np.minimum(d2a, ((sub - np.array(rgb)) ** 2).sum(axis=2))
     m = d2a < tol * tol
     # The background test only matters where the color test already passed, so
-    # run it on those pixels rather than the sheet — a few hundred thousand
+    # run it on those pixels rather than the sheet: a few hundred thousand
     # instead of 17 million, and identical either way.
     ys, xs = np.nonzero(m)
     if len(ys):
@@ -790,9 +792,9 @@ DRAWN_COLORS = {
     # Plain gray, the same as the street art. Re-read once the shapes were
     # snapped onto that art: it had been sampled at (204,193,184) and the
     # sprites came out visibly paler than the lines they ride on. A line two or
-    # three px wide is mostly edge, so anything that averages across its width —
+    # three px wide is mostly edge, so anything that averages across its width,
     # or takes the dominant cluster, which for a gray line is the palest blend
-    # rather than the fill — reads the page as much as the ink. Measured along
+    # rather than the fill, reads the page as much as the ink. Measured along
     # the snapped paths and taken across the line rather than along it, the
     # printed gray is this, and a direct profile of the drawn corridor at
     # (2225,1348) agrees: (160,160,151) to (185,178,172).
@@ -806,8 +808,8 @@ DRAWN_COLORS = {
 # the route runs on and the line under that label *is* the street. For any other
 # agency that would be fatal; here it isn't, because a PT bus runs on those
 # streets. The grid is the right thing to snap to and the only question is which
-# street of it — which the warp already answers nearly everywhere (median 3 px,
-# i.e. on the correct street and a line-width off it). The fault is in the
+# street of it. The warp answers that nearly everywhere (median 3 px, i.e. on
+# the correct street and a line-width off it). The fault is in the
 # excursions, where it drifts into the white between two streets for a few
 # hundred px, and a short reach closes those without ever choosing a street.
 #
@@ -815,12 +817,12 @@ DRAWN_COLORS = {
 # is *on* ink at every intersection. A run parallel to its own street but a few
 # px off it touches ink only at the crossings, which contribute a displacement of
 # zero and, smoothed over the 61-point window, outvote every point that wants to
-# move. Widening the cap does nothing, because reach was never the problem — the
+# move. Widening the cap does nothing, because reach was never the problem. The
 # problem is a north-south street claiming a point travelling east-west.
 #
 # So the ink is binned by the direction it runs, and a point may only be claimed
 # by ink going roughly its own way. For a coloured livery this would be pointless;
-# for the grid it is what makes the mask usable at all.
+# for the grid it is what makes the mask usable.
 DIR_BINS = 6                # 30 deg apart; a line has no sense, so 0..180
 DIR_SLACK = 1               # bins either side: accept within ~45 deg
 
@@ -842,7 +844,7 @@ STREET_STEP = 2.0          # px between sampled points along a stroke
 
 
 def street_ink(step=STREET_STEP):
-    """Points along every street stroke, as (x, y, direction bin) — Nx3."""
+    """Points along every street stroke, as (x, y, direction bin): Nx3."""
     def build():
         try:
             import fitz
@@ -899,7 +901,7 @@ class DirectionalTree:
     """A KD-tree that will only match ink running the same way as the line.
 
     Stands in for a cKDTree everywhere snap_coherent uses one: `.data`, and a
-    `.query` that takes the polyline in order — which is what lets it know the
+    `.query` that takes the polyline in order, which is what lets it know the
     heading at all, since the points arrive along the line rather than as a bag.
     `.plain` is the undirected tree, for solid_pixels."""
 
@@ -989,7 +991,7 @@ LEGEND_SEEDS = {
 
 # The two operators the sheet symbolises by *agency* rather than by route, and
 # so the two that snap on their legend ink rather than on a colour mask. Neither
-# has a route number printed anywhere — one code beside every line the operator
+# has a route number printed anywhere: one code beside every line the operator
 # runs, set as plain text rather than on a chip, so the mask's presence test (the
 # agency's own pixels *under* the word) finds only antialiased glyph strokes and
 # rejects them, leaving both agencies with no anchors at all. The legend strokes
@@ -1005,7 +1007,7 @@ SYMBOL_FEEDS = {"beachcities", "burbank"}
 # word speaks for whichever variant passes nearest it. That holds only while the
 # warp is nearer the truth than the routes are to each other. Where it isn't, the
 # distances come out backwards and one route is fitted bodily onto the other's
-# drawing — so the assignment is made by hand instead.
+# drawing, so the assignment is made by hand instead.
 #
 # A route listed here takes exactly the words listed for it and nothing else; one
 # left out is divided by `branch_anchors` as before. An agency whose routes run
@@ -1039,23 +1041,23 @@ LEGEND_INK = {
 # Montebello is here because a colour mask cannot hold its sage at all. The
 # corridors two or three routes share are drawn thick and mask solidly; the
 # stretches one route runs alone are drawn thin, and at 4096 px a thin sage line
-# is a blend with the cream page — 35% of the agency's strokes have no mask pixel
-# on them. What *is* in the mask is the sheet's grey street lettering, blending
+# is a blend with the cream page, leaving 35% of the agency's strokes with no
+# mask pixel on them. What *is* in the mask is the sheet's grey street lettering, blending
 # into range from the other side, so a badge-to-badge walk bridges along the
 # words onto whatever thick corridor they reach.
 #
 # Long Beach's answer, naming the thin stroke as a second seed, is no use here:
-# its thin lines have a dark core to name, and Montebello's have none — the
+# its thin lines have a dark core to name and Montebello's have none. The
 # missed readings smear pale with no cluster in them, and a seed wide enough to
 # cover the strokes takes the page with it (167k mask pixels to 977k).
 #
 # Foothill's evergreen has the same shape of fault over less of the network: its
 # shared corridors mask solidly and the stretches one route runs alone thin out
 # into the page, so the mask breaks in the middle of a drawn line with no label
-# over it to blame — and a break is where a snap leaves for whichever parallel
+# over it to blame, and a break is where a snap leaves for whichever parallel
 # corridor is unbroken. The cost of the strokes is that they are centrelines
 # with nothing either side, so where a warp runs between two of the agency's
-# own corridors nothing widens the near one's pull; the pin and the overrides
+# own corridors nothing widens the near one's pull. The pin and the overrides
 # below settle the few junctions where that decides the wrong way.
 #
 # The PDF has the same lines as vectors, thin and thick alike, complete under
@@ -1067,8 +1069,8 @@ INK_SNAP = {"montebello", "bigbluebus", "foothill"}
 def refine_color(shape_pts, seed, r2=55 * 55, need=250):
     """Median of pixels along the shapes that are close to the seed color.
     Pixels that match a dominant background color better than the seed are
-    dropped — street gray sits within sampling range of the muted agency
-    seeds and would drag the median gray (Montebello's sage came out gray)."""
+    dropped: street gray sits within sampling range of the muted agency seeds
+    and would drag the median gray (Montebello's sage came out gray)."""
     im, keep = map_image()
     h, w = keep.shape
     seed = np.array(seed)
@@ -1097,15 +1099,15 @@ def stroke_color(feed):
     line already. That holds for most of the municipal agencies and fails for
     exactly the two that need it most. Beach Cities Transit is drawn twice, up
     the coast and out to LAX, and its warp is far enough off both that a
-    correct seed still comes back gray — the samples are the street art it is
-    lying over, not its own evergreen. BurbankBus is drawn barely at all: 1144
+    correct seed still comes back gray, because the samples are the street art
+    it is lying over rather than its own evergreen. BurbankBus is drawn barely at all: 1144
     stroke points on the whole sheet, and two shapes to sample along, which
     cannot reach the 250 samples a refinement needs however well aimed.
 
     The legend says which ink is whose, so there is somewhere better to look:
     the strokes themselves. The dominant cluster of what sits on them is the
-    line's own fill — a median across a 1-2 px line at 4096 px is half page,
-    the reading `drawn_color` describes — and it needs no route to be right
+    line's own fill. A median across a 1-2 px line at 4096 px is half page,
+    the reading `drawn_color` describes, and this needs no route to be right
     about anything. Returns None where the sheet strokes too little of the
     agency to read."""
     rgb = LEGEND_INK.get(feed)
@@ -1145,7 +1147,7 @@ def tile_pixel(x, y, level=SPRITE_LEVEL):
 
 def tile_patch(cx, cy, r, level=SPRITE_LEVEL):
     """The pixels of a (2r+1) map-px square around (cx, cy), off the tile
-    pyramid, as an Nx3 array — or None where the pyramid doesn't cover it.
+    pyramid, as an Nx3 array, or None where the pyramid doesn't cover it.
     Spans tile boundaries; the tiles it touches join `tile_pixel`'s cache."""
     x0, y0 = int((cx - r) * level), int((cy - r) * level)
     x1, y1 = int((cx + r) * level) + 1, int((cy + r) * level) + 1
@@ -1224,7 +1226,7 @@ def drawn_color(shape_pts, seed, r2=55 * 55, need=250, level=SPRITE_LEVEL):
 #
 #  - The color is the page's own furniture. Metrolink rides the crosshatched
 #    railroad, inked in the same gray the sheet uses for place labels and minor
-#    street art, so masking that color selects most of the page — 141k pixels
+#    street art, so masking that color selects most of the page: 141k pixels
 #    spread over the whole sheet. LADOT's olive is the same story: its mask
 #    comes back 278k pixels, most of them label glyphs, and every LADOT route
 #    snaps to the nearest word instead of to its own line.
@@ -1235,9 +1237,9 @@ def drawn_color(shape_pts, seed, r2=55 * 55, need=250, level=SPRITE_LEVEL):
 #
 # But the sheet is a vector PDF, and every route on it is a stroke in its
 # agency's ink: no tolerance, no rival colors, no rendering to recover it from.
-# Where two liveries share one ink they are two stroke styles of it — the
+# Where two liveries share one ink they are two stroke styles of it: the
 # railroad's centreline under its dashed ticks, LADOT's solid DASH against its
-# dashed Commuter Express — so the dash pattern selects between them too.
+# dashed Commuter Express. The dash pattern selects between them too.
 
 INK_STEP = 3.0      # px between samples along a stroke read from the PDF
 
@@ -1247,7 +1249,7 @@ RAIL_INK = [(0.655, 0.664, 0.673)]
 ORANGE_INK = [(0.961, 0.513, 0.272)]                       # Metro Local
 RAPID_RED_INK = [(0.844, 0.086, 0.207)]                    # 720/754/761 rapid ribbon
 BUSWAY_INK = [(0.957, 0.474, 0.126)]                       # G Line busway ribbon
-# The J Line's transitway ribbon, drawn 5.5 wide in the line's own #ADB8BF —
+# The J Line's transitway ribbon, drawn 5.5 wide in the line's own #ADB8BF,
 # which is, to the byte, the route_color Metro's GTFS gives it. The raster is
 # where its color collides with freeway gray, not the PDF: 1104 stroke points,
 # all of them on this line bar two legend swatches down at y≈3700, which no cap
@@ -1256,24 +1258,24 @@ JLINE_INK = [(0.678, 0.723, 0.75)]
 LADOT_INK = [(0.409, 0.398, 0.173), (0.419, 0.4, 0.164)]   # DASH + Commuter Express
 
 # Where a feed's lines are read out of the PDF, the color it draws them in is
-# the ink itself — no sampling, and no rendering to recover it from. It has to
+# the ink itself: no sampling, and no rendering to recover it from. It has to
 # be, for the same reason the lines do: `drawn_color` samples along the *warp*,
 # and LADOT's is a median 20 px off its drawn line, so most of what it reads is
 # the page. Both liveries came out around (151,150,114), a pale khaki against
 # the (104,101,44) the sheet prints, and the vehicles rode visibly lighter than
-# the lines beneath them — the failure the note on DRAWN_COLORS["pasadena"]
-# describes, at twice the size.
+# the lines beneath them, which is the failure the note on
+# DRAWN_COLORS["pasadena"] describes, at twice the size.
 #
 # One ink is also one sprite color for both liveries, and that is right: the
-# dashes are a stroke style, not a second olive — both of the roundings above
-# appear under both styles. The two legend seeds are two readings of the one
+# dashes are a stroke style, not a second olive, and both of the roundings
+# above appear under both styles. The two legend seeds are two readings of the one
 # ink, a solid line and a dashed one blending differently into the page at
 # 4096 px, and they stay as seeds for the color masks, which search that
 # rendering and want it. Only the sprites, which are a rendering of nothing,
 # take the ink.
 INK_SPRITES = {"ladot": tuple(round(v * 255) for v in LADOT_INK[0])}
 
-# The mask holds railroads and nothing else, so — as with the busway ribbon —
+# The mask holds railroads and nothing else, so, as with the busway ribbon,
 # the snap can reach much further than it dares on a shared color. It needs to:
 # the warp sits a median 18-59 px off the drawn track, and 90% of it inside 60.
 RAIL_CAPS = (100.0, 50.0, 25.0, 12.0)
@@ -1415,8 +1417,8 @@ def map_phrases():
     single line, upper-cased.
 
     badge_words() keys on one word, which is what a route badge is. A railroad
-    is named rather than numbered — "ORANGE COUNTY LINE", set in italics along
-    its own track — and no word of that identifies anything on its own: the
+    is named rather than numbered: "ORANGE COUNTY LINE", set in italics along
+    its own track. No word of that identifies anything on its own, since the
     sheet prints "ORANGE" as a city and a street, and "LINE" against five other
     railroads."""
     global _PHRASES
@@ -1461,7 +1463,7 @@ def line_name_anchors(name, tree, near=LABEL_NEAR):
 
     Metrolink prints no badge anywhere on the map, and its lines share one ink
     and one crosshatched livery, so where two of them run parallel the artwork
-    alone cannot say which is which — two tracks drawn a couple of dozen px
+    alone cannot say which is which. Two tracks drawn a couple of dozen px
     apart on the same heading are near enough that the warp lands one line's
     schedule closer to the other's track, and the snap leaves it there.
 
@@ -1469,7 +1471,7 @@ def line_name_anchors(name, tree, near=LABEL_NEAR):
     the route with: metrolink's route_id is the line's printed name. Each is
     written along its own track and repeated down its length, so it pins the
     line at intervals the way a numbered route's badges do. The label is set
-    beside the track rather than on it — a measured 5.5 to 9 px off — so the
+    beside the track rather than on it, a measured 5.5 to 9 px off, so the
     anchor is the nearest ink to the label, not the label itself."""
     if tree is None:
         return []
@@ -1486,7 +1488,7 @@ def badge_line_color(cx, cy, r=7):
 
     A badge is the number drawn on a small colored chip. In a tiny window the
     only pixels are the cream map background, the dark number glyphs, and the
-    chip fill. Discard the background (cream/white — every channel high; keyed
+    chip fill. Discard the background (cream/white, every channel high; keyed
     off min-channel so a saturated fill like Metro orange (217,129,83), bright
     in red but low in blue, isn't mistaken for it) and the glyphs (near-black),
     then take the largest color cluster of what remains: that is the chip.
@@ -1498,7 +1500,7 @@ def badge_line_color(cx, cy, r=7):
     Read off the tile pyramid, where the print is faithful, and only from
     map.png where the pyramid doesn't reach. map.png is a 4096 px reduction of
     a 47" sheet and a badge chip is a few px across in it, so its fill is mixed
-    with the page before anything here can look at it — and the gate above this
+    with the page before anything here can look at it, and the gate above this
     reads that mix as some *other* agency's color and throws the badge away.
     Foothill's seven "190" chips read (78,111,89) through (160,173,153) in
     map.png, a 131 px spread over one printed color, and six of the seven were
@@ -1540,7 +1542,7 @@ def station_anchors(stops, tree, names, positions, near=STATION_NEAR, gate=STATI
 
     The label sits next to the ribbon rather than on it, so the anchor is the
     nearest mask pixel to the label, not the label itself. Names repeat across
-    the map — "College" appears twenty times — so a candidate has to be both
+    the map ("College" appears twenty times), so a candidate has to be both
     within `near` of this line's ribbon and within `gate` of where the warp
     puts that stop. Neither test alone is enough: proximity to the ribbon alone
     matches a stop to a neighbouring station's label, and the warp is too far
@@ -1578,7 +1580,7 @@ def badge_like(token):
 
     A badge is a code, not a word: it carries a digit (720, 1X, 431B, 20cc) or
     it is an initialism short enough to fit the chip (LC, SYL, R3). Case
-    settles the rest — a chip is set in capitals, so "Bay", "Del" and "Los"
+    settles the rest: a chip is set in capitals, so "Bay", "Del" and "Los"
     are prose out of a route's name however short they are."""
     return token.isalnum() and (any(c.isdigit() for c in token)
                                 or (token.isupper() and len(token) <= 3))
@@ -1589,8 +1591,8 @@ _RIVAL_PALETTE = None
 
 def rival_palette():
     """Every agency's drawn color, as a lookup for whose badge a chip is.
-    Metro exact colors plus each municipal legend seed / badge fill — enough
-    to tell one agency's chip from another's, which is all the anchor test
+    Metro exact colors plus each municipal legend seed and badge fill, which
+    is enough to tell one agency's chip from another's and all the anchor test
     needs."""
     global _RIVAL_PALETTE
     if _RIVAL_PALETTE is None:
@@ -1609,12 +1611,12 @@ def route_anchors(tokens, tree, region="main", colors=None, margin=8.0, near=Non
     """Badge positions for any of the route's number tokens that lie on the
     agency's drawn-line mask (rejects same-number badges of other agencies,
     highway shields, street labels). The agency color must be present AT the
-    word itself (badge fill / colored glyph strokes), not merely nearby —
-    another agency's badge drawn against this agency's line must not match.
+    word itself (badge fill or colored glyph strokes), not merely nearby, so
+    another agency's badge drawn against this agency's line does not match.
 
     near: for a tree of PDF strokes rather than mask pixels, the px a word may
     stand from the line to belong to it. The presence test above counts the
-    agency's *pixels* under the word, which is how a badge chip reads — but a
+    agency's *pixels* under the word, which is how a badge chip reads. But a
     line's strokes are sampled along its length, so a handful of them fall
     under a word however squarely it sits on the line. And a number the sheet
     sets as plain text beside its line, which is how it writes a Commuter
@@ -1672,7 +1674,7 @@ def ladot_livery(tokens, is_dash, sheet_tokens=()):
     keeps a DASH loop and a Commuter Express off each other's streets. Which
     style a route is drawn in is not the route's *name* to say, though: dashes
     mark part-time service, which is what a Commuter Express usually is and a
-    DASH never is, so the name predicts the style — and predicts it wrongly for
+    DASH never is, so the name predicts the style, and predicts it wrongly for
     the one Commuter Express that runs all day, drawn solid like a DASH. Looked
     for among the dashes it finds nothing within any cap and keeps the warp.
 
@@ -1683,8 +1685,8 @@ def ladot_livery(tokens, is_dash, sheet_tokens=()):
 
     Which is not to say a DASH cannot be anchored, only that the feed cannot say
     what to anchor it on. `sheet_tokens` is the designation read off the artwork
-    instead, by hand, in MAP_LABELS — the sheet's own word for this route, so it
-    names badges printed along this route's line and no other. Nothing else the
+    instead, by hand, in MAP_LABELS. It is the sheet's own word for this route,
+    so it names badges printed along this route's line and no other. Nothing else the
     feed offers may anchor a DASH: an initialism is a guess, and a guess landing
     on a code the sheet *does* print is worse than one landing on nothing."""
     prefer = ink_tree(LADOT_INK, dashed=not is_dash)
@@ -1692,10 +1694,10 @@ def ladot_livery(tokens, is_dash, sheet_tokens=()):
         # On the chip, not merely near the ink. A Commuter Express number is
         # set as plain text beside its line, so distance to the ink is all there
         # is to go on; a DASH designation is printed on a chip, and needs to be,
-        # because two capitals is also the shape of half the words on the sheet
-        # — a street label abbreviated to the same two letters will sit inside
-        # the anchor gate, on this agency's own olive, and drag the shape across
-        # the map to reach it. The chip is a flat olive (BADGE_FILLS) and street
+        # because two capitals is also the shape of half the words on the
+        # sheet: a street label abbreviated to the same two letters sits inside
+        # the anchor gate, on this agency's own olive, and drags the shape
+        # across the map to reach it. The chip is a flat olive (BADGE_FILLS) and street
         # labels are the teal the sheet letters streets in, so the colour under
         # the word separates them outright.
         return prefer, route_anchors(set(sheet_tokens), prefer,
@@ -1719,7 +1721,7 @@ def ladot_livery(tokens, is_dash, sheet_tokens=()):
 #
 # A pin near an end of a shape also cuts an overshoot back to itself, for the
 # schematic that ends a route at its hub while the GTFS runs on to a layover the
-# map omits. That doubles as a hazard — see trim_terminus and TRIM_TERMINI.
+# map omits. That doubles as a hazard; see trim_terminus and TRIM_TERMINI.
 PINNED_ANCHORS = {
     ("gtfs_bus", "2"): [(1001, 1801)],
     ("gtfs_bus", "182"): [(1677.4, 1703.7), (1700.0, 1704.5)],
@@ -1771,7 +1773,7 @@ PINNED_ANCHORS = {
 }
 
 
-# Termini given in *warp* px instead of on the drawing, for trimming only — they
+# Termini given in *warp* px instead of on the drawing, for trimming only. They
 # are never read as anchors. A pin in PINNED_ANCHORS does both jobs at once, and
 # that works only where the warp lands near enough the drawn terminus for one
 # point to serve as both.
@@ -1804,8 +1806,8 @@ def trim_terminus(pts, pins):
 
     Every pin is measured against the whole shape and the cuts applied together,
     rather than each against what the last one left. Trimming in sequence lets
-    the cuts compound: a first cut brings a pin further into the route — one
-    that is no kind of terminus — inside the tail limit as measured from the new
+    the cuts compound: a first cut brings a pin further into the route, one
+    that is no kind of terminus, inside the tail limit as measured from the new
     end, and the next pass cuts the route back to that as well.
 
     A shape that finishes where it started has no overshoot to cut: its two ends
@@ -1813,7 +1815,7 @@ def trim_terminus(pts, pins):
     end, and the stretch either side of them is the route rather than a layover
     tail. Cutting there would take a piece out of the circuit and leave the last
     point short of the first. It also puts the whole of a circulator's first and
-    last `TERMINUS_TAIL` px of arc — a quarter of a small loop — beyond what a
+    last `TERMINUS_TAIL` px of arc, a quarter of a small loop, beyond what a
     pin can hold, which is the difference between anchoring one and needing an
     override for it."""
     P = np.asarray(densify(pts, 4.0), dtype=float)
@@ -2103,8 +2105,8 @@ DESPIKE_GAP = 10.0      # px; the path returning this close to where it was a
                         # window ago has doubled back on itself
 DESPIKE_MAX = 160.0     # px of arc; a doubling-back longer than this is a real
                         # loop, not a snapping sliver, and is left alone
-DESPIKE_CHORD = 34.0    # px; and its two ends must land this close together —
-                        # a sliver leaves the line and returns beside where it
+DESPIKE_CHORD = 34.0    # px; and its two ends must land this close together.
+                        # A sliver leaves the line and returns beside where it
                         # left, so straightening it barely moves anything, while
                         # a run whose ends are far apart spans a real bend that
                         # straightening would cut a corner off
@@ -2116,7 +2118,7 @@ def spike_penalty(pts, step=2.0, win=12.0):
     streets, measured on a uniform resampling so it is blind to vertex spacing.
 
     This is scripts/path_check.py's score, computed the same way on the same
-    grid — matching it is what lets the caller's gate promise that no shape
+    grid. Matching it is what lets the caller's gate promise that no shape
     comes out of a cleanup pass ranking worse than it went in. Cheap enough to
     run on every candidate for every shape, so no pass is kept on faith."""
     P = np.asarray(pts, dtype=float)
@@ -2158,7 +2160,7 @@ def stored_penalty(full):
     and rounded to the tenth of a pixel schedule.json carries.
 
     Not a detail. The doubling-back test turns on a hard 12 px threshold, so a
-    hundredth of a pixel can carry a whole run of points across it — jittering a
+    hundredth of a pixel can carry a whole run of points across it: jittering a
     shape by 0.02 px can swing its score by half. Score the geometry that ships,
     or the gate below can promise nothing about it."""
     return spike_penalty(np.round(simplify(full), 1))
@@ -2168,7 +2170,7 @@ def despike(full):
     """Straighten thin retrace spikes out of a snapped polyline.
 
     The snapper sometimes crushes a sharp deviation into a hairpin that darts
-    out and straight back on itself within a dozen px — a shape no drawn line
+    out and straight back on itself within a dozen px, a shape no drawn line
     makes. Each such run is replaced by a straight line between the good points
     just outside it, which removes the dart without moving those points, so no
     new corner appears at the join. Only genuine doubling-back is touched: a
@@ -2227,14 +2229,14 @@ FOLD_WIDTH = 12.0   # px; and it has to come back *along itself*. Twice the area
                     # other, while a route going round something holds them a
                     # block apart.
 FOLD_WARP = 4.0     # px of that same gap, in the warp the fold was crushed from
-                    # — enough that the route went somewhere over the stretch
+                    # enough that the route went somewhere over the stretch
                     # rather than out and back down one street. Under it the
                     # doubling-back is the route's own and the snapper only
                     # inherited it.
 FOLD_KEEP = 0.75    # of the snapped line's arc, the least a cleanup may leave.
                     # The tests above read one fold at a time, and a route whose
-                    # arms run a block apart in the warp — a one-way pair, a
-                    # circulator drawn as a single line — offers a fold at every
+                    # arms run a block apart in the warp (a one-way pair, a
+                    # circulator drawn as a single line) offers a fold at every
                     # point along it, each of them ordinary. Taken together they
                     # are half the route. Stop distances are carried through this
                     # geometry, so a line that comes out short does not merely
@@ -2250,7 +2252,7 @@ def arc_length(P):
 
 
 def arm_gap(P, i, j):
-    """Mean distance between the two arms of the run P[i:j+1] — twice the area
+    """Mean distance between the two arms of the run P[i:j+1]: twice the area
     it encloses over its own length. Near zero where the run doubles back along
     itself, a block's width where it goes round something."""
     run = P[i:j + 1]
@@ -2269,7 +2271,7 @@ def strands_badge(before, after, badges):
     own printed badges with no path near it any more.
 
     A badge stands on the line it names, so a detour that is the only thing
-    reaching one is a detour the sheet draws — a run out to a badge and back
+    reaching one is a detour the sheet draws. A run out to a badge and back
     doubles over exactly the way the snapper's folds do, and is the route.
     Gated at the distance a badge is read from its line to begin with, so a
     badge the shape still passes doesn't count."""
@@ -2281,7 +2283,7 @@ def strands_badge(before, after, badges):
 
 
 def folds(full, base):
-    """The runs of a snapped polyline that double back to where they started —
+    """The runs of a snapped polyline that double back to where they started,
     and that the warp they came from does not, so the fold is the snapper's
     doing and not the route's.
 
@@ -2295,7 +2297,7 @@ def folds(full, base):
     # Which points come back within FOLD_GAP of which, asked once of a tree
     # rather than scanned window by window: the pairs are a handful per point,
     # and finding them by hand cost more than everything else here. The tree
-    # only narrows the candidates — each is still measured with the same
+    # only narrows the candidates: each is still measured with the same
     # np.hypot on the same two points, so the answer is the scan's, and the
     # slack on the radius keeps a pair sitting exactly on FOLD_GAP from turning
     # on which of the two computes the distance.
@@ -2331,9 +2333,9 @@ def folds(full, base):
 def unfold(full, base, badges=()):
     """Take the folds out of a snapped polyline.
 
-    Where the sheet draws a route the GTFS detours off — a bus pulling round a
+    Where the sheet draws a route the GTFS detours off (a bus pulling round a
     transit centre, a jog through an office park, a terminal loop the schematic
-    ends in a stub — the detour has no ink of its own and the snapper crushes it
+    ends in a stub), the detour has no ink of its own and the snapper crushes it
     onto the line it does have. Nothing there is drawn twice, so the line runs
     out along that ink and straight back down it.
 
@@ -2346,17 +2348,17 @@ def unfold(full, base, badges=()):
     each look harmless can't between them strand a badge neither would have alone.
 
     The ink test `undetour` asks (see `_ink_vouches`) does *not* belong here,
-    though it looks as though it should — it leaves total drift unchanged and
+    though it looks as though it should. It leaves total drift unchanged and
     costs path_check. The asymmetry is in what replaces a fold: an interior fold
     collapses to a chord between two points already within FOLD_GAP of each
     other, so the test can never fire, while an end fold's replacement is a whole
     leg that reads as marginally further from the strokes than the doubled-over
-    pair it replaces — enough to veto precisely the fixes this pass exists for.
+    pair it replaces, which vetoes precisely the fixes this pass exists for.
 
     An interior fold is replaced by the straight line between the points either
     side, which don't move. A fold at an *end* doubles over the run to the
     terminus, and collapsing it would leave the route stopping short of the end
-    the sheet draws — so that one keeps the leg reaching the terminus and drops
+    the sheet draws, so that one keeps the leg reaching the terminus and drops
     the other, stretched over the same indices."""
     out = full.copy()
     n = len(full)
@@ -2377,7 +2379,7 @@ def unfold(full, base, badges=()):
 
 
 # ---- detours: the snapper riding a neighbour's ink and coming back ----------
-# The mask a bus route snaps onto is the whole *agency's* drawn lines — one
+# The mask a bus route snaps onto is the whole *agency's* drawn lines: one
 # undifferentiated blob of ink per legend colour (see `agency_tree` in main).
 # It cannot tell one route of an agency from another. That is fine while a
 # route's own line is drawn, since its own line is the nearest ink. It stops being
@@ -2396,7 +2398,7 @@ def unfold(full, base, badges=()):
 # after snapping, index for index, so a stretch leaving `base` far and returning
 # is the snapper having found ink the warp says is not this route's. The
 # discriminators against a legitimate correction: it returns (a real fix to a bad
-# warp stays moved), it is bounded in arc, and no badge vouches for it — a chip
+# warp stays moved), it is bounded in arc, and no badge vouches for it. A chip
 # inside the excursion means the sheet really does print the line out there.
 DETOUR_MIN = 13.0     # px *past the sustained correction*; under this the
                       # snapper is refining, not relocating
@@ -2437,18 +2439,18 @@ INK_QUANTILE = float(os.environ.get("INK_QUANTILE", 0.85))
                       # ends of a widened run agree whatever is done to its
                       # middle, so a median mostly reports that agreement; this
                       # reads the far end of the run instead. Set at the most a
-                      # label can knock out of a mask — see `_ink_vouches`.
+                      # label can knock out of a mask; see `_ink_vouches`.
 
 
 def _flatten_run(full, base, lo, hi):
-    """The run with its excursion taken out — see undetour, which applies it."""
+    """The run with its excursion taken out. See undetour, which applies it."""
     d = full - base
     t = np.linspace(0, 1, hi - lo + 1)[:, None]
     return base[lo:hi + 1] + d[lo] * (1 - t) + d[hi] * t
 
 
 def _badge_vouches(full, base, lo, hi, B):
-    """Whether a route-number chip speaks for this excursion — that is, whether
+    """Whether a route-number chip speaks for this excursion, i.e. whether
     flattening it would carry the path away from a chip it is currently on."""
     R = full[lo:hi + 1]
     cur = float(np.sqrt(((B[:, None, :] - R[None]) ** 2).sum(-1)).min())
@@ -2460,8 +2462,8 @@ def _badge_vouches(full, base, lo, hi, B):
 
 
 def _ink_vouches(full, base, lo, hi, tree):
-    """Whether the drawn line itself speaks for this excursion — that is,
-    whether flattening it would carry the path off the artwork altogether.
+    """Whether the drawn line itself speaks for this excursion, i.e. whether
+    flattening it would carry the path off the artwork altogether.
 
     The badge test above is a coarse proxy for this: chips are printed every
     50-100 px, so a run a few hundred px long can hold two of them, and a
@@ -2471,7 +2473,7 @@ def _ink_vouches(full, base, lo, hi, tree):
     Where the PDF's own strokes are to be had they are the better witness, being
     the drawing itself, whole underneath every label painted over it. The
     agencies that most need this test have no vector ink and snap onto a colour
-    mask, which has label-shaped holes in it — and the stretch a genuine detour
+    mask, which has label-shaped holes in it, and the stretch a genuine detour
     should flatten back onto is exactly the stretch a label knocked out. That
     only defeats a test that reads the hole: a word covers a short piece of a run
     and the drawing resumes either side of it, so the comparison need only be
@@ -2480,8 +2482,8 @@ def _ink_vouches(full, base, lo, hi, tree):
     Which is why the two versions are compared at `INK_QUANTILE` of their
     distance rather than at the median. The widened run reaches out to where the
     displacement has come back, so over its ends both versions sit on the same
-    ink and a median mostly reports that agreement — loudly enough to flatten
-    real corners. Reading further out is worse rather than better: at the maximum
+    ink and a median mostly reports that agreement, enough to flatten real
+    corners. Reading further out is worse rather than better: at the maximum
     a single stray point decides, and the ink-snapped routes, whose strokes have
     no holes to forgive, start losing genuine fixes. 0.85 is the swept floor of
     total drift.
@@ -2571,8 +2573,8 @@ def detour_penalty(full, base, badges=(), ink=None):
 def undetour(full, base, badges=(), ink=None):
     """Put a detoured stretch back on the warp.
 
-    The correction either side of the excursion is real — it is what put the
-    line on its own ink — so it is kept and interpolated across, rather than
+    The correction either side of the excursion is real, since it is what put
+    the line on its own ink, so it is kept and interpolated across rather than
     dropping the stretch flat onto the warp and leaving a step at each join.
     What the stretch loses is only the part of the displacement that took it to
     a neighbour's ink, which is the part with nothing to vouch for it."""
@@ -2596,8 +2598,8 @@ def apply_override(full, base, spec):
     stops keep projecting onto the warp and carrying over. `spec["box"]` (warp
     px) brackets the stretch to replace; the run of the shape inside it is
     swapped for `spec["path"]`, resampled to the same point count and oriented
-    to the shape's direction of travel, so the alignment — and the stop timing —
-    hold. A shape that doesn't enter the box is left untouched."""
+    to the shape's direction of travel, so the alignment and the stop timing
+    both hold. A shape that doesn't enter the box is left untouched."""
     B = np.asarray(base, dtype=float)
     x0, y0, x1, y1 = spec["box"]
     inside = np.where((B[:, 0] >= x0) & (B[:, 0] <= x1)
@@ -2652,10 +2654,10 @@ def branch_anchors(anchors, sid, sids, kd_for, slide_for):
     lines, so a badge on the next street over can't be shared.
 
     That slack is what the badges are read against the *slid* route for. Where
-    the warp is out by about half the distance between two parallel drawn lines
-    — a feed pairing two lines under one route puts a variant on each, so the
-    pair's badges are printed a street apart — a badge sitting between them is
-    nearer the wrong variant by less than the slack, and every variant keeps
+    the warp is out by about half the distance between two parallel drawn
+    lines (a feed pairing two lines under one route puts a variant on each, so
+    the pair's badges are printed a street apart), a badge sitting between them
+    is nearer the wrong variant by less than the slack, and every variant keeps
     every badge. The error is common to the variants, so taking it off first
     leaves the comparison to be decided by the distance between the drawn lines,
     which is wider than the slack."""
@@ -2670,7 +2672,7 @@ def branch_anchors(anchors, sid, sids, kd_for, slide_for):
 
 
 TRACE_STEP = 4.0          # px; lattice pitch for walking the drawn line
-TRACE_PAD = 80.0          # px of slack around the two badges, for a bowed line —
+TRACE_PAD = 80.0          # px of slack around the two badges, for a bowed line
                           # and for a corridor that leaves their box entirely, which
                           # a route turning a corner between two badges does: Metro
                           # 182 runs 63 px east of the eastern badge before turning
@@ -2782,8 +2784,8 @@ def bridges(C, free, tree, step, gap=BRIDGE_MAX):
     # what got knocked out, where the two arms stop a couple of dozen px apart
     # and no test of "same heading" can join them, the drawing having turned
     # inside the hole. Facing each other is what they still do, so that is asked.
-    # Anything perpendicular — the gap between two parallel streets, which is
-    # the failure to avoid — fails it flat.
+    # Anything perpendicular fails it flat, and the gap between two parallel
+    # streets is exactly that, which is the failure to avoid.
     kd = cKDTree(P[cand[ends]])
     rows, cols, w = [], [], []
     for i in range(len(ends)):
@@ -2814,7 +2816,7 @@ def mask_path(a, b, tree, step=TRACE_STEP, pad=TRACE_PAD, reach=TRACE_REACH,
     walk is only ever used to aim the snap, which then refines onto the pixels.
 
     The drawing is interrupted, and the walk steps across the interruptions it
-    can justify — see `bridges` below. Widening `reach` instead is the wrong
+    can justify; see `bridges` below. Widening `reach` instead is the wrong
     tool: at 6 px the lattice steps onto the glyphs beside a line and comes back
     with a shortcut through the words. A bridge crosses blank page only where
     the line resumes on the same
@@ -2832,7 +2834,7 @@ def mask_path(a, b, tree, step=TRACE_STEP, pad=TRACE_PAD, reach=TRACE_REACH,
     C = np.stack(np.meshgrid(lo[0] + step * np.arange(nx),
                              lo[1] + step * np.arange(ny), indexing="ij"), -1)
     # Only whether each cell is within `reach` of the drawing, never how far
-    # past it — so the query is bounded, which lets the tree stop descending on
+    # past it, so the query is bounded, which lets the tree stop descending on
     # the cells over blank page, and spread over the cores.
     free = (tree.query(C.reshape(-1, 2), distance_upper_bound=reach,
                        workers=-1)[0] < reach).reshape(nx, ny)
@@ -2884,7 +2886,7 @@ _ALIGN_USED = 0        # aligned walks taken since the count was last read
 def align_used():
     """How many aligned walks the last fit took, and reset. The caller fits the
     shape a second time without them when this is non-zero, and keeps whichever
-    result is better — nothing here is trusted, only measured."""
+    result is better. Nothing here is trusted, only measured."""
     global _ALIGN_USED
     n, _ALIGN_USED = _ALIGN_USED, 0
     return n
@@ -2917,7 +2919,7 @@ def resnap_without_alignment():
 def ink_offset(P, tree, q=0.85):
     """How far a path sits from the drawing it should be on, read high enough
     up the distribution that a hole in a mask cannot answer for the whole of
-    it — the same reading `_ink_vouches` takes, and for the same reason."""
+    it, the same reading `_ink_vouches` takes and for the same reason."""
     if tree is None or P is None or not len(P):
         return 0.0
     return float(np.quantile(tree.query(np.asarray(P, float))[0], q))
@@ -2927,7 +2929,7 @@ ALIGN_DEG = float(os.environ.get("ALIGN_DEG", 70.0))   # mean heading
                        # disagreement, deg, an alignment may leave. Loose on
                        # purpose: what decides an alignment is the measurement
                        # afterwards, not this, and swept from 20 to 999 the
-                       # results stop changing at 70 — so it bounds the absurd
+                       # results stop changing at 70, so it bounds the absurd
                        # and nothing else. Tightening it to 20 costs 6 % of
                        # the drift and 19 % of the hairpin score
 
@@ -2950,7 +2952,7 @@ def align_walk(walk, seg):
     """Where each point of `walk` sits along `seg`, as a fraction of `seg`.
 
     The walk and the shape's own stretch run over the same ground at different
-    rates — that is the whole difficulty. The rate is not constant either: the
+    rates, which is the difficulty here. The rate is not constant either: the
     sheet compresses one street and stretches the next, so no single scale
     relates them. What survives is the *order* of the turns, because the warp is
     smooth: it can put a corner in the wrong place but not in the wrong order.
@@ -2999,12 +3001,12 @@ def trace_anchors(s, D, A, P, cum, tree):
     """Add intermediate anchors by walking the drawn line between badges.
 
     Two badges of a route bracket a stretch of its drawn line, but the
-    displacement between them is interpolated straight — and where the map is
-    schematic, that straight guess lands on the wrong street: a warp that is out
-    by more than the width of a block settles the interpolation onto the
-    neighbouring one. Walking
-    the mask from badge to badge recovers the corridor itself; sampling that
-    walk pins the stretch to it, close enough for the snap passes to finish.
+    displacement between them is interpolated straight, and where the map is
+    schematic that straight guess lands on the wrong street: a warp out by more
+    than the width of a block settles the interpolation onto the neighbouring
+    one. Walking the mask from badge to badge recovers the corridor itself, and
+    sampling that walk pins the stretch to it, close enough for the snap passes
+    to finish.
 
     The walk is trusted only when it comes out about as long as the shape says
     the stretch should be. The drawn lines are one connected web, so a walk
@@ -3013,8 +3015,8 @@ def trace_anchors(s, D, A, P, cum, tree):
     interpolation.
 
     "As long as the shape says" is measured on the shape as it stands, which on
-    the first pass is the warp — so where the warp is bad enough to need this,
-    the yardstick is bad too, and the walk that would fix it can read as a
+    the first pass is the warp. So where the warp is bad enough to need this,
+    the measure is bad too, and the walk that would fix it can read as a
     detour. That is why the count of walks taken comes back with the anchors:
     the caller re-fits while it keeps rising, and a stretch the warp talked it
     out of is walked on a later pass, once the badges have brought the arc
@@ -3049,7 +3051,7 @@ def trace_anchors(s, D, A, P, cum, tree):
                 believed += 1
             elif not _ALIGN_OFF and length < TRACE_LIMIT * ds:
                 # Out of band, which until now threw the walk away. But the band
-                # is not a test of whether the corridor is the route's — it is
+                # is not a test of whether the corridor is the route's. It is
                 # the range over which "same rate" holds, and outside it the
                 # anchors land at the wrong points and saw the line into
                 # hairpins. Align the two courses instead and place the anchors
@@ -3074,7 +3076,7 @@ def trace_anchors(s, D, A, P, cum, tree):
                 # times the arc packs three anchors into every px of shape it
                 # corresponds to, and neighbouring anchors a px apart carrying
                 # displacements tens of px apart is a cliff in the field the fit
-                # interpolates — which comes out as the hairpins that made the
+                # interpolates, which comes out as the hairpins that made the
                 # widened band look like a bad idea in the first place.
                 keep = np.diff(sv, prepend=s[i] - ALIGN_SPACING) >= ALIGN_SPACING
                 if keep.sum() < 1:
@@ -3105,8 +3107,8 @@ PASS_SLACK = 4.0      # px. A second place the shape comes this near a badge is
                       # the same drawn line run twice, not a parallel one: half
                       # a line width, where two parallel streets are a street.
 PASS_RISE = 40.0      # px. And it is a second *pass* only if the shape left the
-                      # badge in between — went at least this far from it and
-                      # came back. A route running alongside a badge holds much
+                      # badge in between, going at least this far from it and
+                      # coming back. A route running alongside a badge holds much
                       # the same distance for hundreds of px, and every point of
                       # that run is within the slack of every other.
 PASS_BACK = -0.5      # cos 120 deg: and it has to be running back the other way
@@ -3126,16 +3128,16 @@ def badge_passes(P, cum, A, gate, slack=PASS_SLACK, rise=PASS_RISE):
     """(badge index, shape index) for every pass the shape makes at each badge.
 
     A badge belongs to the point of the shape nearest it, and for almost every
-    route that is the whole story. A route running the same drawn corridor twice
+    route that is enough. A route running the same drawn corridor twice
     is nearest it twice, at two places far apart along its own length, and
-    pinning only the nearer leaves the other pass unanchored — free to be walked
+    pinning only the nearer leaves the other pass unanchored, free to be walked
     onto a neighbouring route drawn in the same ink.
 
     Three conditions, and the last two keep this from firing everywhere. A pass
     counts only if the shape comes back within `slack` of the distance the
     nearest one stands at, which is under a line width. It has to have *left* in
-    between — gone `rise` px from the badge and returned — or a route running
-    alongside a chip for a few hundred px would be pinned to it over and over,
+    between, going `rise` px from the badge and returning. Otherwise a route
+    running alongside a chip for a few hundred px is pinned to it over and over,
     each anchor demanding its own point be the one on the badge. And it has to be
     running back the other way, which is what doubling along one drawn line
     means; two legs on *parallel* streets running the same way are a street apart
@@ -3179,8 +3181,8 @@ def crossed_badges(A, cum, j):
     A badge is read as belonging to whichever point of the shape is nearest it,
     which asks the warp to be closer to the truth than the streets are to each
     other. Where it isn't, a route running out and back on parallel streets
-    hands both streets' badges to whichever leg the warp favours — and the
-    shape carries one line through that stretch, so at most one of them can be
+    hands both streets' badges to whichever leg the warp favours. The shape
+    carries one line through that stretch, so at most one of them can be
     right. Two badges a street apart on the sheet claiming the same few px
     along the shape is that failure, visible without knowing which is wrong."""
     if len(A) < 2:
@@ -3200,7 +3202,7 @@ def anchor_slide(P, A, gate):
     the other's street.
 
     The warp's error varies slowly over a few miles of map, so a shape's legs are
-    all out by much the same vector — slide the shape by it and each badge is
+    all out by much the same vector. Slide the shape by it and each badge is
     nearest its own leg again. The slide is searched on a coarse grid, then
     refined, and charged for its length, so the smallest slide that sorts the
     badges out is taken. It only decides which point of the shape each badge
@@ -3213,7 +3215,7 @@ def anchor_slide(P, A, gate):
     missing its badges to running through them is worth re-reading against.
 
     The bound is the anchor gate itself, because past it there is nothing to
-    slide onto — a badge further from the shape than the gate does not count for
+    slide onto: a badge further from the shape than the gate does not count for
     it at any offset, so a longer reach only chases badges the fit will ignore.
     A shorter bound is worse than useless where the warp's own error exceeds it,
     which is exactly where the slide exists. Reaching that far is only safe with
@@ -3229,7 +3231,7 @@ def anchor_slide(P, A, gate):
     # A badge no offset in the search can bring within the gate scores the gate
     # in `base` and in every candidate alike. It cannot say which slide is
     # better, and the constant it adds to both sides is enough on its own to
-    # fail the gain test — one such badge, and no slide is believed however
+    # fail the gain test. One such badge, and no slide is believed however
     # squarely it puts every other badge on its line. So only the badges a slide
     # could reach are scored, and the bound is twice the gate: the gate itself,
     # plus the furthest the search may carry the shape.
@@ -3261,7 +3263,7 @@ def anchor_slide(P, A, gate):
 # The Downtown call-out, as the PDF draws it: a cream panel laid over downtown
 # at an angle, carrying a ghosted schematic in place of the network it covers.
 # Not one route that crosses downtown is drawn inside it, so it is a hole in
-# every mask — the panel is the reason EXCLUDE can't say so, being the one
+# every mask. The panel is the reason EXCLUDE can't say so, being the one
 # region of the sheet that isn't square with the page.
 CALLOUT = [(1731, 1774), (1609, 1993), (1731, 2061), (1853, 1841)]
 
@@ -3306,8 +3308,8 @@ def solid_pixels(tree):
     around the labels: half of Torrance's is blobs under ten pixels, and the
     median blob across every agency is a single pixel.
 
-    The coarse passes are unbothered — they move the line by a displacement
-    smoothed over tens of points, so a stray pixel is outvoted. The final pass
+    The coarse passes are unbothered, because they move the line by a
+    displacement smoothed over tens of points and a stray pixel is outvoted. The final pass
     is not: it sets each point *onto* the mask pixel nearest it, and where
     that pixel is a speck, neighbouring points get pinned to different specks
     and the line arrives jagged. So that last pass only lands on a pixel with
@@ -3316,7 +3318,7 @@ def solid_pixels(tree):
 
     Only masks read out of the raster speckle; a tree of PDF strokes is the
     drawn line itself, sampled along its length rather than across its width,
-    and would fail this test everywhere — see snap_coherent's `speckled`."""
+    and would fail this test everywhere. See snap_coherent's `speckled`."""
     key = id(tree)
     if key not in _SOLID:
         # DirectionalTree.query wants the points in line order; crowding is a
@@ -3338,12 +3340,12 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
     anchors: points known to lie on this route's drawn line (its map badges).
     The global warp's local error can exceed the spacing of parallel drawn
     streets, so first shift the polyline by a displacement field interpolated
-    between anchors — `trace_anchors` filling in the stretches between them by
-    walking the drawn line — then snap with tighter caps so the corrected line
+    between anchors, with `trace_anchors` filling in the stretches between them
+    by walking the drawn line, then snap with tighter caps so the corrected line
     can't wander back onto a neighboring route.
 
     The anchor fit is re-run while it keeps learning something the last pass
-    didn't have — a badge it couldn't reach, *or* a corridor it couldn't walk.
+    didn't have: a badge it couldn't reach, *or* a corridor it couldn't walk.
     A badge only counts for a shape it passes within `anchor_gate` of, and where
     the warp is poor the badges that would fix it start out beyond that; one fit
     on the badges it can see brings the rest within reach. This is self-limiting
@@ -3364,7 +3366,7 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
     value cuts total distance from the drawn lines, because most stretches really
     are a few px short of their ink. It also breaks routes outright. The cap
     bounds which points may *contribute* a displacement, not how far the pass may
-    carry one — the field is interpolated across non-contributing points and then
+    carry one. The field is interpolated across non-contributing points and then
     smoothed, so more contributors let a stretch with no ink of its own be
     dragged by its neighbours, out across blank page. Judge a change like this on
     routes, not on the total.
@@ -3374,7 +3376,7 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
 
     sole: the mask holds this one route's drawn line and nothing else, so
     whatever it finds is this route's, and the regions the mask skips stop being
-    a reason to leave a point where it is. Ordinarily they are — a point the
+    a reason to leave a point where it is. Ordinarily they are: a point the
     sheet drew nothing under has no correction of its own, and interpolating one
     carries the line off into blank page. But that failure is a point dragged
     onto a *neighbour's* line, and a one-line mask has no neighbour. The Downtown
@@ -3394,7 +3396,7 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
         for _ in range(ANCHOR_PASSES):
             cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(P, axis=0).T))])
             # (badge, shape point): one per badge in reach, and one per *pass*
-            # where the shape runs its drawn corridor twice — see badge_passes
+            # where the shape runs its drawn corridor twice; see badge_passes
             hit = badge_passes(P, cum, A, anchor_gate)
             ai = np.array([h[0] for h in hit], dtype=int)
             j = np.array([h[1] for h in hit], dtype=int)
@@ -3412,14 +3414,14 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
             D = (A[ai] - P[j])[order]
             s, D, w, b = trace_anchors(s, D, A[ai][order], P, cum, tree)
             # nothing the last fit didn't already have: no badge it couldn't
-            # reach, and no corridor it couldn't walk — nor one it could only
+            # reach, and no corridor it couldn't walk, nor one it could only
             # walk by *aligning*, which is the fallback for a corridor whose
             # length the shape cannot yet vouch for, and which the next pass
             # may well be able to believe outright. Counting the two together
             # made converting one into the other look like standing still: a
             # corner can go in as one aligned node on the first pass and be
-            # believed outright on the second, laying several — with the walk
-            # *count* unchanged, so the loop stopped and threw away the better
+            # believed outright on the second, laying several, with the walk
+            # *count* unchanged. The loop then stopped and threw away the better
             # fit it had just computed.
             if len(ai) <= used and w <= walked and b <= believed:
                 break
@@ -3480,7 +3482,7 @@ def span_points(P, span):
     A window over a fitted shape is a length of line, but the arrays are
     indexed by point, and how much line a point stands for is the feed's
     business rather than ours: densify() puts a ceiling on the step and nothing
-    under it, so a feed drawing its shapes finely keeps its own spacing — under
+    under it, so a feed drawing its shapes finely keeps its own spacing: under
     a px for some feeds, three for others. A window counted in points is
     therefore a different window on every feed."""
     if len(P) < 3:
@@ -3512,8 +3514,8 @@ SEAT_CAP = 8.0        # px the drawing may stand from the smoothed line and
 SEAT_PASSES = 2       # the correction is smoothed like the line it corrects,
                       # which hands back about half of what the average took;
                       # asking again off the moved line recovers most of the
-                      # rest. Self-limiting — a line on its ink has nothing
-                      # left to give back — so this is a count, not a cap.
+                      # rest. It is self-limiting, since a line on its ink has
+                      # nothing left to give back, so this is a count not a cap.
 
 
 def unjitter(P, span=JITTER_SPAN, tree=None):
@@ -3528,30 +3530,29 @@ def unjitter(P, span=JITTER_SPAN, tree=None):
     which scores turning past a square corner.
 
     Averaging the line over a stretch longer than the wander is what removes
-    it. The span is a length rather than a count of points — see span_points.
+    it. The span is a length rather than a count of points; see span_points.
 
     An average over a length of line pulls every bend inside it toward the
     inside of the turn, and a schematic is nothing but bends: where the sheet
     rounds a corner the smoothed line cuts the arc off, by several px on a
-    corner drawn tight. So `tree` — the drawing this shape was fitted on —
-    is asked for the corner back afterwards: each point's offset from the ink,
+    corner drawn tight. So `tree`, the drawing this shape was fitted on, is
+    asked for the corner back afterwards: each point's offset from the ink,
     averaged over half the span so the correction is as smooth as the line it
     corrects, and taken across the line only. The drawing says how far off a
     point sits, not where along it the point belongs, and carrying the
     along-line half of the offset brings the ink's own sampling in with it.
     Smoothing the correction also halves it, so the line is seated
     `SEAT_PASSES` times, each pass asking the drawing again from where the last
-    one left it — which is what brings back a jog the sheet draws in a couple
-    of blocks, where one pass only meets it halfway.
+    one left it. That is what brings back a jog the sheet draws in a couple of
+    blocks, where one pass only meets it halfway.
 
     What that leaves is charged for: each point keeps whatever share of the
     whole correction leaves it no further from the ink than the wander it
     removes, so a corner too tight to be seated back onto keeps its own place
     instead. The share falls off smoothly rather than switching, since a step
-    in the correction is a kink in the line. Off the drawing entirely — a
-    stretch the sheet doesn't draw, or one further than SEAT_CAP from it —
-    there is nothing to seat on and nothing to give up, and the average
-    stands."""
+    in the correction is a kink in the line. Off the drawing entirely, on a
+    stretch the sheet doesn't draw or one further than SEAT_CAP from it, there
+    is nothing to seat on and nothing to give up, and the average stands."""
     P = np.asarray(P, dtype=float)
 
     def smooth(A, w):
@@ -3635,8 +3636,8 @@ def rail_trim(P, tree, end, limit=TRIM_LIMIT):
 
     The snap smooths its displacement along the line and pads that smoothing at
     the ends, so the last points inherit the shift of their neighbours and slide
-    on along the line's own heading — past the end of the drawn line, out into
-    blank page. Points lying on neither ribbon nor platform are cut back to the
+    on along the line's own heading, past the end of the drawn line and out
+    into blank page. Points lying on neither ribbon nor platform are cut back to the
     artwork.
 
     Only a short overrun, though: where a line crosses the Downtown call-out
@@ -3658,7 +3659,7 @@ def rail_platform(P, end):
 
     A drawn platform interrupts its own ribbon, so a line laid along the ink
     stops at the marker's edge, and one cut back off a blank-page overshoot
-    stops at the other — but the middle of the marker is where the map says the
+    stops at the other. The middle of the marker is where the map says the
     train stands, so whichever side it finished on, the points inside the
     marker give way to its centre."""
     mt = marker_tree()
@@ -3715,8 +3716,8 @@ def rail_tail(pts, tree, end, limit=TAIL_LIMIT):
 
     Two gates keep the walk from inventing track. Only ink inside a narrow cone
     off the heading the line arrived on counts as the line carrying on, so track
-    that turns away is not followed — a terminal loop the drawn line runs both
-    ways round would otherwise be walked into. And a walk longer than `limit` says
+    that turns away is not followed. Otherwise a terminal loop the drawn line
+    runs both ways round would be walked into. And a walk longer than `limit` says
     this isn't a terminus at all: the line runs on and the end is a short-turn.
     Either way the answer is empty and the end stays where the warp put it."""
     D = np.array(densify([tuple(p) for p in pts], 2.0), dtype=float)
@@ -3813,8 +3814,8 @@ def snap_rail(pts, tree, caps=(45.0, 24.0, 12.0), wins=(15, 9, 5), max_gap=45, r
     track curves; the passes tighten the cap so the second reels in what the
     first left bulging, and the third, smoothed over a short window, rounds a
     corner to the radius the sheet draws rather than the window's. Runs
-    longer than `max_gap` densified points keep the raw warp instead — the
-    ghosted downtown call-out has no track to snap onto. Corners are rounded
+    longer than `max_gap` densified points keep the raw warp instead, since
+    the ghosted downtown call-out has no track to snap onto. Corners are rounded
     with Chaikin so turns read as curves, not right angles.
 
     The mask is read through `rail_dir_tree`, so where the line crosses itself
@@ -3872,7 +3873,7 @@ def square_ends(P, tree):
 
     Snapping only moves a point sideways, and it pads its smoothing at the ends,
     so an end finishes wherever the warp left it along the line rather than
-    where the artwork stops — which is a different place whenever the warp's
+    where the artwork stops, which is a different place whenever the warp's
     error runs along the line instead of across it."""
     lo, hi = (rail_trim(P, tree, e) for e in (0, -1))
     if lo + hi + 4 < len(P):
@@ -3984,7 +3985,7 @@ def platform_stops(shape_px, cum, stop_px, gate=PLATFORM_GATE):
     more than the stops are apart, so two stops double-book one platform and
     everything past them shifts a station early. The
     platforms along a line *are* its stop sequence, in order, so the two are
-    aligned as sequences instead — a monotone, one-to-one match, which pins
+    aligned as sequences instead, by a monotone one-to-one match, which pins
     each stop to its own platform however far the warp has slid. Stops whose
     platform the sheet doesn't draw fall in the gaps and keep the warp; that is
     most of downtown, where the call-out panel covers the markers.
@@ -4003,9 +4004,10 @@ def platform_stops(shape_px, cum, stop_px, gate=PLATFORM_GATE):
     S, K = len(u), len(s)
 
     # Needleman-Wunsch: match, leave the stop on the warp, or leave the
-    # platform to another line. Leaving a platform out is free — a shape may
-    # run past platforms its pattern doesn't call at — while a stop that finds
-    # no platform costs the gate, so any match inside the gate beats skipping.
+    # platform to another line. Leaving a platform out is free, since a shape
+    # may run past platforms its pattern doesn't call at, while a stop that
+    # finds no platform costs the gate, so any match inside the gate beats
+    # skipping.
     cost = np.abs(u[:, None] - s[None, :])
     cost[cost >= gate] = np.inf
     cost **= 2
@@ -4036,7 +4038,7 @@ def platform_stops(shape_px, cum, stop_px, gate=PLATFORM_GATE):
 
 
 INSET_SLACK = 25.0   # inset px a shape may stray outside the frame and still
-                     # count as inside — ~4x the inset fit's median residual
+                     # count as inside: ~4x the inset fit's median residual
 
 
 def outside_inset(ix, iy, ll):
@@ -4058,8 +4060,9 @@ def outside_inset(ix, iy, ll):
 # needs to: the panel magnifies downtown about fourfold, so the same warp error
 # is four times the pixels, and the corner by Union Station is still tens of px
 # out. A mask holding every bus line in the panel at once gets the short reach
-# it always had, since a longer one would only find a neighbour sooner. Both take the shorter window — it is the magnified grid's
-# right-angle turns that want it, not the livery.
+# it always had, since a longer one would only find a neighbour sooner. Both
+# take the shorter window, which the magnified grid's right-angle turns want
+# rather than the livery.
 INSET_CAPS = (60.0, 30.0, 14.0)
 INSET_SOLE_CAPS = (120.0, 60.0, 30.0, 14.0)
 INSET_WIN = 15
@@ -4074,8 +4077,8 @@ INSET_ORANGE = (245, 132, 70)
 
 
 # Diversions the call-out doesn't draw, in inset px. A feed sometimes routes
-# some workings of a route off the line the sheet gives it — round a closure,
-# usually — and the panel is the one view that draws the difference, on streets
+# some workings of a route off the line the sheet gives it, usually round a
+# closure, and the panel is the one view that draws the difference, on streets
 # it never badges the route along. The box brackets the stretch; the run of the
 # shape inside it is replaced by its own chord, so a variant that keeps to the
 # corridor is left exactly as it was and only the diverted one is straightened.
@@ -4116,8 +4119,8 @@ def inset_runs(ll, main_dist, snap_tree=None, anchors=None, sole=False,
     schematic main map collapses downtown, so main-shape distance cannot
     parameterize it): each run carries its own cumulative distance, and
     stops are later projected onto it. d0/d1 (distance range on the main
-    shape) only route each stop to the right run, and come from `main_dist`
-    — the same measure the stops themselves are placed by, so the two agree
+    shape) only route each stop to the right run, and come from `main_dist`,
+    the same measure the stops themselves are placed by, so the two agree
     however far the snap moved the shape out from under the warp."""
     ll = np.asarray(ll, dtype=float)
     if TR_INSET is None or len(ll) < 2:
@@ -4220,9 +4223,9 @@ def settle(full, base, anc, line_ink):
     Straightening one spike can leave a sharper residual where it met a bend,
     and simplify() can turn a helped dense path into a worse stored one, so
     neither cleanup is taken on faith. Every candidate is scored on the *stored*
-    geometry the animation actually plays — by the very measure path_check ranks
-    on — and the best of them wins, the snapper's own shape taking ties, so no
-    shape comes out worse than it went in. Taking a fold out is what leaves the
+    geometry the animation plays, by the same measure path_check ranks on, and
+    the best of them wins with the snapper's own shape taking ties, so no shape
+    comes out worse than it went in. Taking a fold out is what leaves the
     residual despike files off, so the two together usually win; but not always,
     and a pass run unconditionally ahead of the other can rob it of a better
     answer, so each stands on the ballot alone as well.
@@ -4231,8 +4234,8 @@ def settle(full, base, anc, line_ink):
     turning that doubles back inside 12 px, and the snapper's 61-point smoothing
     turns an occluded stretch into a smooth bulge with no sharp turn anywhere in
     it, scoring a flat 0 while visibly off its line. Scored on that alone,
-    `undetour` can never win a shape it is the only fix for — it ties,
-    and the tie goes to the snapper. So the excursion is priced too, and the
+    `undetour` can never win a shape it is the only fix for: it ties, and the
+    tie goes to the snapper. So the excursion is priced too, and the
     winner minimises both.
 
     The old promise still holds, and is explicit: a candidate that would rank
@@ -4273,17 +4276,17 @@ def settle(full, base, anc, line_ink):
     return full
 
 
-# One agency's — or one route's — shapes, fitted the way the full build fits
-# them and written as a `schedule.json`-shaped stub `debug_line.py --schedule`
-# can draw. A full build is around two minutes, and almost all of it is shapes
-# the change under test cannot reach; a refit is seconds. It runs the build's
+# One agency's shapes, or one route's, fitted the way the full build fits them
+# and written as a `schedule.json`-shaped stub `debug_line.py --schedule` can
+# draw. A full build is around two minutes, and almost all of it is shapes the
+# change under test cannot reach; a refit is seconds. It runs the build's
 # own code rather than a copy, so the fast path cannot answer a question the
 # slow one wouldn't.
 REFIT = None            # (feed, route token or None, output path) while refitting
 SHAPE_CACHE = "scratch/shape-cache"
 
-# Which shapes a feed actually runs is settled by the timetable — a trip with
-# fewer than two timed stops contributes none — and the colour a feed is masked
+# Which shapes a feed actually runs is settled by the timetable (a trip with
+# fewer than two timed stops contributes none), and the colour a feed is masked
 # on is refined off the first twenty shapes it does run (`refine_color`). So a
 # refit that guessed the set from trips.txt alone could mask on a different
 # colour and answer a question the build never asked. The set is cached
@@ -4406,7 +4409,7 @@ def main():
             label = MAP_LABELS.get((feed, row["route_id"])) or route_label(
                 row.get("route_short_name", ""), row.get("route_long_name", ""))
             extra = set()          # designations the sheet prints that the
-                                   # feed's short name doesn't carry — see 910
+                                   # feed's short name doesn't carry; see 910
             color = (row.get("route_color") or "").strip()
             text = (row.get("route_text_color") or "").strip()
             is_dash[row["route_id"]] = "DASH" in (row.get("route_long_name") or "")
@@ -4414,7 +4417,7 @@ def main():
                 color, text = (METRO_BUS_COLOR, METRO_BUS_TEXT) if is_metro else (FALLBACK_COLOR, FALLBACK_TEXT)
             if color == "000000" and is_metro:
                 # GTFS says black; the map draws 720/754/761 in its Rapid-red
-                # ribbon, so the sprite takes that ribbon's own ink — the same
+                # ribbon, so the sprite takes that ribbon's own ink, the same
                 # red these shapes now snap onto (RAPID_RED_INK).
                 color = "%02X%02X%02X" % tuple(round(v * 255) for v in RAPID_RED_INK[0])
             if row["route_id"].split("-")[0] in ("910", "950"):
@@ -4426,7 +4429,7 @@ def main():
                 # here, the designation being four characters already.
                 #
                 # "910" of the pair, for the reason route_label prefers the
-                # first part of a split designation — it is what the sheet
+                # first part of a split designation: it is what the sheet
                 # prints, and the working most of these trips are. It costs the
                 # longer working a badge, the sheet printing only "950" there.
                 label = "910"
@@ -4437,7 +4440,7 @@ def main():
                 # into the long name, so a shape's tokens would be its label
                 # and nothing besides. The other number is the only thing on the
                 # sheet that says where this line goes past the point the
-                # station names run out — see the busway snap below.
+                # station names run out. See the busway snap below.
                 extra = {"950"}
             if row["route_id"].split("-")[0] == "901":
                 color, text = "%02X%02X%02X" % BUSWAY_ORANGE, "FFFFFF"   # G Line's own
@@ -4511,7 +4514,7 @@ def main():
             # A bus laying over at its origin before it enters service is not yet
             # a vehicle anyone can ride, and drawing it parked there for the
             # length of the layover pools whole fleets motionless on the
-            # terminals that time an origin early — some feeds give the first
+            # terminals that time an origin early. Some feeds give the first
             # stop an arrival_time a median 15 minutes, and up to two hours,
             # before its departure_time. The trip starts when it departs, so the
             # origin is timed by its departure; every later stop
@@ -4586,8 +4589,8 @@ def main():
 
         def slide_for(sids, A):
             """The warp's local error where a route's badges are, as the one
-            translation that best puts its whole drawing on them — the reading
-            branch_anchors weighs the variants against.
+            translation that best puts its whole drawing on them, which is the
+            reading branch_anchors weighs the variants against.
 
             Fitted over every variant at once, so it is the error they share
             rather than one of them pulled onto another's badges, and taken only
@@ -4607,9 +4610,9 @@ def main():
         agency_tree, sprite_cols = None, None
         if feed in LEGEND_SEEDS and warped:
             seeds = LEGEND_SEEDS[feed]
-            # The seed refined against the artwork the routes lie over, and —
-            # where there isn't enough of that to refine from — the same
-            # reading taken on the sheet's own strokes instead. Without the
+            # The seed refined against the artwork the routes lie over, and,
+            # where there isn't enough of that to refine from, the same reading
+            # taken on the sheet's own strokes instead. Without the
             # fallback an agency the refinement can't reach has no mask at all
             # and every one of its shapes keeps the warp, which is what left
             # BurbankBus's two workings off their drawn teal.
@@ -4649,7 +4652,7 @@ def main():
             out_pts, anc, can_refit = None, [], False
             # The drawing this shape was snapped on: the PDF's strokes where it
             # has them, its agency's colour mask where it does not. It is the
-            # arbiter of whether a detour is really the drawn line — see
+            # arbiter of whether a detour is really the drawn line; see
             # _ink_vouches, which reads it far enough out along the run that a
             # mask's label-shaped holes cannot answer for the whole of it.
             line_ink = None
@@ -4670,7 +4673,7 @@ def main():
                 rid0 = (rid or "").split("-")[0]
                 # Both ribbons the sheet draws in an ink of their own, and both
                 # snap the same way: on that ink, pinned by the station names
-                # printed beside it. A colour mask is no use for the J Line —
+                # printed beside it. A colour mask is no use for the J Line:
                 # its drawn gray is a rounding from the freeway's in map.png, so
                 # the mask would take every freeway on the sheet with it, and
                 # the raw warp stood instead. The PDF has no such collision, so
@@ -4709,8 +4712,8 @@ def main():
                         # Station names, plus any numbers printed along the
                         # ribbon. The names run out where the stations do, and
                         # past the last one a snap cannot recover a switchback
-                        # on its own — every point of the chord across one is
-                        # already sitting on some part of it. Only a walk
+                        # on its own, since every point of the chord across
+                        # one is already sitting on some part of it. Only a walk
                         # between two anchors does (`trace_anchors`), so the
                         # numbers are what bracket that stretch.
                         #
@@ -4729,7 +4732,7 @@ def main():
                     else:
                         anc = route_anchors(toks, tree) + pins
                     # A badge is printed on one line, and the "950" at the loop
-                    # is on the one variant that gets there — the workings that
+                    # is on the one variant that gets there. The workings that
                     # turn back at Harbor Gateway must not be dragged 640 px
                     # south onto it.
                     anc = branch_anchors(anc, sid, route_sids[rid], kd_for,
@@ -4741,8 +4744,8 @@ def main():
                                                   INK_CAPS if ink else None),
                                             win=BUSWAY_WIN if busway else 61,
                                             speckled=ink is None)
-                    # The busway is drawn the way a rail line is — its own
-                    # ribbon, ending at a drawn platform — so its ends are
+                    # The busway is drawn the way a rail line is, with its own
+                    # ribbon ending at a drawn platform, so its ends are
                     # squared against that ribbon the same way. It needs it more
                     # than rail does: out in the Valley the warp's error runs
                     # *along* the busway as much as across it, which a sideways
@@ -4751,7 +4754,7 @@ def main():
                     #
                     # Squaring trims and extends, so the result is resampled
                     # back to the point count it came in with, keeping it
-                    # index-aligned with the warp — which is what carries the
+                    # index-aligned with the warp, which is what carries the
                     # stops over (see below). Handing those stops to
                     # platform_stops instead, as rail does, is worse: the warp
                     # lags by half the distance between stations here, so the
@@ -4763,7 +4766,7 @@ def main():
                             len(out_pts))
                     # Not the J Line: the call-out redraws every Metro bus line
                     # in orange (see runs_for), and this one is not a Metro bus
-                    # line down there — it is the gray transitway, drawn in the
+                    # line down there: it is the gray transitway, drawn in the
                     # panel the same as it is drawn outside it. Registering it
                     # here would snap its downtown run onto the mask of every
                     # other route in the panel. It stays unsnapped there,
@@ -4780,7 +4783,7 @@ def main():
                     # `+ pins` as every other branch does it. A railroad's name
                     # is written along it a handful of times and nowhere else,
                     # so a line can run a quarter of its length on the sheet
-                    # before the first one — and where the warp has to be told
+                    # before the first one, and where the warp has to be told
                     # which of two parallel tracks is which, that head is the
                     # stretch with nothing to tell it. See the Riverside Line.
                     anc = line_name_anchors(rid or "", tree) + pins
@@ -4789,13 +4792,13 @@ def main():
                     out_pts = snap_recording(pts, tree, anchors=anc, caps=RAIL_CAPS,
                                             win=RAIL_WIN, speckled=False)
             elif feed == "ladot":
-                # LADOT's two liveries are two stroke styles of one olive ink —
-                # DASH solid, Commuter Express dashed — so each snaps to its own
-                # network and neither can be dragged onto the other's streets.
+                # LADOT's two liveries are two stroke styles of one olive ink,
+                # DASH solid and Commuter Express dashed, so each snaps to its
+                # own network and neither is dragged onto the other's streets.
                 # Which style a route is drawn in is settled by its badges
                 # rather than by its name; see ladot_livery.
                 #
-                # Commuter Express needs pinning where the warp is worst — out
+                # Commuter Express needs pinning where the warp is worst: out
                 # at the coast it exceeds the length of the leg it is displacing,
                 # so the leg has no way to tell which end of the drawn line is
                 # which. A DASH is pinned only by the
@@ -4807,8 +4810,8 @@ def main():
                 # `+ pins` as every other branch does it. LADOT was one of the
                 # networks PINNED_ANCHORS could not reach, which is a gap rather
                 # than a policy: a hand-placed point on the drawn line serves
-                # here exactly as it does elsewhere, and a DASH — badged once or
-                # twice on the whole sheet, if at all — is the case with least
+                # here exactly as it does elsewhere, and a DASH, badged once or
+                # twice on the whole sheet if at all, is the case with least
                 # else to go on.
                 anc = branch_anchors(anc + pins, sid, route_sids[rid], kd_for,
                                      slide_for)
@@ -4819,7 +4822,7 @@ def main():
                                             win=LADOT_WIN, speckled=False)
                 shape_isnap[(feed, sid)] = (good, 30.0, toks)
             elif feed in SYMBOL_FEEDS:
-                # Snapped and anchored on the sheet's own strokes — see
+                # Snapped and anchored on the sheet's own strokes; see
                 # SYMBOL_FEEDS for why the mask can hold neither. Beach Cities
                 # shares its evergreen with Foothill Transit, which the legend
                 # is explicit about and the geography makes harmless: the
@@ -4835,7 +4838,7 @@ def main():
                         slide_for)
                 else:
                     # Named by hand, so `branch_anchors` has nothing left to
-                    # decide — see SYMBOL_OWNERS, which exists because the
+                    # decide. See SYMBOL_OWNERS, which exists because the
                     # distances it decides by are the ones that went wrong.
                     anc = [p for p in anc
                            if min(math.hypot(p[0] - q[0], p[1] - q[1])
@@ -4853,10 +4856,10 @@ def main():
                     anchor_cols = good + [BADGE_FILLS[feed]]
                     anchor_tree = mask_tree(anchor_cols, 30.0)
                 # The colour gate below rejects a badge whose chip is better
-                # explained by another agency's colour than by this one's — but
+                # explained by another agency's colour than by this one's, but
                 # an agency's *own* colours must never play that rival. `good`
                 # is refined off the drawn lines and drifts a dozen px from the
-                # legend seed it started at — and that seed is still in the rival
+                # legend seed it started at, and that seed is still in the rival
                 # palette, sitting nearer the agency's own chip than the refined
                 # colour does, so it out-explains `good` and the gate throws out
                 # the agency's own badges. Folding the seeds into the own-set
@@ -4870,7 +4873,7 @@ def main():
                 can_refit = True
                 # Snap on the strokes where the sheet's vectors can be trusted
                 # to hold this agency's whole drawing, anchor on the pixels
-                # either way — the same split Metro's branch makes above, and
+                # either way: the same split Metro's branch makes above, and
                 # for the same reason: a chip is filled with the line colour
                 # rather than stroked in it, so it stands on the mask and not
                 # on the ink. The ink is the centreline alone, which is what
@@ -4892,7 +4895,7 @@ def main():
                 # No livery, so no anchors either: the sheet prints "PT" beside
                 # the street, never a route number, so there is nothing to tell
                 # 31 from 32 where they part. The snap is unanchored and short-
-                # reaching by design — it refines within the corridor the warp
+                # reaching by design, refining within the corridor the warp
                 # already chose rather than choosing one.
                 out_pts = snap_coherent(pts, street_tree(), caps=STREET_CAPS,
                                         speckled=False)
@@ -4901,22 +4904,22 @@ def main():
             # judgement, so it is checked rather than trusted: fit the shape
             # again with those walks refused, and keep them only if what they
             # produce is no worse on the hairpin measure and no further from the
-            # drawing. The corridors are usually right — this is where the drift
-            # win comes from — but a handful of routes came out kinked when
-            # every alignment was believed, and this is what stops them.
+            # drawing. The corridors are usually right, which is where the
+            # drift win comes from, but a handful of routes came out kinked
+            # when every alignment was believed, and this is what stops them.
             aligned_fit = bool(align_used()) and can_refit and out_pts is not None
             if out_pts is not None:
                 snapped += 1
             # Keep the pre-snap polyline alongside the stored one. Stops are
             # warped, not snapped, so projecting them onto a snapped shape asks
             # them to find themselves on a line that has moved out from under
-            # them — half a kilometre, at the median. Where the offset rivals
+            # them, by half a kilometre at the median. Where the offset rivals
             # the spacing between stops the monotone projection scrambles, and
             # the vehicle sprints between the stops it piles up. snap_coherent
             # displaces the densified polyline point by point, so the two agree
             # index for index and a stop's place on one is its place on the
             # other. snap_rail resamples, and falls back to projecting on the
-            # stored shape — rail tracks the artwork closely enough not to care.
+            # stored shape; rail tracks the artwork closely enough not to care.
             base = np.array(densify(pts, 4.0), dtype=float)
             full = np.asarray(out_pts, dtype=float) if out_pts is not None else base
             if out_pts is not None and len(full) == len(base):
@@ -4925,7 +4928,7 @@ def main():
                 # can turn a helped dense path into a worse stored one. Every
                 # candidate is scored on the *stored* geometry the animation
                 # plays, by the measure path_check ranks on, and the best wins
-                # with the snapper's own shape taking ties — so no shape comes
+                # with the snapper's own shape taking ties, so no shape comes
                 # out worse than it went in. Each pass stands on the ballot
                 # alone as well as combined, since one run unconditionally ahead
                 # of another can rob it of a better answer.
@@ -4933,8 +4936,8 @@ def main():
                 # Scored on two measures. `spike_penalty` charges only turning
                 # that doubles back inside 12 px, and the 61-point smoothing
                 # makes an occluded stretch a smooth bulge with no sharp turn in
-                # it — so on that alone `undetour` could never win a shape it is
-                # the only fix for. The excursion is priced too, and the winner
+                # it, so on that alone `undetour` could never win a shape it
+                # is the only fix for. The excursion is priced too, and the winner
                 # minimises both. A candidate ranking worse than the snapper's
                 # own shape on `spike_penalty` is thrown out before scoring, so
                 # nothing buys a straighter line at the cost of a hairpin.
@@ -4945,8 +4948,8 @@ def main():
                 # trusted: fit the shape again with those walks refused, put
                 # that through the same ballot, and keep the alignment only if
                 # what ships is no worse on the hairpin measure and no further
-                # from the drawing. The corridors are usually right — this is
-                # where the drift comes from — but a handful of routes came out
+                # from the drawing. The corridors are usually right, which is
+                # where the drift comes from, but a handful of routes came out
                 # kinked when every alignment was believed, and this is what
                 # stops them, on the geometry that ships rather than on the one
                 # the ballot was handed.
@@ -5058,14 +5061,14 @@ def main():
         """Distance along the stored shape of each map-px point.
 
         Where the snap displaced the warp point by point the two agree index
-        for index, so a point is placed on the warp — which it was measured
-        against — and carried over. Everything that has to speak about a
+        for index, so a point is placed on the warp, which it was measured
+        against, and carried over. Everything that has to speak about a
         position along a shape goes through here, because two callers using
         different rules is a mismatch that only shows up when the snap moves:
         the DTLA inset runs used to project onto the snapped shape while the
         stops carried over, and a shape shifting a few tens of px inside the
-        call-out — where nothing is drawn and the geometry is the warp's own
-        noise — was enough to put a stop outside its own run and drop a whole
+        call-out, where nothing is drawn and the geometry is the warp's own
+        noise, was enough to put a stop outside its own run and drop a whole
         network out of the panel."""
         prm = shape_param.get(key)
         if prm is None:
@@ -5092,7 +5095,7 @@ def main():
                     cols = INSET_COLORS[key[0]]
                 # Metro's networks are masked on the pyramid, where the panel
                 # prints its colours faithfully and its badge chips come away
-                # from the lines — see inset_tile_tree. Every other agency is
+                # from the lines; see inset_tile_tree. Every other agency is
                 # masked on the reading its colour was refined from.
                 tree = (inset_tile_tree(cols)
                         if cols and key[0] in ("gtfs_rail", "gtfs_bus")
@@ -5114,7 +5117,7 @@ def main():
         spx = [stops_px[(feed, s)] for s in stop_seq]
         key = (feed, sid)
         if key not in shape_index:            # no shape in feed: polyline through stops
-            # key per pattern — distinct stop sequences must not share one
+            # key per pattern: distinct stop sequences must not share one
             # pseudo-shape (all Metrolink lines once collided on an empty sid)
             key = (feed, sid, stop_seq)
             if key not in shape_index:
@@ -5144,7 +5147,7 @@ def main():
     # (bit 0 = Sunday) alongside; the client picks a day by filtering on it.
     # Rows identical in route, pattern and every time are merged, so a working
     # that keeps to one timetable all week carries several day bits instead of
-    # costing several rows — feeds give each day its own trip ids, and without
+    # costing several rows. Feeds give each day its own trip ids, and without
     # the merge the file would be most of seven whole timetables.
     trips_final, trip_days = [], []
     seen = {}

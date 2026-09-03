@@ -18,7 +18,7 @@ TILE = 512          # tile edge, px (matches make_tiles.py)
 RAIL = "data/gtfs/gtfs_rail"
 
 # What the map *draws* for each rail line, sampled off the tile pyramid along
-# the line's georeferenced path. Mostly the GTFS route_color, but not always —
+# the line's georeferenced path. Mostly the GTFS route_color, but not always:
 # the C line is printed a good deal lighter than its branding (88,167,56), far
 # enough that keying the mask off GTFS missed the line entirely once the
 # tolerance was tight. These are for finding artwork; vehicle sprites still
@@ -38,8 +38,8 @@ MASK_TOL = 24.0   # RGB tolerance there, where the drawn colors are faithful
 # Regions of the image to ignore (legend, insets, title banner), in pixels
 EXCLUDE = [
     # Title banner. Its fill is within mask tolerance of Metro orange, so the
-    # cut has to clear the band's antialiased edge (last tainted row is 707) —
-    # but no further: it used to stop at 740, hiding 32 rows of live map along
+    # cut has to clear the band's antialiased edge (last tainted row is 707)
+    # but no further. It used to stop at 740, hiding 32 rows of live map along
     # with the badges on them, which cost Metro 690 the anchor at its Olive
     # View terminus and left the tail running up into the banner.
     (0, 0, 4096, 708),
@@ -58,8 +58,8 @@ def load_masks(level=MASK_LEVEL, tol=MASK_TOL):
     runs alongside: the K line beside the C line through Aviation reads
     (201,112,155) against the (230,114,174) actually printed there, 35 away. A
     tolerance loose enough to keep that also admits a neighbouring agency's
-    pink badge chip (43 away) — and the snap, finding the chip nearer than the
-    line, took it, which is what bent the K line east of Aviation north of
+    pink badge chip (43 away), and the snap, finding the chip nearer than the
+    line, takes it. That is what bent the K line east of Aviation north of
     Mariposa. One pyramid level deeper the same line reads within 6 of its true
     color, so the mask both aims better and leaves room for a tolerance tight
     enough to keep foreign chips out.
