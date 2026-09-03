@@ -126,7 +126,11 @@ for an override:
 A route the sheet draws as a trunk rather than as the loop the feed drives is
 not a case for an override either. Only the drawn stretch can be held to the
 drawing; the rest has no ink under it and keeps the warp, and one pin on the
-trunk is what stops the loop being walked onto a neighbouring route's line.
+trunk is what stops the loop being walked onto a neighbouring route's line. A
+loop that lies wholly *past* the drawn terminus is the exception: it is the
+layover the sheet omits, whatever stops it carries, and where it runs longer
+than `TERMINUS_TAIL` no trim can reach it — an override folding it onto the
+drawn stub is then what ends the route where the sheet ends it.
 
 All three are one measurement: the distance from the intended pin to the
 nearest warp point, and to the nearest point on any *other* leg of the same
