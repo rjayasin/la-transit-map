@@ -1021,6 +1021,9 @@ SYMBOL_OWNER_NEAR = 6.0   # px a listed point may stand from the word it names
 # Each agency's line as the sheet's own legend swatch strokes it, straight off
 # the PDF. Where an agency's seed can't be refined against the artwork these
 # say where its ink is, so the reading can be taken on the drawn line itself.
+# A swatch is not always that ink. Where the sheet strokes one in a different
+# tint the value has to be read off a drawn line instead, since pdf_ink matches
+# a colour exactly.
 LEGEND_INK = {
     "bigbluebus": (0.604, 0.5608, 0.5794),
     "culvercity": (0.8051, 0.8047, 0.4456),
@@ -1029,6 +1032,7 @@ LEGEND_INK = {
     "foothill": (0.1677, 0.4166, 0.3111),
     "beachcities": (0.1677, 0.4166, 0.3111),   # one swatch serves both
     "montebello": (0.6295, 0.7205, 0.5582),
+    "norwalk": (0.5768, 0.8258, 0.8628),
     "torrance": (0.4859, 0.5034, 0.7086),
     "burbank": (0.2691, 0.5799, 0.5177),
 }
@@ -1060,10 +1064,15 @@ LEGEND_INK = {
 # own corridors nothing widens the near one's pull. The pin and the overrides
 # below settle the few junctions where that decides the wrong way.
 #
+# Norwalk's light blue thins out the same way. What drops it is the mask's
+# background filter rather than the tolerance: blended toward the page it reads
+# nearer the blue the sheet fills its rivers with than its own colour, 22
+# against 28.
+#
 # The PDF has the same lines as vectors, thin and thick alike, complete under
 # every label painted over them and with no chips or lettering in them at all.
 # drift_check measures these agencies on those strokes for the same reason.
-INK_SNAP = {"montebello", "bigbluebus", "foothill"}
+INK_SNAP = {"montebello", "bigbluebus", "foothill", "norwalk"}
 
 
 def refine_color(shape_pts, seed, r2=55 * 55, need=250):
