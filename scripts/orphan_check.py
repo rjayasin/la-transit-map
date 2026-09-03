@@ -3,7 +3,7 @@
 Every vehicle carries the route's short label, and the point of playing them
 over Metro's own sheet is that you can look one up: a bus marked 720 runs along
 a line the map badges 720. When the label appears nowhere on the sheet the
-vehicle is an orphan — there is nothing to match it to.
+vehicle is an orphan, with nothing to match it to.
 
 Two quite different things produce one, and the report separates them:
 
@@ -12,13 +12,13 @@ Two quite different things produce one, and the report separates them:
               Nothing to fix in code.
     mislabelled   the map does print a designation for this route, just not
               the one we chose. route_label compresses long names down to four
-              characters and can land somewhere the cartographer didn't —
-              these are worth relabelling, since the badge is right there.
+              characters and can land somewhere the cartographer didn't.
+              These are worth relabelling, since the badge is right there.
 
 Route designations are read from the PDF's own text, so this compares what the
 sprite says against what a reader can actually find on the map. A designation
-drawn as artwork rather than set as text won't be found — the K line's roundel
-is the one case in the current sheet — so treat a lone letter with suspicion.
+drawn as artwork rather than set as text won't be found (the K line's roundel
+is the one case in the current sheet), so treat a lone letter with suspicion.
 
 Usage:
     scripts/orphan_check.py                 # every orphan, busiest first
@@ -95,7 +95,7 @@ def main():
         if label.casefold() in words:
             continue                                   # the map prints it
         # Does the map print some other designation for this route? Only
-        # route_short_name is searched, and only tokens shaped like a badge —
+        # route_short_name is searched, and only tokens shaped like a badge:
         # the long name is prose, and "Line", "City" and "Park" all appear on
         # the sheet without designating anything.
         alts = [t for t in set(short.replace("/", " ").replace("-", " ").split())
@@ -118,7 +118,7 @@ def main():
         print(f"{n:6d} {label:>6} {system[:22]:<22} {shows[:16]:<16} {name[:38]}")
     if not a.mislabelled:
         fixable = sum(1 for r in rows if r[3])
-        print(f"\n{fixable} of these are mislabelled — the map designates them, "
+        print(f"\n{fixable} of these are mislabelled: the map designates them, "
               f"just not as we do (--mislabelled)")
 
 

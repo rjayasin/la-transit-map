@@ -1,7 +1,8 @@
 """Rank every route by how much of it runs off the line the sheet draws for it.
 
-path_check asks whether a path is *shaped* like a street — hairpins, zigzags,
-kinks — and speed_check asks whether a vehicle covers ground it has no time for.
+path_check asks whether a path is *shaped* like a street, looking for hairpins,
+zigzags and kinks. speed_check asks whether a vehicle covers ground it has no
+time for.
 Both are proxies, and both are blind to the failure that matters most here: a
 path that is perfectly smooth, perfectly paced, and simply on the wrong street.
 Metro 180 ran a straight line across blank page north of Colorado Blvd for 180
@@ -9,7 +10,7 @@ px and scored 0 for spikes doing it.
 
 This asks the question directly. Every route is drawn on the sheet in its
 agency's ink, the PDF has that ink as vector strokes, and the animation plays
-the stored shape — so the distance between the two *is* the deviation, in map
+the stored shape, so the distance between the two is the deviation, in map
 pixels, with nothing inferred.
 
     drift   arc px of the route running further than --px (default 12, about a
@@ -18,15 +19,16 @@ pixels, with nothing inferred.
             where the sheet does draw the route hereabouts and the path is not
             on it.
     beyond  arc px with no ink of the agency within --far at all. Nearly always
-            the sheet declining to draw a stretch the feed still runs — a DASH
-            loop the schematic ends at its terminal, a line leaving the sheet —
-            and there the warp is the best there is and no fault of the snap.
+            the sheet declining to draw a stretch the feed still runs, such as
+            a DASH loop the schematic ends at its terminal or a line leaving
+            the sheet. There the warp is the best available, and no fault of
+            the snap.
             Counted apart from drift rather than ranked with it, because it was
             drowning the real thing: LADOT's Pacoima DASH runs up to the Sylmar
             Metrolink station, the sheet draws only the Pacoima loop, and that
             read as 24% of the route being off its line.
-    worst   the single furthest point *within* reach, and where it is — paste it
-            into debug_line.py, or crop the tiles there.
+    worst   the single furthest point *within* reach, and where it is. Paste
+            it into debug_line.py, or crop the tiles there.
 
 Points inside the Downtown call-out and under the title banner are dropped:
 the sheet draws no ink there by design, so distance to it means nothing.
@@ -35,7 +37,7 @@ Where the ink can be trusted and where it can't
 -----------------------------------------------
 The PDF gives one stroke per drawn line for Metro bus (orange, the Rapid red,
 the busway ribbon), LADOT's two olives, Montebello's sage, and the railroads.
-Those rows are exact — the strokes are the drawing itself, complete underneath
+Those rows are exact: the strokes are the drawing itself, complete underneath
 every label painted over them.
 
 Everything else has no vector ink of its own and is measured against the colour
@@ -46,8 +48,8 @@ at this", not as "this is broken".
 
 What this cannot see
 --------------------
-An agency's ink is one undifferentiated set of strokes — the same blind spot
-the snapper has, and for the same reason. A route sitting squarely on a
+An agency's ink is one undifferentiated set of strokes, which is the same
+blind spot the snapper has and for the same reason. A route sitting squarely on a
 *sibling's* line reads as zero drift, because it is on ink of the right colour;
 only leaving the agency's drawing altogether, for blank page or another
 agency's streets, registers here. So a clean score means "on some line this
@@ -75,10 +77,10 @@ sys.path.insert(0, "scripts")
 SCHEDULE = "schedule.json"
 DRIFT_PX = 12.0        # px off the ink before a stretch counts as drifting;
                        # a drawn line is ~8 px wide at 4096, so this is a line
-                       # and a half — visibly beside it, not merely fuzzy
+                       # and a half: visibly beside it, not merely fuzzy
 STEP = 4.0             # px between samples along the path, matching the snapper
 FAR_PX = 60.0          # px; with no ink of the agency this near, the sheet is
-                       # not drawing the route here — and the snapper could not
+                       # not drawing the route here, and the snapper could not
                        # have reached it if it were, its widest cap being 40
 NOT_DRAWN = 60.0       # median px; past this the sheet isn't drawing this route
                        # at all (it runs off the edge, or the map omits it) and
@@ -87,7 +89,7 @@ MIN_ARC = 80.0         # px; ignore a route with almost nothing on the sheet
 
 # Metro's bus ink is not all one colour. The Rapid ribbon and the busway are
 # drawn in their own, and the J/Silver line is drawn in the freeway gray the
-# masks can't separate — build_data gives it no mask either, so neither can this.
+# masks can't separate; build_data gives it no mask either, so neither can this.
 METRO_RAPID = {"720", "754", "761"}
 METRO_BUSWAY = {"G"}
 METRO_JLINE = {"910"}   # drawn as the freeway busway's gray ribbon, not in bus orange
@@ -124,7 +126,7 @@ def tree_for(system, label, cache, rail_trees):
         # Two stroke styles of one olive: DASH solid, Commuter Express dashed,
         # and a route measured against the wrong one is measured against another
         # network entirely. schedule.json doesn't carry the distinction, so it is
-        # read back out of the feed the way build_data reads it — guessing from
+        # read back out of the feed the way build_data reads it. Guessing from
         # the designation is wrong for the one Commuter Express that isn't
         # numbered.
         out = (B.ink_tree(B.LADOT_INK, dashed=not ladot_is_dash().get(label, True)),
@@ -141,7 +143,7 @@ def tree_for(system, label, cache, rail_trees):
             # use for these agencies: it misses the thin parts of the drawing
             # and holds the grey street lettering instead, and the two agencies
             # the sheet symbolises have seeds refine_color cannot find enough of
-            # along the drawing to return a reading at all — so the tree came
+            # along the drawing to return a reading at all, so the tree came
             # back None and their rows were dropped before they were scored.
             out = (B.ink_tree([B.LEGEND_INK[feed]]), "ink")
         else:
@@ -156,7 +158,7 @@ _LADOT_DASH = None
 
 def ladot_is_dash():
     """{map label: is a DASH route}, read from the feed exactly as build_data
-    reads it — the long name says which livery, and the label is what the sheet
+    reads it: the long name says which livery, and the label is what the sheet
     prints. A label covering both liveries (none does today) would resolve to
     DASH, which is the commoner of the two."""
     global _LADOT_DASH
@@ -220,7 +222,7 @@ def densify(pts, step=STEP):
 def measure(pts, tree, px, far=FAR_PX):
     """Where a path stands off its ink. Returns a dict, or None where nothing
     can be judged. `drift` counts only ground the sheet actually draws the route
-    on — see the header on `beyond`, which counts the rest."""
+    on. See the header on `beyond`, which counts the rest."""
     import build_data as B
     P = densify(pts)
     if len(P) < 2 or tree is None:
@@ -345,7 +347,7 @@ def main():
                   f"median {r['med']:.1f}  p90 {r['p90']:.1f}  max {r['max']:.1f}")
             if r["beyond"]:
                 print(f"  {r['beyond']:.0f} px beyond the drawing "
-                      f"(no {r['sy']} ink within {a.far:g} px) — not counted as drift")
+                      f"(no {r['sy']} ink within {a.far:g} px), not counted as drift")
             for length, mx, xy in sorted(r["runs"], key=lambda x: -x[0])[:12]:
                 print(f"   {length:6.0f} px off, worst {mx:5.1f} px "
                       f"at ({xy[0]:.0f},{xy[1]:.0f})")
@@ -377,7 +379,7 @@ def main():
               f"{r['beyond']:>7.0f} {r['p90']:>6.1f} {r['max']:>6.1f}  {w}{flag}")
     ink = sum(1 for r in rows if r["src"] == "ink")
     print(f"\n{len(rows)} routes measured ({ink} against the PDF's strokes, "
-          f"{len(rows) - ink} against a colour mask — see the header).")
+          f"{len(rows) - ink} against a colour mask; see the header).")
     if undrawn:
         print(f"{len(undrawn)} not drawn on the sheet, so not ranked: "
               + ", ".join(sorted(f"{r['n']} ({r['sy']})" for r in undrawn)[:12])

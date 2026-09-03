@@ -10,16 +10,16 @@ crawls even at its quickest is standing still for everybody.
 
 Too fast
     A segment covering more ground than its schedule allows is nearly always a
-    shape problem — a spurious detour, or a stop projected onto the wrong part
-    of the line — rather than a timetable one, so each row also carries the
-    evidence to tell those apart:
+    shape problem rather than a timetable one: a spurious detour, or a stop
+    projected onto the wrong part of the line. Each row carries the evidence to
+    tell those apart:
 
     detour  how far the path runs between the two stops against the straight
             line between them. Much over 1 means the shape wanders, and the
             vehicle has to sprint to keep the schedule. This is the pathing
             error you are usually looking for.
     ratio ~1 at high speed means the path is direct and the vehicle really
-            does travel that far in that time — a genuine express hop, an
+            does travel that far in that time: a genuine express hop, an
             off-map segment, or a hole in the feed.
 
 Too slow
@@ -112,7 +112,7 @@ def eff_dist(pat):
 
 
 def detie(times, dist):
-    """Spread runs of (near-)tied stop times over the adjacent gap, in place —
+    """Spread runs of (near-)tied stop times over the adjacent gap, in place,
     the same fix the client applies. GTFS times are minute-quantized, so
     consecutive stops often share a timestamp while the bus is really moving;
     measuring speed against the raw times would report teleports everywhere."""
@@ -185,7 +185,7 @@ def segments(d, inset):
 
 
 def run_bounds(pat, i, inset):
-    """First and last stop index of the stretch stop i is placed along — the
+    """First and last stop index of the stretch stop i is placed along: the
     whole pattern on the sheet, one call-out run inside the panel."""
     last = len(pat["d"]) - 1
     if not inset:
@@ -338,13 +338,13 @@ def main():
     print(f"\nroutes to look at, {'slowest' if slow else 'worst'} first:")
     for (n, sysname), r in list(worst.items())[:12]:
         if slow:
-            flag = ("off-map — line isn't drawn" if r["offmap"] else
-                    f"downtown — moves in the {other}" if r["panel_kmh"] >= PANEL_MOVING
-                    else "terminus — the layover tail" if r["at"] != "mid" else
+            flag = ("off-map: line isn't drawn" if r["offmap"] else
+                    f"downtown: moves in the {other}" if r["panel_kmh"] >= PANEL_MOVING
+                    else "terminus: the layover tail" if r["at"] != "mid" else
                     "stalled mid-route")
         else:
-            flag = ("off-map — line isn't drawn" if r["offmap"] else
-                    "detour" if r["detour"] > 1.6 else "direct — check the feed")
+            flag = ("off-map: line isn't drawn" if r["offmap"] else
+                    "detour" if r["detour"] > 1.6 else "direct: check the feed")
         print(f'  {r["kmh"]:6.1f} km/h  {flag:<26} '
               f'scripts/debug_line.py {n} --system "{sysname}"')
 
