@@ -73,6 +73,27 @@ machinery moves every color-masked feed at once, so diff the two builds' shapes
 per system, score both against the strokes, and look at the largest movers by
 eye. A total that improves can still hide a route that got worse.
 
+## Rail lines have none of the tables
+
+Metro rail goes through `snap_rail`, not the machinery above. There are no
+badges, so no anchors and no `PINNED_ANCHORS`. `OVERRIDE_PATHS` cannot reach it
+either: an override needs the snapped and warped shapes index-aligned, and
+`snap_rail` resamples. That leaves the mask and the pass ladder, so a rail line
+off its drawing is one of three things.
+
+- **The mask holds something that is not the ribbon.** `drawn_blobs` drops
+  blobs too small to be drawn. This matters more than on a colour mask: the
+  rail warp sits tens of px off the track, so a speck between the two is
+  nearer than the line for a whole run of points and the smoothing cannot
+  outvote it.
+- **The line's own other limb claims it.** Where the warp's corner and the
+  drawn one are a block apart, the limb the shape is not on is nearer all the
+  way up to the turn, and the corner comes out as a chord. `rail_dir_tree`
+  separates them by heading.
+- **A corner is rounded wider than the sheet draws it.** The displacement is
+  smoothed along the line, so the corner's radius is the smoothing window's.
+  The last and tightest pass of the ladder is what fixes that.
+
 ## Hand-tuned tables
 
 Everything the artwork can't settle on its own is named in a table near the code
@@ -126,7 +147,11 @@ for an override:
 A route the sheet draws as a trunk rather than as the loop the feed drives is
 not a case for an override either. Only the drawn stretch can be held to the
 drawing; the rest has no ink under it and keeps the warp, and one pin on the
-trunk is what stops the loop being walked onto a neighbouring route's line.
+trunk is what stops the loop being walked onto a neighbouring route's line. A
+loop lying wholly *past* the drawn terminus is the exception. It is the layover
+the sheet omits, whatever stops it carries, and if it runs longer than
+`TERMINUS_TAIL` no trim reaches it. Fold it onto the drawn stub with an
+override so the route ends where the sheet ends it.
 
 All three are one measurement: the distance from the intended pin to the
 nearest warp point, and to the nearest point on any *other* leg of the same
@@ -216,7 +241,7 @@ The route token matches a route id, an id without its variant suffix, or the
 designation the sheet prints, so `--only ladot:437` and `--only bigbluebus:9`
 both work without looking an opaque feed id up.
 
-**Two signatures worth recognising**, each of which names its own fix:
+**Three signatures worth recognising**, each of which names its own fix:
 
 - *A foreign agency's badge chip printed over this agency's line.* It knocks a
   gap in the mask that no bridge will cross, because the block closes round it
@@ -235,6 +260,14 @@ both work without looking an opaque feed id up.
   flat, so the whole unanchored tail inherits a correction pointing the wrong
   way. The tell is two adjacent badges whose fitted displacements disagree by
   more than a street. The fix is a pin in the tail.
+- *A schematic detour bracketed by two badges closer together than
+  `TRACE_SPAN[0]`.* No walk is attempted over a span that short, so the
+  displacement between the badges is interpolated straight and the shape cuts
+  across whatever the sheet draws between them. This looks like a missing
+  anchor but is not one. Adding a pin only shortens the span further, and where
+  the warp runs a corridor's width off the drawing, every point of the drawn
+  detour is nearest the same warp point, so the pins all speak for one stretch
+  and fight each other. Use an override.
 
 **Placing a pin is a search with two constraints, both answerable before any
 rebuild.** It has to be on the drawn line — take the coordinates off the trace,

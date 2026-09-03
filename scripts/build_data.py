@@ -2002,6 +2002,39 @@ OVERRIDE_PATHS = {
             (1692.5, 2900.0), (1692.5, 2925.0), (1692.5, 2948.0),
         ],
     },
+    ("longbeach", "121"): {
+        "box": (2245, 3274, 2276, 3349.8),
+        "path": [
+            (2279.0, 3289.3), (2286.0, 3289.3), (2292.0, 3289.3),
+            (2296.5, 3289.3), (2299.0, 3289.3), (2300.5, 3289.7),
+            (2301.5, 3290.2), (2302.4, 3290.9), (2303.1, 3291.7),
+            (2303.4, 3292.1), (2304.4, 3293.8), (2305.9, 3296.4),
+            (2307.4, 3299.0), (2308.9, 3301.6), (2310.4, 3304.2),
+            (2311.9, 3306.8), (2313.4, 3309.4), (2314.9, 3312.0),
+            (2315.3, 3312.9), (2315.4, 3313.8), (2315.2, 3314.7),
+            (2314.5, 3315.9), (2313.7, 3316.4), (2310.9, 3318.1),
+            (2308.3, 3319.6), (2305.6, 3321.1), (2303.0, 3322.5),
+            (2300.4, 3324.0), (2297.8, 3325.5), (2295.2, 3327.0),
+            (2294.5, 3327.6), (2294.0, 3328.3), (2293.6, 3329.6),
+            (2293.7, 3330.6), (2294.0, 3331.4), (2294.9, 3333.0),
+            (2296.2, 3335.2), (2297.6, 3337.6), (2299.1, 3340.2),
+            (2300.6, 3342.8), (2302.1, 3345.4), (2303.6, 3348.0),
+            (2305.1, 3350.6), (2305.7, 3351.9), (2305.7, 3353.1),
+            (2305.3, 3354.1), (2304.4, 3354.8), (2303.2, 3355.3),
+        ],
+    },
+    ("longbeach", "141"): {
+        "box": (2305, 2790, 2360, 2870),
+        "path": [
+            (2319.8, 2770.0), (2319.8, 2774.0), (2319.8, 2778.5),
+            (2320.0, 2779.9), (2320.6, 2781.2), (2321.5, 2782.2),
+            (2322.6, 2783.0), (2324.0, 2783.4), (2328.0, 2783.4),
+            (2333.0, 2783.4), (2338.0, 2783.4), (2343.4, 2783.4),
+            (2344.8, 2783.6), (2346.1, 2784.2), (2347.1, 2785.1),
+            (2347.9, 2786.3), (2348.3, 2787.6), (2348.3, 2792.0),
+            (2348.3, 2799.4),
+        ],
+    },
     ("torrance", "6"): {
         "box": (1320, 2950, 1400, 3010),
         "path": [
@@ -3739,7 +3772,37 @@ def rail_tail(pts, tree, end, limit=TAIL_LIMIT):
     return centre_on_ink(cells[walk[-2::-1]], tree)
 
 
-def snap_rail(pts, tree, caps=(45.0, 24.0), wins=(15, 9), max_gap=45, rnd=2):
+RAIL_HOOD = 7.0    # px of ribbon read to say which way the track runs there
+_RAIL_DIR = {}     # keyed by tree identity, as _PATHS is and for the same reason
+
+
+def rail_dir_tree(tree):
+    """A rail mask binned by the direction its ribbon runs, so a line only
+    matches track running its own way.
+
+    One mask holds one line, which is usually enough to place a shape. It is
+    not enough at a corner: where the warp's corner and the drawn one are a
+    block apart, the limb the shape is not on is the nearer of the two for the
+    whole run up to the turn, every point in that run is pulled to it, and the
+    corner comes out as a chord across the block. Track more than ~45 deg off
+    the shape's own heading is rejected, which separates the two limbs.
+
+    Pixels too tightly curved to yield a heading go into every bin. Those are
+    the corners, where a line changing course has to be able to land."""
+    key = id(tree)
+    if key not in _RAIL_DIR:
+        P = np.asarray(tree.data)
+        head = line_headings(P, tree, hood=RAIL_HOOD)
+        known = np.hypot(*head.T) > 0
+        ang = np.mod(np.arctan2(head[known, 1], head[known, 0]), np.pi)
+        b = np.minimum((ang / (np.pi / DIR_BINS)).astype(np.int64), DIR_BINS - 1)
+        rows = [np.c_[P[known], b]]
+        rows += [np.c_[P[~known], np.full((~known).sum(), k)] for k in range(DIR_BINS)]
+        _RAIL_DIR[key] = DirectionalTree(np.vstack(rows))
+    return _RAIL_DIR[key]
+
+
+def snap_rail(pts, tree, caps=(45.0, 24.0, 12.0), wins=(15, 9, 5), max_gap=45, rnd=2):
     """Snap a warped rail polyline onto its drawn-track mask, coherently.
 
     Each pass pins points within `cap` of the track to it, interpolates that
@@ -3748,22 +3811,27 @@ def snap_rail(pts, tree, caps=(45.0, 24.0), wins=(15, 9), max_gap=45, rnd=2):
     back as a whole rather than a few points snapping and the rest sagging.
     Snapping each point to its own nearest track pixel leaves hooks where the
     track curves; the passes tighten the cap so the second reels in what the
-    first left bulging. Runs
+    first left bulging, and the third, smoothed over a short window, rounds a
+    corner to the radius the sheet draws rather than the window's. Runs
     longer than `max_gap` densified points keep the raw warp instead — the
     ghosted downtown call-out has no track to snap onto. Corners are rounded
-    with Chaikin so turns read as curves, not right angles."""
+    with Chaikin so turns read as curves, not right angles.
+
+    The mask is read through `rail_dir_tree`, so where the line crosses itself
+    the limb the shape is not running cannot claim it."""
     P = np.array(densify(pts, 4.0), dtype=float)
     n = len(P)
     idx = np.arange(n)
+    aimed = rail_dir_tree(tree)          # the ends still read the plain mask
     for pass_i, (cap, win) in enumerate(zip(caps, wins)):
-        dist, j = tree.query(P)
+        dist, j = aimed.query(P)
         ok = dist < cap
         if ok.sum() < 4:
             if pass_i == 0:
                 return [tuple(p) for p in P]    # nothing drawn here: keep the warp
             break
         disp = np.full((n, 2), np.nan)
-        disp[ok] = tree.data[j[ok]] - P[ok]
+        disp[ok] = aimed.data[j[ok]] - P[ok]
         i = 0                                    # keep the warp through long gaps
         while i < n:
             if not ok[i]:
@@ -3781,9 +3849,9 @@ def snap_rail(pts, tree, caps=(45.0, 24.0), wins=(15, 9), max_gap=45, rnd=2):
             col = np.interp(idx, idx[known], disp[known, c])
             disp[:, c] = np.convolve(np.pad(col, win // 2, mode="edge"), kern, "valid")
         P = P + disp
-    dist, j = tree.query(P)                      # final tight re-snap on the track
+    dist, j = aimed.query(P)                     # final tight re-snap on the track
     close = dist < 8
-    P[close] = tree.data[j[close]]
+    P[close] = aimed.data[j[close]]
     return [tuple(p) for p in chaikin(simplify(square_ends(P, tree), 1.0), rnd)]
 
 
