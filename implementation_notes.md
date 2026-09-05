@@ -306,6 +306,21 @@ belong in long straight stretches, where the snap can only move the line
 sideways. The fix for a cusp at an edge is to move the edge out, not to redraw
 the path.
 
+A route needing two separate corridors gives a list of them instead of one, and
+they are spliced in order. Each is matched against the warp rather than against
+what the last one left, so the boxes must not overlap. Two small boxes beat one
+box spanning both faults: the path is resampled across the whole run, so a box
+long enough to cover a stretch the snap already had right redistributes the
+stops along it.
+
+One box, one path, and the shapes of a route can still disagree about where a
+box edge lands, because the snap slides points along the line by different
+amounts on each. Read every shape's first and last in-box point before fixing
+the path's ends, and where they differ by more than a few px, take the edge out
+to where they agree. An edge set to one shape's reading puts the other's first
+in-box point behind its own neighbour, which is a fold rather than the along-line
+shift a straight stretch forgives.
+
 ## Verifying a change
 
 The build is deterministic: same inputs, byte-identical `schedule.json`. Diff
