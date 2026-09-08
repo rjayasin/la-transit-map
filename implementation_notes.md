@@ -266,7 +266,7 @@ The route token matches a route id, an id without its variant suffix, or the
 designation the sheet prints, so `--only ladot:437` and `--only bigbluebus:9`
 both work without looking an opaque feed id up.
 
-**Three signatures worth recognising**, each of which names its own fix:
+**Signatures worth recognising**, each of which names its own fix:
 
 - *A foreign agency's badge chip printed over this agency's line.* It knocks a
   gap in the mask that no bridge will cross, because the block closes round it
@@ -293,6 +293,17 @@ both work without looking an opaque feed id up.
   the warp runs a corridor's width off the drawing, every point of the drawn
   detour is nearest the same warp point, so the pins all speak for one stretch
   and fight each other. Use an override.
+- *A cross street joining the two corridors two badges bracket.* The drawn
+  lines are one connected web, so where another route is drawn between the
+  corridor the shape leaves and the one it should reach, the badge-to-badge
+  walk can take that connector instead of the way round. The band cannot
+  reject it: a connector one block up from the corner is barely shorter than
+  the drawn course, so the walk lands well inside `TRACE_DETOUR` and its
+  anchors pin the shape to the diagonal. `drift_check` reports nothing at all,
+  since every px of the shortcut is this agency's own ink. The sign is a walk
+  whose midpoint is on neither corridor. One pin on the right corridor between
+  the connector and the corner fixes it, by splitting the pair so that the way
+  round is the shortest way for both legs.
 - *A shape on the drawn line but on the wrong part of it.* Where the sheet
   draws a stretch as a loop or an out-and-back, the snap can reach the ink by
   the short way, run the far leg backwards and finish at the wrong end, leaving
