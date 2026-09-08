@@ -293,6 +293,18 @@ both work without looking an opaque feed id up.
   the warp runs a corridor's width off the drawing, every point of the drawn
   detour is nearest the same warp point, so the pins all speak for one stretch
   and fight each other. Use an override.
+- *The walk is right and the band throws it away.* Where the sheet compresses
+  a stretch, the drawn corridor is far shorter than the warp's arc across it,
+  and a walk that follows the drawing exactly reads as a corner cut. Below
+  `TRACE_DETOUR[0]` of the arc it is refused, `align_walk` gets one attempt at
+  placing the anchors by correspondence instead, and what ships when that
+  fails is the straight interpolation across the corner. The sign is a walk
+  whose midpoint is on the drawn corridor and a band the walk misses low.
+  Re-fitting does not rescue it, because the arc it is measured against is the
+  shape's own and the shape cannot reach the drawing until the walk is
+  believed. Where the warp also lies a block off the drawing, so that one leg
+  of it sits over where another leg is drawn, no pin can attach either: that
+  is an override.
 - *A cross street joining the two corridors two badges bracket.* The drawn
   lines are one connected web, so where another route is drawn between the
   corridor the shape leaves and the one it should reach, the badge-to-badge
@@ -347,6 +359,14 @@ point the hand-drawn path has to continue from: a few px and the edge holds,
 tens of px and it is in the wrong place. Read both shapes' `lo` in the same
 run. Where they disagree by more than a few px the edge is not in a straight
 stretch yet.
+
+The two directions of a route can disagree by several px of *along-line*
+position at the same box edge, because each snap distributes the sheet's
+compression its own way. Sweep candidate edges and print, for every shape, the
+snapped point just outside the box; take the edge where the two directions
+agree best and set the path's end between them, so neither direction gets a
+reversal. Two routes sharing one corridor need their own path ends for the
+same reason, even where the box can be identical.
 
 **Where the box ends matters as much as the path.** The box picks its run off
 the warp, but each end of the hand-drawn path has to meet a point the snap
