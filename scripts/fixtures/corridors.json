@@ -30,6 +30,21 @@
     "path": [[2050,3138.5],[1906.5,3138.5],[1904.6,3139.1],[1903.5,3140.1],[1903,3141.6],[1902.9,3142.1],[1902.9,3252.3]]
   },
   {
+    "name": "Long Beach 22 Ocean Bl corner and terminus",
+    "system": "Long Beach Transit", "route": "22", "gate": 4, "tolerance": 3, "min_matches": 2,
+    "path": [[2049.6,3300],[2049.6,3331.2],[2049,3334],[2047.3,3336.2],[2044.9,3337.5],[2043,3337.8],[1947.9,3337.8]]
+  },
+  {
+    "name": "Long Beach 61 Ocean Bl corner and terminus",
+    "system": "Long Beach Transit", "route": "61", "gate": 4, "tolerance": 3, "min_matches": 2,
+    "path": [[1993.1,3290],[1993.1,3331.2],[1992.5,3334],[1991.5,3335.5],[1989.3,3337.2],[1986.5,3337.8],[1947.9,3337.8]]
+  },
+  {
+    "name": "Metro 246 Harbor College corners",
+    "system": "Metro Bus", "route": "246", "gate": 4, "tolerance": 3, "min_matches": 2,
+    "path": [[1596.5,3190],[1596.5,3144.8],[1596,3142.8],[1594.8,3141.2],[1593,3140.2],[1591.6,3140],[1514.5,3140.2],[1512.6,3140.5],[1510.2,3141.8],[1509,3143.2],[1508,3145.8],[1507.9,3146.8],[1507.9,3190]]
+  },
+  {
     "name": "C Line Hawthorne/Lennox platform",
     "system": "Metro Rail", "route": "C", "platform": [1319,2474], "tolerance": 5, "min_matches": 2
   }
