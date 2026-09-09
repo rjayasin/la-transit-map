@@ -1874,7 +1874,8 @@ def trim_terminus(pts, pins, with_offset=False):
 #
 # A route with two such stretches gives a list of them instead of one corridor.
 # They are spliced in order and must not overlap, since each is matched against
-# the warp rather than against what the last one left.
+# the warp rather than against what the last one left. A spec with `shape_ids`
+# applies only to those GTFS variants.
 OVERRIDE_PATHS = {
     ("gtrans", "7X"): {
         "box": (1300, 2380, 1400, 2532),
@@ -2181,6 +2182,44 @@ OVERRIDE_PATHS = {
             (2348.3, 2799.4),
         ],
     },
+    ("longbeach", "171"): [{
+        "shape_ids": ("1710195", "1710196"),
+        "box": (1800, 3150, 2320, 3440),
+        "path": [
+            (1804.8, 3116.4), (1806.1, 3116.6), (1807.1, 3117.3),
+            (1807.8, 3118.3), (1808.1, 3119.6), (1808.1, 3134.0),
+            (1808.4, 3135.3), (1809.1, 3136.3), (1810.1, 3137.0),
+            (1811.4, 3137.2), (1813.2, 3137.2), (1939.9, 3137.2),
+            (2147.8, 3139.0), (2158.6, 3139.7), (2160.0, 3140.0),
+            (2161.4, 3140.7), (2162.6, 3141.6), (2163.5, 3142.7),
+            (2179.6, 3170.7), (2186.3, 3182.2), (2187.2, 3183.5),
+            (2188.3, 3184.7), (2189.5, 3185.8), (2190.7, 3186.7),
+            (2242.9, 3217.1), (2244.2, 3217.8), (2245.8, 3218.3),
+            (2247.4, 3218.7), (2248.9, 3218.8), (2282.1, 3218.8),
+            (2283.4, 3219.1), (2284.4, 3219.8), (2285.2, 3220.8),
+            (2285.5, 3222.1), (2285.9, 3231.9), (2286.9, 3240.2),
+            (2286.9, 3263.5), (2286.6, 3265.0), (2285.8, 3266.2),
+            (2284.6, 3267.0), (2283.1, 3267.3), (2274.4, 3268.4),
+            (2267.3, 3268.3), (2266.0, 3268.6), (2265.0, 3269.3),
+            (2264.3, 3270.3), (2264.0, 3271.6), (2264.0, 3276.2),
+            (2264.1, 3277.7), (2264.5, 3279.3), (2265.0, 3280.9),
+            (2265.6, 3282.3), (2276.9, 3301.9), (2365.7, 3455.7),
+            (2366.1, 3456.9), (2366.0, 3458.1), (2365.5, 3459.2),
+            (2364.5, 3460.1), (2349.5, 3468.8),
+        ],
+    }, {
+        "shape_ids": ("1710197",),
+        "box": (1800, 3150, 2190, 3220),
+        "path": [
+            (1804.8, 3116.4), (1806.1, 3116.6), (1807.1, 3117.3),
+            (1807.8, 3118.3), (1808.1, 3119.6), (1808.1, 3134.0),
+            (1808.4, 3135.3), (1809.1, 3136.3), (1810.1, 3137.0),
+            (1811.4, 3137.2), (1813.2, 3137.2), (1939.9, 3137.2),
+            (2149.2, 3137.3), (2156.4, 3137.3), (2158.5, 3136.9),
+            (2160.2, 3135.7), (2161.4, 3134.0), (2161.8, 3131.9),
+            (2161.8, 3127.0),
+        ],
+    }],
     ("torrance", "6"): {
         "box": (1320, 2950, 1400, 3010),
         "path": [
@@ -2240,14 +2279,6 @@ OVERRIDE_PATHS = {
             (1639.0, 1643.4), (1640.0, 1645.0),
         ],
     },
-}
-
-
-# Simplification tolerances for fitted routes whose shared agency ink leaves
-# broad excursions along otherwise straight runs. Keyed by (feed, route), in
-# map px. Corners retained by the simplification are rounded before storage.
-STRAIGHTEN_PATHS = {
-    ("longbeach", "171"): 24.0,
 }
 
 
@@ -2743,8 +2774,10 @@ def undetour(full, base, badges=(), ink=None):
 DETOUR_AUDIT = []     # (peak, feed, route, x, y) for the report main() prints
 
 
-def apply_override(full, base, spec):
+def apply_override(full, base, spec, sid=None):
     """Splice a hand-drawn corridor into a snapped shape.
+
+    A `shape_ids` tuple limits the spec to named GTFS variants.
 
     `full` (snapped) and `base` (warped) are equal-length and index-aligned, so
     stops keep projecting onto the warp and carrying over. `spec["box"]` (warp
@@ -2752,6 +2785,8 @@ def apply_override(full, base, spec):
     swapped for `spec["path"]`, resampled to the same point count and oriented
     to the shape's direction of travel, so the alignment and the stop timing
     both hold. A shape that doesn't enter the box is left untouched."""
+    if spec.get("shape_ids") and sid not in spec["shape_ids"]:
+        return full
     B = np.asarray(base, dtype=float)
     x0, y0, x1, y1 = spec["box"]
     inside = np.where((B[:, 0] >= x0) & (B[:, 0] <= x1)
@@ -4069,13 +4104,6 @@ def simplify(pts, tol=1.2, mask=False):
     return (pts[keep], keep) if mask else pts[keep]
 
 
-def straighten(P, tol):
-    """Reduce a fitted path to its main runs and round the retained corners."""
-    P = np.asarray(P, dtype=float)
-    line = chaikin(simplify(P, tol), 2)
-    return resample(line, len(P))
-
-
 def project_stops(shape_px, cum, stop_px):
     """Distance along shape for each stop: minimum-cost monotone assignment.
 
@@ -5094,13 +5122,10 @@ def build_schedule(feeds):
             # by hand, so it goes on after this rather than through it.
             if out_pts is not None:
                 full = unjitter(full, tree=line_ink)
-                tolerance = STRAIGHTEN_PATHS.get((feed, (rid or "").split("-")[0]))
-                if tolerance is not None:
-                    full = straighten(full, tolerance)
             override = OVERRIDE_PATHS.get((feed, (rid or "").split("-")[0]))
             if override is not None and len(full) == len(base):
                 for spec in (override if isinstance(override, list) else [override]):
-                    full = np.asarray(apply_override(full, base, spec), dtype=float)
+                    full = np.asarray(apply_override(full, base, spec, sid), dtype=float)
             if len(full) == len(base):
                 stored, keep = simplify(full, mask=True)
                 cb = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(base, axis=0).T))])

@@ -122,7 +122,6 @@ fix. Try them in this order, least invasive first.
 | `PINNED_ANCHORS` | The sheet prints no badge over a stretch that needs one. A point on the drawn line then acts as a badge |
 | `TRIM_TERMINI` | A pin can't both anchor and trim; give the terminus in *warp* px for the trim alone |
 | `OVERRIDE_PATHS` | Nothing above can reach it. A corridor drawn by hand, spliced into the snapped shape. Last resort |
-| `STRAIGHTEN_PATHS` | Shared agency ink pulls a correct route into broad excursions. Simplifies its main runs and rounds the retained corners |
 | `INSET_DIVERSIONS` | The feed routes some workings off the line the sheet draws, and only the call-out is magnified enough to show it. A box in inset px; the run inside it is flattened onto its chord |
 
 A DASH is a special case of the first row. It is named rather than numbered, so
@@ -350,9 +349,10 @@ run goes from the first to the last warp point inside it. An excursion that
 leaves the box in between is harmless, but a second pass through the box later
 in the route swallows everything between the two. One `path` serves both
 directions, since the orientation comes from the direction of travel rather
-than from which end the shape enters by. Trace the corridor off the artwork and
-draw the trace back over the tiles before wiring it in; a hook or a dip the eye
-skips over is obvious once drawn.
+than from which end the shape enters by. Use `shape_ids` when variants of one
+route follow different drawn paths. Trace the corridor off the artwork and draw
+the trace back over the tiles before wiring it in; a hook or a dip the eye skips
+over is obvious once drawn.
 
 Two measurements settle a box, both before any rebuild. The warp it is matched
 against is `densify(to_px(shape), 4.0)`, so the in-box index runs come off that
