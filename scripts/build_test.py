@@ -70,6 +70,15 @@ class CacheTests(unittest.TestCase):
 
 
 class GeometryTests(unittest.TestCase):
+    def test_straighten_removes_excursion_and_rounds_corner(self):
+        pts = B.densify([(0, 0), (35, 0), (45, 10), (55, 0),
+                         (100, 0), (100, 60)], 2)
+        out = B.straighten(pts, 12)
+        self.assertEqual(len(out), len(pts))
+        np.testing.assert_allclose(out[[0, -1]], [[0, 0], [100, 60]])
+        self.assertLess(np.abs(out[(out[:, 0] > 15) & (out[:, 0] < 70), 1]).max(), 2)
+        self.assertTrue(np.any((out[:, 0] < 100) & (out[:, 1] > 0)))
+
     def test_measures_disambiguate_retraced_legs(self):
         ll = [[-118,34],[-117.99,34],[-118,34]]
         stops = [[-117.995,34],[-117.995,34]]
