@@ -55,6 +55,16 @@
     "path": [[1980.3,3267.3],[2020,3267.3],[2060,3267.3]]
   },
   {
+    "name": "Wilmington DASH clockwise ring at Watson and L",
+    "system": "LADOT", "route": "WM", "gate": 4, "tolerance": 3, "min_matches": 1,
+    "path": [[1739.5,3150],[1739.6,3174.1],[1739.3,3175.4],[1738.1,3176.8],[1736.3,3177.3],[1691.7,3177.3]]
+  },
+  {
+    "name": "Wilmington DASH counterclockwise block west of Wilmington Bl",
+    "system": "LADOT", "route": "WM", "gate": 4, "tolerance": 3, "min_matches": 2,
+    "path": [[1653.2,3200],[1653.1,3236.2],[1652.4,3237.5],[1650.8,3239.2],[1647.8,3240],[1624.9,3240],[1622.6,3239.5],[1620.8,3238.2],[1619.7,3236.2],[1619.5,3234.6],[1619.5,3215.1]]
+  },
+  {
     "name": "C Line Hawthorne/Lennox platform",
     "system": "Metro Rail", "route": "C", "platform": [1319,2474], "tolerance": 5, "min_matches": 2
   }
