@@ -118,7 +118,7 @@ on :8741.
 ## Rebuild data
 
 ```sh
-python3 -m venv .venv && .venv/bin/pip install numpy scipy pillow pymupdf
+python3.14 -m venv .venv && .venv/bin/pip install -r requirements.txt
 cd data/gtfs && for z in *.zip; do unzip -o "$z" -d "${z%.zip}"; done && cd ../..
 .venv/bin/python scripts/georef.py      # refit the transform (optional)
 .venv/bin/python scripts/georef_inset.py   # ... and the Downtown call-out's
@@ -126,9 +126,26 @@ cd data/gtfs && for z in *.zip; do unzip -o "$z" -d "${z%.zip}"; done && cd ../.
 .venv/bin/python scripts/make_tiles.py  # only if the map PDF changes
 ```
 
-Color masks are memoized under `scratch/mask-cache/`. A rebuild takes about
-30 s warm against about 80 s cold. The build is deterministic, so diffing two
-runs shows exactly what a change did.
+Complete feed builds are cached under `scratch/feed-cache/`; masks are cached
+under `scratch/mask-cache/`. An unchanged build reuses paths, stop assignments,
+and inset runs. Input files, artwork, fitting code, settings, and library
+versions invalidate the cache. Route-table edits invalidate the affected feed.
+
+Use `--no-cache` to refit all feeds, `--only FEED[:ROUTE]` to write a complete
+subset under `scratch/`, and `--out PATH` to choose a different output. Builds
+validate the schedule before replacing the output atomically. Dependency
+versions are pinned in `requirements.txt`; build keys and versions are recorded
+in `scratch/build-manifest.json`.
+
+Stops use GTFS shape distances when both shape and stop measures are valid and
+agree with the geographic positions. Other stops use monotone projection.
+Inset runs carry geographic entry and exit positions so vehicles remain visible
+for the portions of a stop interval that fall inside the panel.
+
+Before deployment, `scripts/geometry_check.py` checks fixed artwork corridors
+and a rail platform, `scripts/build_test.py` checks caching and stop assignment,
+and `scripts/motion_test.mjs` checks path interpolation and inset transitions.
+The geometry check also validates the complete schedule structure.
 
 ## Checking a line against the artwork
 

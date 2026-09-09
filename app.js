@@ -50,6 +50,7 @@ function fitView(mw, mh) {
 let map = null, data = null;
 let shapes = [];        // {pts: Float32Array, cum: Float32Array}
 let insetRuns = [];     // per shape: null or [{d, p}] mirroring it into the DTLA inset
+let insetRanges = [];   // each run's entry and exit on the geographic shape, 0..1
 let insetRect = null;   // [x0, y0, x1, y1] inset frame in map px
 let trips = [];         // {r, p, times:Int32Array, t0, t1}
 let vAlpha = null;      // per-trip opacity, eased in real time so vehicles fade in/out
@@ -874,6 +875,7 @@ Promise.all([
   buildPanel(d.systems || []);
   insetRect = d.insetRect;
   insetRuns = (d.insets || []).map(runs => runs && runs.map(toShape));
+  insetRanges = d.insetRanges || [];
   showDay(laDay());
   armFrame();
 });
@@ -962,32 +964,41 @@ function vehiclePos(tr, t) {
   return a && posAlong(shapes[a.pat.s], a.dist);
 }
 
-// Mirror a vehicle the main map has already placed into the DTLA call-out, or
-// null where the trip isn't inside the panel then. Inset motion is computed in
-// inset space, since the schematic main map collapses downtown: each stop knows
-// its run and its distance along that run's inset polyline, and the vehicle's
-// progress through the current segment interpolates between them. Takes the
-// clock position the caller already worked out rather than finding it again,
-// since the draw loop runs this for every trip, every frame.
+// Place a vehicle on its inset run. Source-distance boundaries keep separate
+// visits apart and retain movement before an exit and after a re-entry.
 function insetPosAt(pat, lo, hi, dist, tc, times) {
   const ir = pat.ir;
   if (!ir) return null;
   const ra = ir[lo], rb = ir[hi];
-  let run = -1, i0 = 0, i1 = 0;
-  if (ra >= 0 && ra === rb) { run = ra; i0 = pat.id[lo]; i1 = pat.id[hi]; }
-  else if (ra < 0 && rb >= 0) { run = rb; i0 = 0; i1 = pat.id[hi]; }               // entering
-  else if (ra >= 0 && rb < 0) {                                                    // leaving
-    run = ra; i0 = pat.id[lo];
-    const g = insetRuns[pat.s][ra]; i1 = g.cum[g.cum.length - 1];
+  const span = pat.d[hi] - pat.d[lo], tspan = times[hi] - times[lo];
+  const fp = Math.min(1, Math.max(0, span > 0 ? (dist - pat.d[lo]) / span
+                                  : tspan > 0 ? (tc - times[lo]) / tspan : 0));
+  if (ra >= 0 && ra === rb) {
+    return posAlong(insetRuns[pat.s][ra], pat.id[lo] + (pat.id[hi] - pat.id[lo]) * fp);
   }
-  if (run < 0) return null;
-  // progress through the segment: from the main-map Hermite when the segment
-  // has extent there, else by time (downtown is so compressed on the main map
-  // that adjacent stops can share a rounded distance)
-  const d = pat.d, span = d[hi] - d[lo], tspan = times[hi] - times[lo];
-  const fp = span > 0 ? Math.min(1, Math.max(0, (dist - d[lo]) / span))
-           : tspan > 0 ? (tc - times[lo]) / tspan : 0;
-  return posAlong(insetRuns[pat.s][run], i0 + (i1 - i0) * fp);
+  const ranges = insetRanges[pat.s], u = pat.u;
+  if (ranges && u) {
+    const at = u[lo] + (u[hi] - u[lo]) * fp;
+    for (let run = 0; run < ranges.length; run++) {
+      const [start, end] = ranges[run];
+      if (at < start || at > end) continue;
+      const g = insetRuns[pat.s][run];
+      const from = ra === run ? u[lo] : start;
+      const to = rb === run ? u[hi] : end;
+      const d0 = ra === run ? pat.id[lo] : 0;
+      const d1 = rb === run ? pat.id[hi] : g.cum[g.cum.length - 1];
+      const f = to > from ? Math.min(1, Math.max(0, (at - from) / (to - from))) : 0;
+      return posAlong(g, d0 + (d1 - d0) * f);
+    }
+    return null;
+  }
+  // Older schedules have stop assignments but no entry/exit boundaries.
+  if (ra < 0 && rb >= 0) return posAlong(insetRuns[pat.s][rb], pat.id[hi] * fp);
+  if (ra >= 0 && rb < 0) {
+    const g = insetRuns[pat.s][ra];
+    return posAlong(g, pat.id[lo] + (g.cum[g.cum.length - 1] - pat.id[lo]) * fp);
+  }
+  return null;
 }
 
 // map-px position of a trip's mirrored vehicle inside the call-out, or null

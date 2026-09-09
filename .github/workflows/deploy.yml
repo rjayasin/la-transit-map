@@ -26,6 +26,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14.7'
+          cache: pip
+
+      - name: Check geometry and motion
+        run: |
+          python -m pip install -r requirements.txt
+          python scripts/build_test.py
+          python scripts/geometry_check.py
+          node scripts/motion_test.mjs
+          node scripts/stall_test.mjs
+
       # The build id the page reports as its own, and the one version.json
       # advertises. Short SHA plus the commit date, so it is both unique and
       # readable in a console line.
