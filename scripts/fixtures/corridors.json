@@ -25,6 +25,11 @@
     "path": [[2050,3138.5],[1906.5,3138.5],[1904.6,3139.1],[1903.5,3140.1],[1903,3141.6],[1902.9,3142.1],[1902.9,3252.3]]
   },
   {
+    "name": "Long Beach 173 PCH corner and Pacific Av stub",
+    "system": "Long Beach Transit", "route": "173", "gate": 4, "tolerance": 3, "min_matches": 2,
+    "path": [[2050,3138.5],[1906.5,3138.5],[1904.6,3139.1],[1903.5,3140.1],[1903,3141.6],[1902.9,3142.1],[1902.9,3252.3]]
+  },
+  {
     "name": "C Line Hawthorne/Lennox platform",
     "system": "Metro Rail", "route": "C", "platform": [1319,2474], "tolerance": 5, "min_matches": 2
   }
