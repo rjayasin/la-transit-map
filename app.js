@@ -735,8 +735,14 @@ function drawSprite(g, route, px) {
   g.lineWidth = rail ? 2 : 1.2; g.strokeStyle = "rgba(255,255,255,.9)"; g.stroke();
   g.fillStyle = route.t;
   const label = route.n;
-  const fs = label.length <= 2 ? 12 : label.length === 3 ? 9.5 : 7;
+  // Character count sets the starting size, then the measured width settles
+  // it. Count alone assumes digits: a two-letter designation like WM or SP is
+  // half again as wide as "22" at the same size and runs over the disc.
+  let fs = label.length <= 2 ? 12 : label.length === 3 ? 9.5 : 7;
+  const fit = R * 1.7;             // chord the label has to sit inside
   g.font = `bold ${fs}px -apple-system, Arial`;
+  const w = g.measureText(label).width;
+  if (w > fit) g.font = `bold ${fs * fit / w}px -apple-system, Arial`;
   g.textAlign = "center"; g.textBaseline = "middle";
   g.fillText(label, half, half + 0.5);
 }
