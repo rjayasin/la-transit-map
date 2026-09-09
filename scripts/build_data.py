@@ -2243,6 +2243,14 @@ OVERRIDE_PATHS = {
 }
 
 
+# Simplification tolerances for fitted routes whose shared agency ink leaves
+# broad excursions along otherwise straight runs. Keyed by (feed, route), in
+# map px. Corners retained by the simplification are rounded before storage.
+STRAIGHTEN_PATHS = {
+    ("longbeach", "171"): 24.0,
+}
+
+
 DESPIKE_WIN = 3         # densified points (~12 px each side), matching path_check
 DESPIKE_ANGLE = 110.0   # deg; sharper than a square street corner
 DESPIKE_GAP = 10.0      # px; the path returning this close to where it was a
@@ -4061,6 +4069,13 @@ def simplify(pts, tol=1.2, mask=False):
     return (pts[keep], keep) if mask else pts[keep]
 
 
+def straighten(P, tol):
+    """Reduce a fitted path to its main runs and round the retained corners."""
+    P = np.asarray(P, dtype=float)
+    line = chaikin(simplify(P, tol), 2)
+    return resample(line, len(P))
+
+
 def project_stops(shape_px, cum, stop_px):
     """Distance along shape for each stop: minimum-cost monotone assignment.
 
@@ -5079,6 +5094,9 @@ def build_schedule(feeds):
             # by hand, so it goes on after this rather than through it.
             if out_pts is not None:
                 full = unjitter(full, tree=line_ink)
+                tolerance = STRAIGHTEN_PATHS.get((feed, (rid or "").split("-")[0]))
+                if tolerance is not None:
+                    full = straighten(full, tolerance)
             override = OVERRIDE_PATHS.get((feed, (rid or "").split("-")[0]))
             if override is not None and len(full) == len(base):
                 for spec in (override if isinstance(override, list) else [override]):
