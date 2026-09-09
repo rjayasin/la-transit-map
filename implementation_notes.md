@@ -22,28 +22,37 @@ does; this covers what will bite you.
 
 A snap follows whatever is in the tree it was handed, so a shape on the wrong
 street is a fact about that tree, about the anchors, or about the sheet. Which
-one it is decides the fix, so diagnose before reaching for a table.
+one it is decides the fix, so diagnose before reaching for a table. Steps 1 and
+2 settle most faults and cost a couple of minutes.
 
-1. **See both courses at once.** `debug_line.py <n> --system <name> --no-stops`
-   puts the stored path over the artwork. Crop `tiles/<level>/<col>_<row>.webp`
-   (512 px tiles, level = scale over the 4096 px base) to see the drawing on
-   its own, since a path drawn over its line hides the line. What the sheet
-   draws is the target, not what the street grid suggests.
-2. **Ask the feed where the route goes.** The stop names in order
+1. **See the drawing on its own.** `debug_line.py <n> --system <name>
+   --no-stops` names the shape indices and prints the crop it drew. Crop the
+   same box out of `tiles/<level>/<col>_<row>.webp` (512 px tiles, level =
+   scale over the 4096 px base) without the overlay, since a path drawn over
+   its line hides the line. What the sheet draws is the target, not what the
+   street grid suggests.
+2. **Read both courses as numbers.** `shapes[i]` in `schedule.json` is a flat
+   x,y list in map px; `pdf_ink(...)` filtered to a box and sorted by y is the
+   drawn corridor to a tenth of a px. Side by side they compare coordinate for
+   coordinate, which is what separates three faults that look alike at map
+   zoom: a shape off the drawing, a shape on the drawing with a leg of it
+   missing, and a shape running the drawn stretch the wrong way round. Those
+   ink coordinates are also what a pin or an override is pasted from, so
+   nothing later has to re-read them.
+3. **Ask the feed where the route goes.** The stop names in order
    (`stop_times.txt` joined to `stops.txt`) name the streets, and `to_px` puts
-   them in map px. That separates the drawn corridor from a corridor running
-   parallel to it, before any pixel work starts.
-3. **Score against the strokes, not the mask.** `pdf_ink([LEGEND_INK[feed]])`
-   is the drawing itself: complete under every label, with no chips and no
-   lettering in it. The distance from the stored shape to those points is the
-   deviation with nothing inferred, and it is the one measure a mask change
-   cannot move. `drift_check --ink` does this for the agencies the PDF can
-   settle.
-4. **Ask whether the mask holds the line at all.** Query the agency's
+   them in map px. That separates the drawn corridor from one running parallel
+   to it, and says which end of the drawn stretch is the terminus.
+4. **Score against the strokes, not the mask.** Distance from the stored shape
+   to those ink points is the deviation with nothing inferred, and the one
+   measure a mask change cannot move. `drift_check --ink` does this for the
+   agencies the PDF can settle. Distance is half the answer; read it with
+   `cover`, under "Chasing a divergent path".
+5. **Ask whether the mask holds the line at all.** Query the agency's
    `mask_tree` with the ink points along the stretch. A run of ink several px
-   from any mask pixel is a hole in the mask, and a snap crossing a hole leaves
-   for whichever parallel corridor is unbroken. `ink_gap_check.py` asks a
-   cruder version of the same question against the grey street art.
+   from any mask pixel is a hole, and a snap crossing a hole leaves for
+   whichever parallel corridor is unbroken. `ink_gap_check.py` asks a cruder
+   version of the same question against the grey street art.
 
 What the answer means:
 
@@ -55,10 +64,9 @@ What the answer means:
   line under every name rather than to one route.
 - **A hole with nothing printed over it.** A stretch one route runs alone is
   drawn thin, and a thin line at 4096 px is a blend with what it is drawn on.
-  `unfade` cannot reach it, since there is no label over it to recover it
-  under, and the colour tests reject the blend outright where a background fill
-  explains it better. The agency belongs in `INK_SNAP`, where the PDF strokes
-  the thin lines the same as the thick ones.
+  `unfade` cannot reach it, and the colour tests reject the blend outright
+  where a background fill explains it better. The agency belongs in `INK_SNAP`,
+  where the PDF strokes the thin lines the same as the thick ones.
 - **The mask holds the line and the path still leaves it.** That is an anchor
   question, not a mask one: nothing tells the snap which end of the drawing
   this leg belongs to. See `PINNED_ANCHORS` and the pin failures below.
@@ -178,34 +186,44 @@ and that is the measure to fit against.
 ## Chasing a divergent path
 
 A line reported off its drawn ink is usually one *variant* of a route rather
-than the route. The checks are the wrong place to start: `drift_check` scores
-by colour, so a route that has wandered onto a sibling of the same agency
-scores clean. Work from the drawing instead, in this order: trace the corridor,
-stand up a harness, then search for the table entry. The first two make the
-third cheap, and skipping them makes this slow.
+than the route. Work from the drawing, in this order: trace the corridor, stand
+up a harness, then search for the table entry. The first two make the third
+cheap, and skipping them makes this slow.
 
-**Trace the corridor first, and trust nothing else as ground truth.** Take two
-points known to be on the drawn line, such as a badge `route_anchors` returned
-or a drawn terminus, and `mask_path(a, b, tree)` walks the centreline between
-them. A walked length close to the straight distance means it stayed on one
-corridor rather than going round a block. That polyline is the measure for
-everything that follows: which variant is wrong, and whether a candidate fix
-helped. A variant that looks right is not a substitute, since sitting on the
-agency's ink is not the same as sitting on this route's line, and a sibling's
-corridor a block over scores clean against every mask measure there is.
+**Trace the corridor first, and trust nothing else as ground truth.** The
+checks cannot stand in for it. A variant that looks right cannot either, since
+sitting on the agency's ink is not the same as sitting on this route's line,
+and a sibling's corridor a block over scores clean against every mask measure
+there is.
 
-`corridor_check.py` is that walk and that scoring in one command:
+The strokes themselves are the trace. Filter `pdf_ink(colors, dashed=...)` to a
+box round the stretch, sort by y, and print it: that is the drawn centreline at
+the PDF's own precision, and it is what a `path` gets pasted from. A crude
+ASCII plot of the same points shows the shape of it in one screen.
+
+`mask_path(a, b, tree)` walks between two points known to be on the line, such
+as a badge `route_anchors` returned or a drawn terminus. It is the coarse
+version. The lattice is 4 px and it bridges gaps, so use it to answer *whether*
+the two connect and roughly how, not to place a corner. A walked length close
+to the straight distance means it stayed on one corridor rather than going
+round a block. `corridor_check.py` is that walk and the scoring below in one
+command:
 
 ```sh
 .venv/bin/python scripts/corridor_check.py bigbluebus 9 --from 697,2065.7 --to 775.3,2166.4
 ```
 
-It prints the traced corridor, ready to paste into a pin or an override, then
-each shape's distance to it and how much of it the shape covers, over the
-stretch of the shape that runs it. It takes `--schedule`, so a `--only` refit
-can be scored without a build. Read the walked-against-straight line first: if
-the walk went round something, everything below it is scored against the
-detour.
+It takes `--schedule`, so a `--only` refit can be scored without a build. Read
+the walked-against-straight line first: if the walk went round something,
+everything below it is scored against the detour.
+
+**Check which tree it walked on.** `corridor_check` reads the strokes only for
+the agencies in `INK_SNAP`, and a colour mask for everything else. Metro, LADOT
+and the rail feeds snap on strokes without being in that set, so for them the
+walk comes off a mask the build never used, and it can take a corridor that is
+not drawn at all. The sign is a walk shorter than the drawing. `drift_check`
+mirrors the build for all of them (`tree_for`) and `corridor_check` does not,
+so for those agencies walk `ink_tree` yourself and score against that.
 
 **Find the variant against that trace**, not against the other variants.
 Comparing variants with each other has two traps. Stored shapes keep only the
@@ -216,13 +234,16 @@ its other leg, which hides the divergence entirely. `debug_line.py` draws the
 variants in listed order, so the last one drawn hides the ones under it. Read
 the printed legend, or pass `--shape`, before believing a colour.
 
-**Read length as well as distance.** A path cutting the corner off a tight loop
-can sit a few px from the corridor at its worst and still be obviously wrong on
-screen. The second measure is how much arc the shape spends inside the window;
-a shortcut shows up there as ground it never covers. That is also what the
-stops ride on, so it is the half that reaches the animation. Scoring a
-candidate as (distance to the trace, fraction of the trace covered) catches
-both at once.
+**Read `cover` as well as distance.** A path cutting the corner off a tight
+loop can sit a few px from the corridor at its worst and still be obviously
+wrong on screen. The second measure is how much of the corridor the shape comes
+within `COVER` px of; a shortcut shows up there as ground it never covers. That
+is also what the stops ride on, so it is the half that reaches the animation.
+Every distance measure in the repo is blind to it: a shape that runs half a
+drawn corridor, or runs it the wrong way round and stops at the wrong end, sits
+on ink for all of the arc it has and scores clean on `drift_check`. Score a
+candidate as (distance to the trace, fraction of the trace covered) and both
+faults show.
 
 **Refit the one route rather than rebuilding.** A full build is around two
 minutes, and almost all of it is shapes the change under test cannot reach.
@@ -245,7 +266,7 @@ The route token matches a route id, an id without its variant suffix, or the
 designation the sheet prints, so `--only ladot:437` and `--only bigbluebus:9`
 both work without looking an opaque feed id up.
 
-**Three signatures worth recognising**, each of which names its own fix:
+**Signatures worth recognising**, each of which names its own fix:
 
 - *A foreign agency's badge chip printed over this agency's line.* It knocks a
   gap in the mask that no bridge will cross, because the block closes round it
@@ -272,6 +293,37 @@ both work without looking an opaque feed id up.
   the warp runs a corridor's width off the drawing, every point of the drawn
   detour is nearest the same warp point, so the pins all speak for one stretch
   and fight each other. Use an override.
+- *The walk is right and the band throws it away.* Where the sheet compresses
+  a stretch, the drawn corridor is far shorter than the warp's arc across it,
+  and a walk that follows the drawing exactly reads as a corner cut. Below
+  `TRACE_DETOUR[0]` of the arc it is refused, `align_walk` gets one attempt at
+  placing the anchors by correspondence instead, and what ships when that
+  fails is the straight interpolation across the corner. The sign is a walk
+  whose midpoint is on the drawn corridor and a band the walk misses low.
+  Re-fitting does not rescue it, because the arc it is measured against is the
+  shape's own and the shape cannot reach the drawing until the walk is
+  believed. Where the warp also lies a block off the drawing, so that one leg
+  of it sits over where another leg is drawn, no pin can attach either: that
+  is an override.
+- *A cross street joining the two corridors two badges bracket.* The drawn
+  lines are one connected web, so where another route is drawn between the
+  corridor the shape leaves and the one it should reach, the badge-to-badge
+  walk can take that connector instead of the way round. The band cannot
+  reject it: a connector one block up from the corner is barely shorter than
+  the drawn course, so the walk lands well inside `TRACE_DETOUR` and its
+  anchors pin the shape to the diagonal. `drift_check` reports nothing at all,
+  since every px of the shortcut is this agency's own ink. The sign is a walk
+  whose midpoint is on neither corridor. One pin on the right corridor between
+  the connector and the corner fixes it, by splitting the pair so that the way
+  round is the shortest way for both legs.
+- *A shape on the drawn line but on the wrong part of it.* Where the sheet
+  draws a stretch as a loop or an out-and-back, the snap can reach the ink by
+  the short way, run the far leg backwards and finish at the wrong end, leaving
+  the near legs uncovered. Low drift, low `cover`, and the stored points read
+  as the drawn corridor with a leg missing and the rest reversed. A pin cannot
+  fix it: the legs the shape skipped have no warp on them to attach to, and a
+  pin at the drawn terminus reads as a terminus for whichever end of the shape
+  came nearest. Override, with the box running out to the end of the shape.
 
 **Placing a pin is a search with two constraints, both answerable before any
 rebuild.** It has to be on the drawn line, so take the coordinates off the
@@ -288,12 +340,33 @@ whole fix.
 **Placing an override.** `box` is matched against the warp, and the replaced
 run goes from the first to the last warp point inside it. An excursion that
 leaves the box in between is harmless, but a second pass through the box later
-in the route swallows everything between the two. List the in-box index runs
-for every shape of the route before trusting a box. One `path` serves both
+in the route swallows everything between the two. One `path` serves both
 directions, since the orientation comes from the direction of travel rather
 than from which end the shape enters by. Trace the corridor off the artwork and
 draw the trace back over the tiles before wiring it in; a hook or a dip the eye
 skips over is obvious once drawn.
+
+Two measurements settle a box, both before any rebuild. The warp it is matched
+against is `densify(to_px(shape), 4.0)`, so the in-box index runs come off that
+directly: build it for every shape of the route, take the indices inside the
+box, and split them into contiguous runs. One run per shape and the box is
+clean; two runs mean a second pass, and everything between them goes.
+
+The other is what the splice meets, which nothing prints. Wrap `apply_override`
+before calling `main()` with `REFIT` set, and have the wrapper report `lo`,
+`hi`, `full[lo-1]` and `path[0]` for each shape. `full[lo-1]` is the snapped
+point the hand-drawn path has to continue from: a few px and the edge holds,
+tens of px and it is in the wrong place. Read both shapes' `lo` in the same
+run. Where they disagree by more than a few px the edge is not in a straight
+stretch yet.
+
+The two directions of a route can disagree by several px of *along-line*
+position at the same box edge, because each snap distributes the sheet's
+compression its own way. Sweep candidate edges and print, for every shape, the
+snapped point just outside the box; take the edge where the two directions
+agree best and set the path's end between them, so neither direction gets a
+reversal. Two routes sharing one corridor need their own path ends for the
+same reason, even where the box can be identical.
 
 **Where the box ends matters as much as the path.** The box picks its run off
 the warp, but each end of the hand-drawn path has to meet a point the snap
@@ -367,8 +440,10 @@ Four blind spots to know about, since a fix can look like a no-op:
   it as on the drawing and `path_check` as never turning past a corner, while
   it is still an obvious zigzag at map zoom. Total turning per px of arc is what
   shows it, and `unjitter` is what removes it.
-- `drift_check` scores by color, so a route sitting on a sibling route's ink of
-  the same color scores clean.
+- `drift_check` scores distance to a colour, so a route sitting on a sibling's
+  ink of the same colour scores clean, and so does one covering only part of
+  its own drawn line. `cover` against a traced corridor is the measure for
+  both; see "Chasing a divergent path".
 - `path_check` scores by straightness, so a smoothly cut corner scores zero,
   and putting a shape back onto a corner it was cutting scores worse. An
   out-and-back whose legs both sit on one drawn line is a true fold where the
@@ -415,6 +490,13 @@ everything, without either leg moving a street.
   `inspect.getsource` of the mask-building functions, so editing them, comments
   included, invalidates `scratch/mask-cache/` and forces one cold rebuild
   (~80 s against ~30 s). Harmless, but expect it.
+- **`--only` on an unextracted feed overwrites `schedule.json`.** The refit's
+  write-and-return sits inside the per-feed loop, and a feed with no
+  `data/gtfs/<feed>/` directory is skipped before it. The loop then ends and
+  `main()` falls through to the full-build path, writing an empty
+  `schedule.json` over the committed one. The only warning is a
+  `<feed>: missing, skipped` line above output that otherwise looks like a
+  build. Unzip the feeds first, and check `git status` if that line appears.
 - **`--only` reads a cached shape set; a full build never does.** Which shapes a
   feed runs is settled by its timetable, and the colour the feed is masked on is
   refined off the first twenty of them, so a refit that guessed the set from
