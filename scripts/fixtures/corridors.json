@@ -65,6 +65,21 @@
     "path": [[1653.2,3200],[1653.1,3236.2],[1652.4,3237.5],[1650.8,3239.2],[1647.8,3240],[1624.9,3240],[1622.6,3239.5],[1620.8,3238.2],[1619.7,3236.2],[1619.5,3234.6],[1619.5,3215.1]]
   },
   {
+    "name": "Long Beach 91 Cal State Long Beach corner",
+    "system": "Long Beach Transit", "route": "91", "gate": 4, "tolerance": 5, "min_matches": 2,
+    "path": [[2282.1,3218.8],[2283.5,3219.1],[2284.6,3219.9],[2285.3,3221.1],[2285.5,3222.1],[2285.9,3231.9],[2286.9,3240.2],[2286.9,3255]]
+  },
+  {
+    "name": "Long Beach 92 Cal State Long Beach corner",
+    "system": "Long Beach Transit", "route": "92", "gate": 4, "tolerance": 5, "min_matches": 2,
+    "path": [[2282.1,3218.8],[2283.5,3219.1],[2284.6,3219.9],[2285.3,3221.1],[2285.5,3222.1],[2285.9,3231.9],[2286.9,3240.2],[2286.9,3255]]
+  },
+  {
+    "name": "Long Beach 93 Cal State Long Beach corner",
+    "system": "Long Beach Transit", "route": "93", "gate": 4, "tolerance": 5, "min_matches": 2,
+    "path": [[2282.1,3218.8],[2283.5,3219.1],[2284.6,3219.9],[2285.3,3221.1],[2285.5,3222.1],[2285.9,3231.9],[2286.9,3240.2],[2286.9,3255]]
+  },
+  {
     "name": "C Line Hawthorne/Lennox platform",
     "system": "Metro Rail", "route": "C", "platform": [1319,2474], "tolerance": 5, "min_matches": 2
   }
