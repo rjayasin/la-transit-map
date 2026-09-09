@@ -245,26 +245,33 @@ on ink for all of the arc it has and scores clean on `drift_check`. Score a
 candidate as (distance to the trace, fraction of the trace covered) and both
 faults show.
 
-**Refit the one route rather than rebuilding.** A full build is around two
-minutes, and almost all of it is shapes the change under test cannot reach.
-`build_data.py --only <feed>[:<route>]` fits that route alone and writes a
-`schedule.json`-shaped stub that `debug_line.py --schedule` draws:
+**Complete feed caching.** `build_data.py --only <feed>[:<route>]` writes a
+complete subset to `scratch/refit_<feed>.json`. It includes stops, service days,
+and inset runs. The token matches a route ID, its prefix without a variant
+suffix, or its printed label. The whole feed is fitted before selecting a route,
+since siblings share badge ownership and color calibration.
 
-```sh
-.venv/bin/python scripts/build_data.py --only bigbluebus:9
-.venv/bin/python scripts/debug_line.py 9 --schedule scratch/refit_bigbluebus.json --no-stops
-```
+`--no-cache` forces a refit. Compare its output with a cached build using
+`--out` and byte equality. Cache keys hash feed inputs and shared artwork,
+algorithm code, settings, and library versions. The tables listed in
+`build_cache.FEED_TABLES` are keyed per feed; other code or constants invalidate
+all feeds. Add a table there only if it cannot affect another feed's fit.
+`build_schedule(feeds)` returns an uncached schedule for integration checks;
+`merge_schedules` preserves the full build's native-before-pseudo shape order.
 
-Two seconds for a route, five for a whole agency, against 72 for the build. The
-geometry is identical, since this is the build's own code with the fit loop
-narrowed, so testing a pin position is a loop rather than a rebuild. It does
-not give you `schedule.json`: it emits no timetable and no call-out runs, so
-`drift_check`, `path_check` and `speed_check` still need a full build before
-you commit.
+**Fixed accuracy checks.** `scripts/fixtures/corridors.json` stores artwork
+coordinates independently of the fitted output. `geometry_check.py` measures
+both path-to-corridor error and corridor coverage. Keep thresholds fixed when
+changing the fitter. The tests include a platform and allow a real U-turn.
+Run `build_test.py`, `geometry_check.py`, and `motion_test.mjs` before publishing.
 
-The route token matches a route id, an id without its variant suffix, or the
-designation the sheet prints, so `--only ladot:437` and `--only bigbluebus:9`
-both work without looking an opaque feed id up.
+**Source distances.** `measured_positions` accepts GTFS distances only when
+both files have complete ordered measures and every inferred stop is within
+150 m of its geographic position. Conflicting measures across a pattern's trips
+use projection instead. Trimmed shapes retain their original starting distance,
+so a layover tail cannot shift every subsequent stop. `u` stores geographic
+fractions for inset timing; `insetRanges` stores the matching run boundaries.
+The renderer interpolates along each visible run and hides only the outside gap.
 
 **Signatures worth recognising**, each of which names its own fix:
 
@@ -353,7 +360,7 @@ box, and split them into contiguous runs. One run per shape and the box is
 clean; two runs mean a second pass, and everything between them goes.
 
 The other is what the splice meets, which nothing prints. Wrap `apply_override`
-before calling `main()` with `REFIT` set, and have the wrapper report `lo`,
+before calling `main(["--only", feed, "--no-cache"])`, and have the wrapper report `lo`,
 `hi`, `full[lo-1]` and `path[0]` for each shape. `full[lo-1]` is the snapped
 point the hand-drawn path has to continue from: a few px and the edge holds,
 tens of px and it is in the wrong place. Read both shapes' `lo` in the same
@@ -486,40 +493,15 @@ everything, without either leg moving a street.
   mask, and cutting a corner smoothly costs `path_check` nothing. Use
   `LEGEND_INK` and `INK_SNAP` where the PDF carries the agency's strokes, and
   `ink_gap_check.py` to see the holes.
-- **Mask cache keys include function source.** `code_stamp` hashes
-  `inspect.getsource` of the mask-building functions, so editing them, comments
-  included, invalidates `scratch/mask-cache/` and forces one cold rebuild
-  (~80 s against ~30 s). Harmless, but expect it.
-- **`--only` on an unextracted feed overwrites `schedule.json`.** The refit's
-  write-and-return sits inside the per-feed loop, and a feed with no
-  `data/gtfs/<feed>/` directory is skipped before it. The loop then ends and
-  `main()` falls through to the full-build path, writing an empty
-  `schedule.json` over the committed one. The only warning is a
-  `<feed>: missing, skipped` line above output that otherwise looks like a
-  build. Unzip the feeds first, and check `git status` if that line appears.
-- **`--only` reads a cached shape set; a full build never does.** Which shapes a
-  feed runs is settled by its timetable, and the colour the feed is masked on is
-  refined off the first twenty of them, so a refit that guessed the set from
-  `trips.txt` could mask on a different colour and answer a question the build
-  never asked. `scratch/shape-cache/` holds the set, stamped with the size and
-  mtime of the files it came from. A full build writes it and reads nothing, and
-  a refit whose stamp doesn't match reads the stop times as usual. The busways
-  are the exception: they anchor on the station names printed beside them, which
-  come out of the timetable, so `--only gtfs_bus` and `--only gtfs_bus:901`
-  parse it whatever the cache says.
-- **The colour masks read the PDF too.** A place name doesn't paint out the line
-  it crosses. It washes the line back, under a halo and under a page-coloured
-  panel that `knockout_panels` reads off the PDF, and `unfade` puts what
-  survives back into the mask. The masks are therefore keyed on the sheet as
-  well as on `map.png`. Without pymupdf they lose the panels, a gap under a name
-  becomes a hole again, and the snap takes a parallel street instead.
-- **A build without pymupdf poisons the cache.** The badges, the strokes and the
-  knockout panels all come from the PDF, and each falls back to nothing rather
-  than failing. The empty stroke set is written to `scratch/mask-cache/` under a
-  key that says nothing about which libraries were installed, so the next build
-  reads it back and comes out wrong with no warning. Install pymupdf before
-  building, and clear the cache directory if a run printed either "unavailable"
-  line.
+- **Mask cache keys include source and library versions.** Editing mask-building
+  functions, including comments, invalidates `scratch/mask-cache/`. Feed cache
+  keys use the parsed code, so comment edits alone do not invalidate fitted feeds.
+- **Build inputs are checked before caches are read.** Missing feeds, calendars,
+  inset calibration, or PDF support fail without replacing the schedule. A
+  subset cannot target `schedule.json`. Both schedule and cache writes are atomic.
+- **The colour masks read the PDF too.** Knockout panels and strokes recover
+  artwork hidden under labels. PyMuPDF is required, and library versions are
+  part of the cache identity.
 - **Module docstrings are user-facing.** Several scripts pass `__doc__` as their
   argparse `description`. Trimming one changes `--help`.
 - **`index.html` must stay byte-stable across deploys.** It is the one URL that
@@ -623,8 +605,8 @@ everything, without either leg moving a street.
   refit that took another corridor. The sign is movements of tens of px on
   routes nowhere near the change. `unjitter` runs after the ballot for this
   reason, and anything else that touches the geometry should too.
-- **Stop distances ride on the stored arc.** `main_dist` places the stops on the
-  warp and carries that parameterization onto the stored shape point for point,
+- **Stop distances ride on the stored arc.** `main_dist` carries validated GTFS
+  distances, or projected positions on the warp, onto the stored shape point for point,
   so whatever shortens the line compresses the stops with it. `unfold` usually
   does. Where the sheet draws one line for a stretch the route drives twice, as
   with a one-way pair or a circulator's loop, every point along it offers an

@@ -225,11 +225,15 @@ def main():
         err = np.hypot(x[ok] - tx[ok], y[ok] - ty[ok])
         print(f"icp {it}: matched {ok.sum()}/{len(x)} median={np.median(err):.1f}px p90={np.percentile(err,90):.1f}px")
 
-    out = {"poly2": {"lon0": lon0, "lat0": lat0, "cx": list(cx), "cy": list(cy)},
+    out = {}
+    if os.path.exists("data/transform.json"):
+        with open("data/transform.json") as f:
+            out = json.load(f)
+    out.update({"poly2": {"lon0": lon0, "lat0": lat0, "cx": list(cx), "cy": list(cy)},
            "affine": list(sol.x), "map_width": 4096, "map_height": 4139,
-           "residual_median_px": float(np.median(err))}
-    with open("data/transform.json", "w") as f:
-        json.dump(out, f, indent=1)
+           "residual_median_px": float(np.median(err))})
+    from build_cache import atomic_json
+    atomic_json("data/transform.json", out)
 
     # diagnostic overlay
     im = Image.open(MAP).convert("RGB")

@@ -321,8 +321,8 @@ def main():
         "geo": list(GEO),
         "residual_median_px": float(np.median(err[ok])),
     }
-    with open("data/transform.json", "w") as f:
-        json.dump(out, f, indent=1)
+    from build_cache import atomic_json
+    atomic_json("data/transform.json", out)
     print("wrote inset transform")
 
     if len(sys.argv) > 1:
