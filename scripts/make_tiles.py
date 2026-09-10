@@ -21,7 +21,10 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--overview-only", action="store_true", help="skip the PDF detail tiles")
 args = parser.parse_args()
 
-base = Image.open("map.png").convert("RGB")
+source = Image.open("map.png").convert("RGBA")
+# Match the PDF renderer's white background in transparent margins.
+base = Image.new("RGBA", source.size, "white")
+base = Image.alpha_composite(base, source).convert("RGB")
 for level in (0.25, 0.5, 1):
     im = base.resize((round(base.width * level), round(base.height * level)),
                      Image.Resampling.LANCZOS) if level != 1 else base
