@@ -5,6 +5,17 @@ does; this covers what will bite you.
 
 ## Layout
 
+The client uses 4096 × 4139 map coordinates without loading `map.png`. Keep
+those dimensions aligned if the artwork changes. `make_tiles.py --overview-only`
+rebuilds levels 0.25, 0.5 and 1 from the PNG. The six level-0.25 tiles stay cached
+as a fallback during pans. Tile edges are rounded to shared device pixels to
+avoid seams. All levels use the tile revision in their URLs.
+
+`node scripts/load_benchmark.mjs DIR [DIR ...]` compares staged clients using
+cold Chromium caches, gzip level 5, and desktop, mobile and zoomed views.
+`BENCH_OUT=scratch/load-benchmark.json` saves measurements and screenshots.
+Readiness requires vehicles and complete coverage at the selected tile level.
+
 `scripts/build_data.py` is the whole pipeline and is large. Rough order:
 
 | Region | What lives there |

@@ -8,7 +8,7 @@
 // The data files carry the build's content identity in a query string, so a
 // cached index.html can never pair with a newer schedule.json. Tiles are keyed
 // on the last commit that touched tiles/, so a code-only deploy doesn't make
-// every client re-download 5488 images.
+// every client re-download cached tiles.
 //
 //     node scripts/stamp_build.mjs "<build id>" "<tiles rev>"
 import fs from "node:fs";
@@ -26,7 +26,6 @@ const hash = f => crypto.createHash("sha256")
 const subs = [
   ["__BUILD__", build],
   ["__V_SCHEDULE__", hash("schedule.json")],
-  ["__V_MAP__", hash("map.png")],
   ["__V_TILES__", tilesRev],
 ];
 

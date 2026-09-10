@@ -49,7 +49,7 @@ const env = {
   // page state the samples copy
   frames: 0, tileCache: new Map(), tileDecodes: 0, tileEvictions: 0,
   bgComposes: 0, frameErrors: 0, slowFrames: 0, view: { k: 1.5 }, DPR: 2,
-  tileQueue: [], baseDrawn: false, tileHoldFrames: 0,
+  tileQueue: [], tileHoldFrames: 0,
   frameCostSum: 0, frameCostN: 0,
   // the frame-cost split and the two non-page explanations the samples copy
   costComposeSum: 0, costBlitSum: 0, costSpriteSum: 0, spriteDraws: 0, ctxLost: 0,
@@ -283,7 +283,7 @@ check("app.js reports the browser's frame clock", SRC.includes("renderTick: rend
 check("app.js measures what a frame costs",
       SRC.includes("frameCostAvg: frameCostN"), true);
 check("app.js records what the compositor was handed",
-      SRC.includes("queued: tileQueue.length, base: baseDrawn, hold: tileHoldFrames"), true);
+      SRC.includes("queued: tileQueue.length, hold: tileHoldFrames"), true);
 check("app.js splits the frame cost by phase",
       SRC.includes("costCompose: frameCostN") && SRC.includes("costSprites: frameCostN"), true);
 check("the run-up carries the split too", SRC.includes("cSprites:"), true);
