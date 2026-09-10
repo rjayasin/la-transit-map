@@ -234,6 +234,7 @@ MAP_LABELS = {
     ("burbank", "3163"): "BU",      # NoHo - Airport
     ("ladot", "708"): "WM",         # DASH Wilmington, clockwise
     ("ladot", "710"): "WM",         # DASH Wilmington, counterclockwise
+    ("ladot", "711"): "SP",         # DASH San Pedro
     ("ladot", "713"): "WT",         # DASH Watts, clockwise
     ("ladot", "714"): "WT",         # DASH Watts, counterclockwise
     ("ladot", "4867"): "BE",        # DASH Boyle Heights
