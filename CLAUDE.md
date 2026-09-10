@@ -28,6 +28,9 @@ Which workflow applies depends on where the work is running.
   isn't stale. Cloud work may have merged something.
 - **Ask before pushing anything unusual.** Rewriting history, force pushes and
   deleting remote branches are not covered by this default.
+- **Finish after pushing.** Run relevant local checks, commit and push. Don't
+  watch or poll deployment runs or verify the live site after routine pushes.
+  Check deployment only when the user asks or the task is to fix a deployment.
 
 ### Working in the cloud: branch and open a PR
 
