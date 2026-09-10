@@ -8,7 +8,7 @@
 // travels in every freeze snapshot, and the data files carry it in their URLs,
 // so a cached page can never pair with a newer schedule.json than its own.
 const BUILD = "__BUILD__";
-const V_SCHEDULE = "__V_SCHEDULE__", V_MAP = "__V_MAP__", V_TILES = "__V_TILES__";
+const V_SCHEDULE = "__V_SCHEDULE__", V_TILES = "__V_TILES__";
 const DEPLOYED = !BUILD.startsWith("__");     // false in a working copy
 // Set by checkVersion() below, and reported in every snapshot. Declared up here
 // because resourceStats() reads it and is defined long before the poll is.
@@ -281,10 +281,10 @@ for (const el of [bar, filtersEl])
   for (const ev of ["pointerdown", "input"]) el.addEventListener(ev, bumpBar);
 bumpBar();
 
-// ---- hi-res tile pyramid (pre-rendered from the PDF; levels 2x and 4x the base PNG) ----
+// ---- tile pyramid (levels are pixels per map coordinate) ----
 const TILE = 512;
-// Decoded tiles are this page's largest graphics allocation: 1 MB apiece, 5488
-// in the pyramid, so only a fraction is ever resident.
+const TILE_LEVELS = [0.25, 0.5, 1, 2, 4, 8];
+// Decoded tiles use up to 1 MB apiece. Only part of the pyramid stays resident.
 //
 // They are ImageBitmaps rather than <img> elements because an <img> does not own
 // its decoded surface. It names one in the browser's image cache, which the
@@ -325,20 +325,17 @@ function dropTile(t) {
 function evictTiles(budget) {
   if (tileCache.size < budget) return;
   const keep = Math.floor(budget * 0.75);  // still comfortably above one frame
-  for (const [k, t] of tileCache) {        // insertion order, so the front of the
-    tileCache.delete(k);                   // map is the least recently used tile
+  for (const [k, t] of tileCache) {        // oldest entries first
+    // Keep the six overview tiles available during pans and failed detail loads.
+    if (t.level === TILE_LEVELS[0]) continue;
+    tileCache.delete(k);
     dropTile(t);
     tileEvictions++;
     if (tileCache.size <= keep) break;
   }
 }
 
-// A permanently failed tile costs far more than the missing square it looks
-// like: levelReady() is all-or-nothing, so one stuck tile keeps its level
-// un-ready forever, and every frame then redraws the base PNG underneath and
-// draws all three tile levels instead of one. It never shows as a slow frame,
-// since the cost lands on the compositor. Hence a bounded retry: a genuinely
-// missing file still gives up rather than becoming a fetch storm.
+// Retry failed tiles a bounded number of times. Coarser tiles fill the gaps.
 const TILE_RETRY_MS = 4000;    // before a failed tile is asked for again
 const TILE_TRIES = 3;          // attempts before it is left alone for good
 
@@ -428,7 +425,7 @@ async function fetchTile(t) {
   } catch (err) {
     // An evicted tile aborts its own fetch, so only a real failure counts. The
     // tile stays in the cache as an error and getTile() retries it a few times
-    // on a delay, so a blip heals instead of pinning the base PNG under every
+    // on a delay, so a blip heals instead of pinning coarse tiles under every
     // recompose for as long as the view holds the tile.
     if (!t.dead) { t.state = "error"; t.errAt = performance.now(); t.tries++; tileErrors++; }
   } finally {
@@ -474,13 +471,12 @@ function levelCost(level) {
 const SHARP_ENOUGH = 0.9;      // accept a tier within this fraction of sharp
 function levelsFor(want) {
   const levels = [];
-  for (const level of [2, 4, 8]) {
-    if (level / 2 >= want * SHARP_ENOUGH) break;
+  for (const level of TILE_LEVELS) {
+    if (levels.length && level / 2 >= want * SHARP_ENOUGH) break;
     levels.push(level);
   }
   // Drop the finest tier while a single frame's tiles wouldn't fit under the
-  // ceiling with headroom. Always keep one: the coarsest is cheap, and drawing
-  // nothing would show the base PNG through a view that has zoomed past it.
+  // ceiling with headroom. Keep the coarsest tier as a loading fallback.
   let cost = levels.reduce((n, l) => n + levelCost(l), 0);
   while (levels.length > 1 && cost * TILE_HEADROOM > TILE_CEIL) {
     cost -= levelCost(levels.pop());
@@ -499,7 +495,7 @@ function levelReady(level) {
 
 function drawTiles(g) {
   tilesDrawn = 0;
-  if (view.k * DPR <= 1.05 || !map) return;         // base PNG is sharp enough
+  if (!map) return;
   const want = view.k * DPR;                         // needed px per map px
   let levels = levelsFor(want);
   if (!levels.length) return;
@@ -522,7 +518,14 @@ function drawTiles(g) {
         const t = getTile(level, c, r);
         if (t.state === "ready") {
           const b = t.bmp;    // its own size: the last row and column are cropped
-          g.drawImage(b, c * ts, r * ts, b.width / level, b.height / level);
+          // Shared edges land on the same device pixel, without canvas seams.
+          const scale = view.k * DPR;
+          const x0 = Math.round((c * ts - view.x) * scale);
+          const y0 = Math.round((r * ts - view.y) * scale);
+          const x1 = Math.round((c * ts + b.width / level - view.x) * scale);
+          const y1 = Math.round((r * ts + b.height / level - view.y) * scale);
+          g.drawImage(b, x0 / scale + view.x, y0 / scale + view.y,
+                      (x1 - x0) / scale, (y1 - y0) / scale);
           tilesDrawn++;
         }
       }
@@ -538,11 +541,6 @@ function drawTiles(g) {
 const bg = document.createElement("canvas");
 const bgCtx = bg.getContext("2d");
 let bgKey = "", bgDirty = true, bgComposes = 0;
-// What the last compose asked the compositor for. The base PNG is the largest
-// single draw this page makes, drawn whenever the tiles don't yet cover, and at
-// the deepest zoom it lands on a 32768 px destination rect, which is worth
-// recording in a freeze snapshot.
-let baseDrawn = false, baseScale = 0;
 
 // Whether the browser took the canvases away. A 2D context is lost when the
 // process holding its surfaces goes (usually the GPU process), and the browser
@@ -581,24 +579,12 @@ function composeBackground() {
   bgCtx.fillRect(0, 0, W, H);
   bgCtx.setTransform(DPR * view.k, 0, 0, DPR * view.k,
                      -view.x * DPR * view.k, -view.y * DPR * view.k);
-  // Draw the base PNG first so tiles land on top of it while they stream in,
-  // then skip it entirely once the tiles are shown to cover the viewport.
-  // Scaling a 17-megapixel image under an opaque layer is pure waste.
-  if (map) {
-    const probe = tilesCover();
-    baseDrawn = !probe;
-    baseScale = +(DPR * view.k).toFixed(2);
-    if (!probe) bgCtx.drawImage(map, 0, 0);
-    drawTiles(bgCtx);
-  }
+  drawTiles(bgCtx);
 }
 
-// Whether the tile pyramid will completely hide the base PNG this frame. It has
-// to ask about the same cascade drawTiles will actually draw. This used to
-// repeat the level choice inline, and any disagreement between the two skips the
-// base PNG under tiles that were never drawn, leaving bare canvas.
+// Whether the selected detail level covers the viewport.
 function tilesCover() {
-  if (view.k * DPR <= 1.05 || !map) return false;
+  if (!map) return false;
   const levels = levelsFor(view.k * DPR);
   if (!levels.length) return false;
   return levelReady(levels[levels.length - 1]);
@@ -856,15 +842,19 @@ function showDay(day) {
 }
 
 // ---- load ----
-Promise.all([
-  new Promise(res => { const im = new Image(); im.onload = () => res(im); im.src = `map.png?v=${V_MAP}`; }),
-  fetch(`schedule.json?v=${V_SCHEDULE}`).then(r => r.json()),
-]).then(([im, d]) => {
-  map = im; data = d;
-  fitView(im.width, im.height);
-  if (qp.get("k")) view.k = +qp.get("k");
-  if (qp.get("x")) view.x = +qp.get("x");
-  if (qp.get("y")) view.y = +qp.get("y");
+// Map coordinates match map.png and the tile builder. No full-map bitmap is loaded.
+map = { width: 4096, height: 4139 };
+fitView(map.width, map.height);
+if (qp.get("k")) view.k = +qp.get("k");
+if (qp.get("x")) view.x = +qp.get("x");
+if (qp.get("y")) view.y = +qp.get("y");
+// Load the overview and visible detail alongside the schedule.
+const overviewLevel = TILE_LEVELS[0], overviewSpan = TILE / overviewLevel;
+for (let r = 0; r < Math.ceil(map.height / overviewSpan); r++)
+  for (let c = 0; c < Math.ceil(map.width / overviewSpan); c++) getTile(overviewLevel, c, r);
+drawTiles(bgCtx);
+fetch(`schedule.json?v=${V_SCHEDULE}`).then(r => r.json()).then(d => {
+  data = d;
 
   function toShape(flat) {
     const pts = Float32Array.from(flat);
@@ -1202,24 +1192,22 @@ function resourceStats() {
     // and where it went: one compose (only when the view moved), one
     // full-canvas blit, and the fleet. costSprites climbing with `zoom` while
     // the other two sit still is the sqrt(k) sprite growth; costCompose is the
-    // base PNG or the tile cascade and shows up as a spike in the max rather
+    // tile cascade and shows up as a spike in the max rather
     // than in the average, since most frames skip it.
     costCompose: frameCostN ? +(costComposeSum / frameCostN).toFixed(1) : 0,
     costComposeMax: +costComposeMax.toFixed(1),
     costBlit: frameCostN ? +(costBlitSum / frameCostN).toFixed(1) : 0,
     costSprites: frameCostN ? +(costSpriteSum / frameCostN).toFixed(1) : 0,
     spriteDraws,
-    // Whether the last compose drew the base PNG, and at what scale; see
-    // composeBackground. tileHoldFrames counts frames drawn while tile loading
-    // was deliberately held off because the view was still moving.
-    baseDrawn, baseScale, tileHoldFrames,
+    // Frames drawn while tile loading was held off because the view was moving.
+    tileHoldFrames,
     tileDiscards, tileErrors,
     // bgComposes should sit still while the view is still; climbing at frame
     // rate means the blit cache is missing and every frame recomposites.
     bgComposes, composesPerSec: rate(bgComposes - statsComposes),
     bgMB: mb(bg.width * bg.height),
     tileMB: mb(tilePx), peakTileMB,
-    mapMB: map ? mb(map.width * map.height) : 0,
+    mapMB: 0,  // retained for reports from clients that used a full-map bitmap
     spriteCanvases, spriteMB: mb(spritePx),
     canvasMB: mb(cv.width * cv.height),
     zoom: +view.k.toFixed(3), dpr: DPR, frameErrors, slowFrames,
@@ -1405,9 +1393,8 @@ function stallSample() {
            tick: renderTick(), winH: innerHeight, cvH: cv.height,
            tiles: tileCache.size, decodes: tileDecodes, evictions: tileEvictions,
            composes: bgComposes, errors: frameErrors, slow: slowFrames,
-           // the churn on the way in, and what the compositor was being handed:
-           // `base` is the 17-megapixel PNG going down at `k`*DPR scale
-           queued: tileQueue.length, base: baseDrawn, hold: tileHoldFrames,
+           // Tile queue and frame costs before the stall.
+           queued: tileQueue.length, hold: tileHoldFrames,
            cost: +(frameCostN ? frameCostSum / frameCostN : 0).toFixed(1),
            // and the same millisecond split three ways, so the run-up says
            // which phase was growing rather than only that the frame was

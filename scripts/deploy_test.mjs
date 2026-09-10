@@ -48,7 +48,7 @@ for (const name of ["stamped", "dev"]) {
   for (const f of ["index.html", "app.js"]) {
     fs.copyFileSync(path.join(ROOT, f), path.join(dir, f));
   }
-  for (const f of ["map.png", "schedule.json", "tiles"]) {
+  for (const f of ["schedule.json", "tiles"]) {
     fs.symlinkSync(path.join(ROOT, f), path.join(dir, f));
   }
   // Only the deployed copy has a version.json — it is written by the workflow,
@@ -139,8 +139,10 @@ check("stamped: index.html itself carries no version",
 check("stamped: it is drawing", s.framesTotal > 0, true);
 check("stamped: schedule.json carries its content hash",
       net.some(u => u.includes(`schedule.json?v=${h("schedule.json")}`)), true);
-check("stamped: map.png carries its content hash",
-      net.some(u => u.includes(`map.png?v=${h("map.png")}`)), true);
+check("stamped: no full-map bitmap is downloaded",
+      net.some(u => /map\.(png|webp)/.test(u)), false);
+check("stamped: overview tiles carry the tiles rev",
+      net.some(u => /tiles\/0\.25\/.*\.webp\?v=deadbee/.test(u)), true);
 check("stamped: tiles carry the tiles rev",
       net.some(u => /tiles\/\d+\/.*\.webp\?v=deadbee/.test(u)), true);
 check("stamped: version.json polled past the CDN cache",
@@ -150,6 +152,38 @@ check("stamped: the bar offers the update",
       await ev("!document.getElementById('upd').hidden"), true);
 // the one thing it must never do: throw away a view somebody chose
 check("stamped: it did not reload itself", s.framesTotal > 100, true);
+check("stamped: no full-map image memory", s.mapMB, 0);
+const png = fs.readFileSync(path.join(ROOT, "map.png"));
+check("stamped: coordinates match the source artwork", await ev("[map.width, map.height]"),
+      [png.readUInt32BE(16), png.readUInt32BE(20)]);
+
+// Remove detail tiles and disable requests to check the cached fallback.
+const fallback = await ev(`(() => {
+  const saved = { ...view }, mayLoad = tilesMayLoad;
+  evictTiles(0);
+  const overview = [...tileCache.values()].filter(t => t.level === 0.25 && t.state === "ready").length;
+  tilesMayLoad = false;
+  let seamSpread = 0, painted = true;
+  for (const k of [0.233, 0.37, 0.51]) {
+    view.x = 500; view.y = 0; view.k = k;
+    bgDirty = true;
+    composeBackground();
+    const x = Math.round((2048 - view.x) * k * DPR), y = Math.round(100 * k * DPR);
+    const pixels = bgCtx.getImageData(x - 3, y, 6, 1).data;
+    for (let c = 0; c < 3; c++) {
+      const values = Array.from({ length: 6 }, (_, i) => pixels[i * 4 + c]);
+      seamSpread = Math.max(seamSpread, Math.max(...values) - Math.min(...values));
+    }
+    painted &&= pixels[0] > 180 && pixels[1] < 180 && pixels[2] < 120;
+  }
+  Object.assign(view, saved);
+  tilesMayLoad = mayLoad;
+  bgDirty = true;
+  return { overview, painted, seamSpread };
+})()`);
+check("stamped: eviction retains all six overview tiles", fallback.overview, 6);
+check("stamped: overview fills missing detail", fallback.painted, true);
+check("stamped: fractional zoom leaves no tile seam", fallback.seamSpread <= 6, true);
 
 // 2. an unstamped working copy must not poll, and must not nag
 const d = await load("dev");

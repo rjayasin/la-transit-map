@@ -30,10 +30,11 @@ The background is Metro's printed map. The vehicles are GTFS schedules warped
 onto it. Everything below the browser is offline build tooling that runs once
 and emits `schedule.json`.
 
-- **Background.** A 4096 px `map.png` plus a WebP tile pyramid
-  (`tiles/{2,4,8}/`, 512 px tiles, up to about 700 dpi of the 47″ sheet),
-  rendered from the PDF vectors. Tiles cascade in as you zoom, and zoom is
-  capped at the deepest level's 1:1, so the background is never upscaled.
+- **Background.** A WebP tile pyramid (`tiles/{0.25,0.5,1,2,4,8}/`, 512 px
+  tiles). The browser loads the overview and visible detail alongside the
+  schedule. Higher levels come from the PDF vectors, up to about 700 dpi of
+  the 47″ sheet. Zoom is capped at the deepest level's 1:1. `map.png` is an
+  offline input for geometry tools and overview generation.
 - **Data.** 15 static GTFS feeds are reduced to one service date per weekday
   and emitted as `schedule.json` (~12 MB): 49,960 trips on 337 routes for a
   whole week, around 26,000 of them on any one weekday. Each carries route
