@@ -19,12 +19,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
+  # Reports on its own, and nothing depends on it. A failing check marks the
+  # commit red without holding back the deploy.
+  check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -39,6 +39,13 @@ jobs:
           python scripts/geometry_check.py
           node scripts/motion_test.mjs
           node scripts/stall_test.mjs
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # The build id the page reports as its own, and the one version.json
       # advertises. Short SHA plus the commit date, so it is both unique and

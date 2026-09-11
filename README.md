@@ -143,7 +143,7 @@ agree with the geographic positions. Other stops use monotone projection.
 Inset runs carry geographic entry and exit positions so vehicles remain visible
 for the portions of a stop interval that fall inside the panel.
 
-Before deployment, `scripts/geometry_check.py` checks fixed artwork corridors
+On each push, `scripts/geometry_check.py` checks fixed artwork corridors
 and a rail platform, `scripts/build_test.py` checks caching and stop assignment,
 and `scripts/motion_test.mjs` checks path interpolation and inset transitions.
 The geometry check also validates the complete schedule structure.
