@@ -65,6 +65,8 @@ import sys
 
 sys.path.insert(0, "scripts")
 
+from schedule_timing import detie, eff_dist
+
 SCHEDULE = "schedule.json"
 DEG_KM = 111.32          # km per degree of latitude
 DEFAULT_OVER = 120.0     # km/h; above an LA bus's plausible top speed
@@ -92,50 +94,6 @@ def trip_times(t):
     times = [float(t[2])]
     for dv in t[3:]:
         times.append(times[-1] + dv)
-    return times
-
-
-def eff_dist(pat):
-    """Distance used for de-tying, mirroring the client: downtown the main map
-    is so compressed that stop distances plateau, so inset movement (at ~1/5
-    scale) counts too, or tied stops there would get no time at all."""
-    dd, ir, idd = pat["d"], pat.get("ir"), pat.get("id")
-    if not ir:
-        return dd
-    eff = [0.0] * len(dd)
-    for i in range(1, len(dd)):
-        step = dd[i] - dd[i - 1]
-        if ir[i] >= 0 and ir[i] == ir[i - 1]:
-            step = max(step, abs(idd[i] - idd[i - 1]) / 5)
-        eff[i] = eff[i - 1] + step
-    return eff
-
-
-def detie(times, dist):
-    """Spread runs of (near-)tied stop times over the adjacent gap, in place,
-    the same fix the client applies. GTFS times are minute-quantized, so
-    consecutive stops often share a timestamp while the bus is really moving;
-    measuring speed against the raw times would report teleports everywhere."""
-    n = len(times)
-    i = 0
-    while i < n - 1:
-        if times[i + 1] - times[i] > 1:
-            i += 1
-            continue
-        j = i
-        while j + 1 < n and times[j + 1] - times[j] <= 1:
-            j += 1
-        if j + 1 < n:
-            T, U, D = times[i], times[j + 1], dist[j + 1] - dist[i]
-            if D > 0:
-                for m in range(i + 1, j + 1):
-                    times[m] = T + (U - T) * (dist[m] - dist[i]) / D
-        elif i > 0:
-            T, U, D = times[i - 1], times[j], dist[j] - dist[i - 1]
-            if D > 0:
-                for m in range(i, j):
-                    times[m] = T + (U - T) * (dist[m] - dist[i - 1]) / D
-        i = j
     return times
 
 
@@ -241,15 +199,16 @@ def main():
                          f"seconds (default {DEFAULT_HELD:.0f})")
     ap.add_argument("--top", type=int, default=25, help="rows to print (default 25)")
     ap.add_argument("--system", help="substring of the system name")
+    ap.add_argument("--schedule", default=SCHEDULE, help="schedule JSON to inspect")
     ap.add_argument("--inset", action="store_true", help="check the Downtown panel instead")
     ap.add_argument("--csv", action="store_true", help="write every hit as CSV to stdout")
     a = ap.parse_args()
     slow = a.slow or a.under is not None
     under = DEFAULT_UNDER if a.under is None else a.under
 
-    if not os.path.exists(SCHEDULE):
-        sys.exit(f"missing {SCHEDULE} (run from the repo root)")
-    with open(SCHEDULE) as f:
+    if not os.path.exists(a.schedule):
+        sys.exit(f"missing {a.schedule} (run from the repo root)")
+    with open(a.schedule) as f:
         d = json.load(f)
     pxkm = map_scale(a.inset)
     other_pxkm = map_scale(not a.inset)

@@ -40,6 +40,7 @@ sys.path.insert(0, "scripts")
 from georef import (EXCLUDE, MASK_LEVEL, MASK_TOL, ROUTE_COLORS, TILE, TILES,  # noqa: E402
                     TOL, load_masks, tile_scan)
 from georef_inset import GEO as INSET_GEO, LEGEND as INSET_LEGEND, RECT as INSET_RECT  # noqa: E402
+from schedule_timing import repair_estimates
 
 TARGET = date(2026, 7, 22)  # a Wednesday inside the Metro JUNE26 calendar window
 GTFS = "data/gtfs"
@@ -4878,15 +4879,17 @@ def build_schedule(feeds):
             return route_idx[key]
 
         stop_times = defaultdict(list)
-        for ti, seq, at, dt, sid_, measure in read_cols(
+        for ti, seq, at, dt, sid_, measure, timepoint in read_cols(
                 feed, "stop_times.txt",
-                ("trip_id", "stop_sequence", "arrival_time", "departure_time", "stop_id", "shape_dist_traveled")):
+                ("trip_id", "stop_sequence", "arrival_time", "departure_time",
+                 "stop_id", "shape_dist_traveled", "timepoint")):
             if ti in trip_info and at.strip():
                 # keep both times: a stop is a dwell [arrival, departure], and at
                 # the origin that dwell is a layover we must not draw (see below)
                 stop_times[ti].append((int(seq), parse_time(at),
                                        parse_time(dt) if dt.strip() else parse_time(at),
-                                       sid_, parse_distance(measure)))
+                                       sid_, parse_distance(measure),
+                                       timepoint.strip() != "0" or bool(dt.strip() and at != dt)))
 
         n_before = len(trips_out)
         used_shapes = set()
@@ -4895,7 +4898,7 @@ def build_schedule(feeds):
                 continue
             rid, sid = trip_info[ti]
             sts.sort()
-            route_stops.setdefault((feed, rid), set()).update(s for _, _, _, s, _ in sts)
+            route_stops.setdefault((feed, rid), set()).update(s for _, _, _, s, _, _ in sts)
             # A bus laying over at its origin before it enters service is not yet
             # a vehicle anyone can ride, and drawing it parked there for the
             # length of the layover pools whole fleets motionless on the
@@ -4906,13 +4909,13 @@ def build_schedule(feeds):
             # keeps its arrival (arrival and departure are equal there anyway, so
             # this changes nothing downstream). Clamped so a malformed feed whose
             # departure trails the next arrival can't make the clock run backward.
-            times = [t for _, t, _, _, _ in sts]
+            times = [t for _, t, _, _, _, _ in sts]
             if len(times) > 1:
                 times[0] = min(sts[0][2], times[1])
-            stop_seq = tuple(s for _, _, _, s, _ in sts)
+            stop_seq = tuple(s for _, _, _, s, _, _ in sts)
             ridx = route_index(rid)
             pkey = (feed, sid, stop_seq)
-            measures = tuple(m for _, _, _, _, m in sts)
+            measures = tuple(m for _, _, _, _, m, _ in sts)
             if pkey not in pattern_measures:
                 pattern_measures[pkey] = measures
             elif pattern_measures[pkey] != measures:
@@ -4920,7 +4923,8 @@ def build_schedule(feeds):
             if pkey not in pattern_idx:
                 pattern_idx[pkey] = len(patterns)
                 patterns.append(pkey)
-            trips_out.append((ridx, pkey, times, trip_dow[ti]))
+            trips_out.append((ridx, pkey, times, trip_dow[ti],
+                              tuple(st[-1] for st in sts)))
             used_shapes.add(sid)
 
         # load shapes used by this feed
@@ -5400,9 +5404,9 @@ def build_schedule(feeds):
                 routes.append(dict(routes[base], n=tok))
             split_route = {s: idx[t] for s, t in moved.items()}
             for k in range(n_before, len(trips_out)):
-                ridx, pkey, times, dow = trips_out[k]
+                ridx, pkey, times, dow, fixed = trips_out[k]
                 if ridx == base and pkey[1] in split_route:
-                    trips_out[k] = (split_route[pkey[1]], pkey, times, dow)
+                    trips_out[k] = (split_route[pkey[1]], pkey, times, dow, fixed)
             print(f"  {feed} {label}: "
                   + ", ".join(f"{s}->{t}" for s, t in sorted(moved.items())))
 
@@ -5543,10 +5547,14 @@ def build_schedule(feeds):
             trip_days.append(0)
         trip_days[i] |= dows
 
-    for ridx, pkey, times, dows in trips_out:
+    for ridx, pkey, times, dows, fixed in trips_out:
         pi = pattern_idx[pkey]
         if patterns_out[pi] is None:
             continue
+        if not routes[ridx]["rail"]:
+            repaired = repair_estimates(times, fixed, patterns_out[pi])
+            stats["repaired_estimates"] += sum(a != b for a, b in zip(times, repaired))
+            times = repaired
         t0 = times[0]
         deltas = [times[k] - times[k - 1] for k in range(1, len(times))]
         emit([ridx, pi, t0] + deltas, dows)
@@ -5690,7 +5698,8 @@ def main(argv=None):
                 "TRACE_MIN", "TRACE_LO", "TRACE_HI", "TRACE_LIMIT", "ALIGN_SPACING", "ALIGN_DEG")}}
         cache = FeedCache("scratch/feed-cache", artwork,
                           ["scripts/build_data.py", "scripts/build_cache.py",
-                           "scripts/georef.py", "scripts/georef_inset.py", "scripts/schedule_check.py"],
+                           "scripts/georef.py", "scripts/georef_inset.py", "scripts/schedule_check.py",
+                           "scripts/schedule_timing.py"],
                           settings, {name: globals()[name] for name in sorted(FEED_TABLES)})
         parts, manifest = [], {}
         for name in feeds:
