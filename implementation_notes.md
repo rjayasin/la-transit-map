@@ -276,6 +276,13 @@ both path-to-corridor error and corridor coverage. Keep thresholds fixed when
 changing the fitter. The tests include a platform and allow a real U-turn.
 Run `build_test.py`, `geometry_check.py`, and `motion_test.mjs` before publishing.
 
+`schedule_timing.py` repairs fast estimated arrivals between fixed GTFS times.
+It weights the interval by displayed distance, including inset movement. Only
+explicit `timepoint=0` stops without a dwell can move; trip endpoints stay fixed.
+An interval whose fixed times require excessive speed is left unchanged.
+`timing_test.py` checks these constraints. `speed_check.py --schedule FILE`
+compares builds using the same de-tying as the client.
+
 **Source distances.** `measured_positions` accepts GTFS distances only when
 both files have complete ordered measures and every inferred stop is within
 150 m of its geographic position. Conflicting measures across a pattern's trips
