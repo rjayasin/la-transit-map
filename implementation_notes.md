@@ -274,7 +274,9 @@ all feeds. Add a table there only if it cannot affect another feed's fit.
 coordinates independently of the fitted output. `geometry_check.py` measures
 both path-to-corridor error and corridor coverage. Keep thresholds fixed when
 changing the fitter. The tests include a platform and allow a real U-turn.
-Run `build_test.py`, `geometry_check.py`, and `motion_test.mjs` before publishing.
+Run `build_test.py`, `geometry_check.py`, and `motion_test.mjs` before
+publishing. CI runs them beside the deploy rather than ahead of it, so a failing
+check marks the commit red but still publishes.
 
 `schedule_timing.py` repairs fast estimated arrivals between fixed GTFS times.
 It weights the interval by displayed distance, including inset movement. Only
