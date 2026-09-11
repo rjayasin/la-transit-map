@@ -59,6 +59,7 @@ def check(data, fixtures):
         routes = {i for i, r in enumerate(data["routes"])
                   if r["n"] == case["route"] and data["systems"][r["sy"]] == case["system"]}
         patterns = {t[1] for t in data["trips"] if t[0] in routes}
+        shapes = {data["patterns"][pi]["s"] for pi in patterns}
         if "platform" in case:
             hits = 0
             for pi in patterns:
@@ -69,7 +70,7 @@ def check(data, fixtures):
                 raise ValueError(f"{case['name']}: platform reached by only {hits} patterns")
         else:
             hits = 0
-            for si in {data["patterns"][pi]["s"] for pi in patterns}:
+            for si in shapes:
                 error = corridor_error(data["shapes"][si], case["path"], case["gate"])
                 if error is None:
                     continue
@@ -78,6 +79,16 @@ def check(data, fixtures):
                     raise ValueError(f"{case['name']}: shape {si}, off={error[0]:.2f}, uncovered={error[1]:.2f}px")
             if hits < case["min_matches"]:
                 raise ValueError(f"{case['name']}: only {hits} shapes reach the reference corridor")
+        if "min_y" in case:
+            north = [si for si in shapes
+                     if min(data["shapes"][si][1::2]) < case["min_y"] - case["tolerance"]]
+            if north:
+                raise ValueError(f"{case['name']}: shapes {north} extend north of the terminus")
+        if "max_y" in case:
+            south = [si for si in shapes
+                     if max(data["shapes"][si][1::2]) > case["max_y"] + case["tolerance"]]
+            if south:
+                raise ValueError(f"{case['name']}: shapes {south} extend south of the terminus")
         print(f"ok: {case['name']} ({hits} matches)")
 
 
