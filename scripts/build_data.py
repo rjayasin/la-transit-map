@@ -242,6 +242,7 @@ MAP_LABELS = {
     ("ladot", "4868"): "SC",        # DASH El Sereno/City Terrace
     ("ladot", "1757"): "SE",        # DASH Southeast, clockwise
     ("ladot", "1758"): "SE",        # DASH Southeast, counterclockwise
+    ("ladot", "576"): "MT",         # DASH Midtown
     ("ladot", "573"): "CR",         # DASH Crenshaw, clockwise
     ("ladot", "589"): "CR",         # DASH Crenshaw, counter-clockwise
     ("ladot", "6768"): "PA",        # DASH Pacoima, clockwise
@@ -1772,6 +1773,7 @@ PINNED_ANCHORS = {
     ("foothill", "20185"): [(2785.4, 2218.4)],
     ("metrolink", "Riverside Line"): [(1860, 2077.4)],
     ("ladot", "28"): [(1328.0, 3093.5)],
+    ("ladot", "576"): [(1389.1, 1944.5)],
     ("ladot", "573"): [(1299, 2080), (1310, 2103), (1313, 2117), (1322, 2130),
                        (1336, 2133), (1348, 2112), (1370, 2124), (1387, 2134),
                        (1417, 2134)],
@@ -1879,6 +1881,20 @@ def trim_terminus(pts, pins, with_offset=False):
 # the warp rather than against what the last one left. A spec with `shape_ids`
 # applies only to those GTFS variants.
 OVERRIDE_PATHS = {
+    ("ladot", "576"): {
+        "box": (1365, 1940, 1510, 2120),
+        "path": [
+            (1389.1, 1944.5), (1393.9, 1944.5), (1395.6, 1947.3),
+            (1373.1, 1986.4), (1372.2, 1988.0), (1373.0, 1989.2),
+            (1374.8, 1989.2), (1478.2, 1989.2), (1480.0, 1989.2),
+            (1481.5, 1990.7), (1481.5, 1992.5), (1481.5, 2028.1),
+            (1481.5, 2029.9), (1480.0, 2031.4), (1478.2, 2031.4),
+            (1387.1, 2031.4), (1385.3, 2031.4), (1383.9, 2032.8),
+            (1383.9, 2034.6), (1383.9, 2056.1), (1383.9, 2057.9),
+            (1385.3, 2059.4), (1387.1, 2059.4), (1416.8, 2059.4),
+            (1418.0, 2059.4), (1419.0, 2060.4), (1419.0, 2082.8),
+        ],
+    },
     ("culvercity", "3"): {
         "box": (1000, 1800, 1200, 1980),
         "path": [
