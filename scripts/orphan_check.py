@@ -49,14 +49,14 @@ def map_words():
 
 def route_rows(feed_names):
     """(system, label, short, long) for every route in every cached feed."""
-    from build_data import FEEDS, read_csv, route_label
+    from build_data import FEEDS, MAP_LABELS, read_csv, route_label
     out = []
     for feed in FEEDS:
         for row in read_csv(feed, "routes.txt"):
             short = (row.get("route_short_name") or "").strip()
             long_name = (row.get("route_long_name") or "").strip()
-            out.append((feed_names.get(feed, feed),
-                        route_label(short, long_name), short, long_name))
+            label = MAP_LABELS.get((feed, row["route_id"])) or route_label(short, long_name)
+            out.append((feed_names.get(feed, feed), label, short, long_name))
     return out
 
 
