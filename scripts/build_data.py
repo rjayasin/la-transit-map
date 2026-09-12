@@ -252,6 +252,23 @@ MAP_LABELS = {
     ("ladot", "798"): "NR",         # DASH Northridge
     ("ladot", "799"): "VS",         # DASH Van Nuys/Studio City, clockwise
     ("ladot", "800"): "VS",         # DASH Van Nuys/Studio City, counterclockwise
+    ("ladot", "563"): "FA",         # DASH Fairfax
+    ("ladot", "564"): "HW",         # DASH Hollywood, clockwise
+    ("ladot", "603"): "HW",         # DASH Hollywood, counterclockwise
+    ("ladot", "566"): "HE",         # DASH Highland Park/Eagle Rock
+    ("ladot", "567"): "LC",         # DASH Lincoln Heights/Chinatown, clockwise
+    ("ladot", "568"): "LC",         # DASH Lincoln Heights/Chinatown, counterclockwise
+    ("ladot", "571"): "WK",         # DASH Wilshire Center/Koreatown, clockwise
+    ("ladot", "572"): "WK",         # DASH Wilshire Center/Koreatown, counterclockwise
+    ("ladot", "574"): "KE",         # DASH King East, clockwise
+    ("ladot", "604"): "KE",         # DASH King East, counterclockwise
+    ("ladot", "575"): "LS",         # DASH Leimert/Slauson, clockwise
+    ("ladot", "605"): "LS",         # DASH Leimert/Slauson, counterclockwise
+    ("ladot", "5819"): "NH",       # DASH North Hollywood, clockwise
+    ("ladot", "5820"): "NH",       # DASH North Hollywood, counterclockwise
+    ("ladot", "715"): "VM",        # DASH Vermont/Main, clockwise
+    ("ladot", "716"): "VM",        # DASH Vermont/Main, counterclockwise
+    ("ladot", "4869"): "PE",       # DASH Pico Union/Echo Park
 }
 
 
@@ -1785,6 +1802,7 @@ PINNED_ANCHORS = {
     ("ladot", "798"): [(645, 1236), (652, 1140)],
     ("ladot", "799"): [(1032, 1472), (999, 1336), (1180, 1507)],
     ("ladot", "800"): [(1032, 1472), (999, 1336), (1180, 1507)],
+    ("ladot", "856"): [(1313, 1405)],
     ("gtrans", "7X"): [(1400.0, 2489.5), (1440.0, 2514.5), (1500.0, 2514.5),
                        (1560.0, 2514.5), (1584.0, 2552.0), (1584.0, 2590.0),
                        (1569.0, 2640.0), (1569.0, 2680.0), (1569.0, 2748.0)],
@@ -1796,6 +1814,8 @@ PINNED_ANCHORS = {
 # and pull that end onto a corridor the route never covers.
 SKIP_ANCHORS = {
     ("foothill", "10195"): [(3463.6, 1865.9), (3478.7, 1888.5)],
+    ("ladot", "571"): [(1499, 1800)],
+    ("ladot", "572"): [(1499, 1800)],
 }
 SKIP_NEAR = 6.0   # px a listed point may stand from the badge it names
 
