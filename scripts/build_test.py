@@ -69,6 +69,27 @@ class CacheTests(unittest.TestCase):
         self.assertEqual(list(self.root.glob("schedule.json.*")), [])
 
 
+class ScheduleTests(unittest.TestCase):
+    def test_block_chain_keeps_one_trip_across_multiple_splits(self):
+        def stop(seq, time, sid, measure):
+            return (seq, time, time, sid, measure, True)
+        times = {
+            "a": [stop(1, 10, "x", 0), stop(2, 20, "y", 10)],
+            "b": [stop(1, 20, "y", 0), stop(2, 30, "z", 10)],
+            "c": [stop(1, 30, "z", 0), stop(2, 40, "w", 10)],
+            "reverse": [stop(1, 40, "w", 0), stop(2, 50, "x", 10)],
+            "loop": [stop(1, 50, "x", 0), stop(2, 60, "x", 10)],
+            "next-loop": [stop(1, 60, "x", 0), stop(2, 70, "x", 10)],
+        }
+        info = {ti: ("route", "shape") for ti in times}
+        info["reverse"] = ("route", "other-shape")
+        blocks = {ti: ("service", "block") for ti in times}
+        self.assertEqual(B.chain_block_trips(times, info, blocks), 2)
+        self.assertEqual(set(times), {"a", "reverse", "loop", "next-loop"})
+        self.assertEqual([s[3] for s in times["a"]], ["x", "y", "z", "w"])
+        self.assertEqual([s[0] for s in times["a"]], [1, 2, 3, 4])
+
+
 class GeometryTests(unittest.TestCase):
     def test_override_can_target_shape_variants(self):
         full = [(0, 0), (5, 0), (10, 0)]

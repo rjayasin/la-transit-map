@@ -214,6 +214,36 @@ def parse_time(s):
     return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2] if len(parts) > 2 else 0)
 
 
+def chain_block_trips(stop_times, trip_info, trip_block):
+    """Keep a vehicle continuous across adjacent trips on the same shape."""
+    blocks = defaultdict(list)
+    for ti, sts in stop_times.items():
+        service, block = trip_block[ti]
+        if block and len(sts) >= 2:
+            sts.sort()
+            blocks[(service, block)].append(ti)
+
+    chained = 0
+    for group in blocks.values():
+        group.sort(key=lambda ti: (stop_times[ti][0][1], ti))
+        current = group[0]
+        for ti in group[1:]:
+            a, b = stop_times[current], stop_times[ti]
+            if (trip_info[current] == trip_info[ti]
+                    and a[0][3] != a[-1][3]
+                    and b[0][3] != b[-1][3]
+                    and a[-1][3] == b[0][3]
+                    and a[-1][2] == b[0][1]):
+                offset = a[-1][0] + 1 - b[1][0]
+                a.extend((seq + offset, arr, dep, sid, measure, fixed)
+                         for seq, arr, dep, sid, measure, fixed in b[1:])
+                del stop_times[ti]
+                chained += 1
+            else:
+                current = ti
+    return chained
+
+
 # Designations the sheet prints that the feed never says. Getting this wrong
 # costs twice over: a rider sees a designation the map never prints, *and* the
 # badges are the anchors, so the shape has nothing pinning it to its own drawn
@@ -4993,7 +5023,7 @@ def build_schedule(feeds):
                 {MAP_LABELS[(feed, row["route_id"])]}
                 if (feed, row["route_id"]) in MAP_LABELS else set())
 
-        trip_info, trip_dow = {}, {}
+        trip_info, trip_dow, trip_block = {}, {}, {}
         for row in trip_rows:
             if row["service_id"] not in dow_of:
                 continue
@@ -5002,6 +5032,7 @@ def build_schedule(feeds):
                 sid = METROLINK_SHAPES.get((row["route_id"], row.get("direction_id", "")), sid)
             trip_info[row["trip_id"]] = (row["route_id"], sid)
             trip_dow[row["trip_id"]] = dow_of[row["service_id"]]
+            trip_block[row["trip_id"]] = (row["service_id"], row.get("block_id", ""))
 
         def route_index(rid):
             """This feed's route, registered on first sight."""
@@ -5029,6 +5060,7 @@ def build_schedule(feeds):
                                        sid_, parse_distance(measure),
                                        timepoint.strip() != "0" or bool(dt.strip() and at != dt)))
 
+        chained = chain_block_trips(stop_times, trip_info, trip_block)
         n_before = len(trips_out)
         used_shapes = set()
         for ti, sts in stop_times.items():
@@ -5552,7 +5584,8 @@ def build_schedule(feeds):
         stats[feed] = n_trips
         picked = [d for d in days if d]
         print(f"{feed}: {n_trips} trips over {min(picked)}..{max(picked)} "
-              f"({snapped}/{len(warped)} shapes snapped, {anchored} anchored)")
+              f"({chained} chained, {snapped}/{len(warped)} shapes snapped, "
+              f"{anchored} anchored)")
 
     # finalize shapes + cumulative dists (including stop-derived pseudo-shapes)
     shapes_out, cums, shape_index = [], [], {}
