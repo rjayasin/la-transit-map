@@ -422,6 +422,16 @@ to where they agree. An edge set to one shape's reading puts the other's first
 in-box point behind its own neighbour, which is a fold rather than the along-line
 shift a straight stretch forgives.
 
+Where they disagree by tens of px there is no edge that works, and the split is
+what `shape_ids` is for even though the shapes run the same drawn line. The
+disagreement is the snap distributing the sheet's compression its own way on
+each variant, so measure it before designing the box: walk both warps by arc
+from a shared end and print the snapped point at matching arcs. A gap that
+grows to tens of px means one variant is covering a fraction of the drawn
+stretch the other covers, and each then needs its own box and path ends. The
+box the two would otherwise share puts one variant's entry point past the far
+end of the path.
+
 ## Verifying a change
 
 The build is deterministic: same inputs, byte-identical `schedule.json`. Diff
