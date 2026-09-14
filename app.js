@@ -65,6 +65,7 @@ let pathTrip = -1;      // index into trips whose path is shown, or -1
 // palette instead; magenta is what scripts/debug_line.py reaches for first, so
 // the browser and the offline tool draw a path the same way.
 const PATH_INK = "#FF00FF";
+const PATH_ALPHA = 0.55;
 let lastFrame = performance.now();
 const speedSel = document.getElementById("speed");
 const scrub = document.getElementById("scrub");
@@ -1940,6 +1941,7 @@ function drawFrame(now) {
   if (pathTrip >= 0) {
     const tr = trips[pathTrip], pat = tr && data.patterns[tr.p];
     if (pat && sysOn[data.routes[tr.r].sy]) {
+      ctx.globalAlpha = PATH_ALPHA;
       ctx.lineJoin = ctx.lineCap = "round";
       const stroke = shape => {
         ctx.lineWidth = 8 / view.k; ctx.strokeStyle = "rgba(0,0,0,.7)"; strokeShape(shape);
@@ -1955,6 +1957,7 @@ function drawFrame(now) {
         for (const run of runs) if (run) stroke(run);
         ctx.restore();
       }
+      ctx.globalAlpha = 1;
     } else pathTrip = -1;   // the trip's system was filtered out
   }
 
