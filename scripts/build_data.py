@@ -1120,23 +1120,6 @@ LEGEND_INK = {
 # nearer the blue the sheet fills its rivers with than its own colour, 22
 # against 28.
 #
-# Long Beach Transit is here for a different reason: its mask holds its own ink
-# perfectly well, 0.4 px at the median. What it also holds is the badges. The
-# sheet stacks a chip per route along every shared corridor, in the line colour,
-# so beside each one the mask carries a block of colour a dozen px deep. A fit
-# that cuts the corner lands on that block and reads as landed: at the Santa Fe
-# corner below Del Amo the shapes sat 1 px from the mask and 9 from the line.
-# That is the split the Metro branch makes below, for the same reason.
-#
-# Culver CityBus is the same fault reached from the other end. Its pale
-# yellow-green is light enough that map.png reads most of the network as the
-# page it is laid over, so the refinement settles on that blend (220,201,146)
-# rather than on the stroke, and 64% of the drawn strokes then fall outside the
-# mask's tolerance of it. What the mask does hold is the fringe either side of a
-# line, and the fringe of whatever is drawn beside it: a shape can sit a
-# corridor's width off its own line, on the antialiasing of a neighbour's, and
-# be on the mask the whole way.
-#
 # The PDF has the same lines as vectors, thin and thick alike, complete under
 # every label painted over them and with no chips or lettering in them at all.
 # drift_check measures these agencies on those strokes for the same reason.

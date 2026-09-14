@@ -65,10 +65,6 @@ let pathTrip = -1;      // index into trips whose path is shown, or -1
 // palette instead; magenta is what scripts/debug_line.py reaches for first, so
 // the browser and the offline tool draw a path the same way.
 const PATH_INK = "#FF00FF";
-// The path is there to be read *against* the artwork, so it is laid on at less
-// than full strength. At full opacity a 4.5 px stroke covers the drawn line it
-// is being compared with, and the streets either side of it, which is the
-// comparison the inspector exists to make.
 const PATH_ALPHA = 0.55;
 let lastFrame = performance.now();
 const speedSel = document.getElementById("speed");
