@@ -1123,7 +1123,8 @@ LEGEND_INK = {
 # The PDF has the same lines as vectors, thin and thick alike, complete under
 # every label painted over them and with no chips or lettering in them at all.
 # drift_check measures these agencies on those strokes for the same reason.
-INK_SNAP = {"montebello", "bigbluebus", "foothill", "norwalk"}
+INK_SNAP = {"montebello", "bigbluebus", "foothill", "norwalk",
+            "culvercity", "longbeach"}
 
 
 def refine_color(shape_pts, seed, r2=55 * 55, need=250):
@@ -1799,6 +1800,7 @@ PINNED_ANCHORS = {
     ("foothill", "20270"): [(2684.3, 1426.0)],
     ("foothill", "20284"): [(3209.0, 1712.0), (3236.0, 1695.5)],
     ("longbeach", "131"): [(2113, 3320)],
+    ("longbeach", "405"): [(1990.0, 3071.1), (2030.0, 3071.1)],
     ("longbeach", "111"): [(2146, 2880)],
     ("longbeach", "61"): [(1930, 2752.2)],
     ("longbeach", "51"): [(1893, 2751)],
@@ -1932,6 +1934,25 @@ def trim_terminus(pts, pins, with_offset=False):
 # the warp rather than against what the last one left. A spec with `shape_ids`
 # applies only to those GTFS variants.
 OVERRIDE_PATHS = {
+    ("ladot", "4577"): {
+        "box": (1495, 1520, 1548, 1600),
+        "path": [
+            (1548.84, 1563.64), (1548.27, 1563.60), (1547.72, 1563.48),
+            (1547.21, 1563.28), (1546.74, 1563.02), (1546.31, 1562.69),
+            (1545.93, 1562.31), (1545.60, 1561.88), (1545.34, 1561.41),
+            (1545.14, 1560.90), (1545.02, 1560.35), (1544.98, 1559.78),
+            (1544.98, 1556.45), (1544.98, 1553.45), (1544.98, 1550.45),
+            (1544.98, 1547.45), (1544.98, 1544.45), (1544.98, 1541.45),
+            (1544.98, 1538.45), (1544.98, 1535.74), (1544.93, 1535.04),
+            (1544.78, 1534.37), (1544.54, 1533.74), (1544.22, 1533.16),
+            (1543.82, 1532.63), (1543.35, 1532.17), (1542.82, 1531.77),
+            (1542.24, 1531.44), (1541.61, 1531.20), (1540.95, 1531.06),
+            (1540.25, 1531.00), (1537.25, 1531.00), (1534.25, 1531.00),
+            (1531.25, 1531.00), (1528.25, 1531.00), (1525.25, 1531.00),
+            (1522.25, 1531.00), (1519.25, 1531.00), (1516.25, 1531.00),
+            (1513.25, 1531.00), (1512.14, 1531.00),
+        ],
+    },
     ("ladot", "576"): {
         "box": (1365, 1940, 1510, 2120),
         "path": [
