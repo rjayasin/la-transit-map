@@ -1120,10 +1120,20 @@ LEGEND_INK = {
 # nearer the blue the sheet fills its rivers with than its own colour, 22
 # against 28.
 #
+# Culver CityBus is the same fault reached from the other end. Its pale
+# yellow-green is light enough that map.png reads most of the network as the
+# page it is laid over, so the refinement settles on that blend (220,201,146)
+# rather than on the stroke, and 64% of the drawn strokes then fall outside the
+# mask's tolerance of it. What the mask does hold is the fringe either side of a
+# line, and the fringe of whatever is drawn beside it: a shape can sit a
+# corridor's width off its own line, on the antialiasing of a neighbour's, and
+# be on the mask the whole way.
+#
 # The PDF has the same lines as vectors, thin and thick alike, complete under
 # every label painted over them and with no chips or lettering in them at all.
 # drift_check measures these agencies on those strokes for the same reason.
-INK_SNAP = {"montebello", "bigbluebus", "foothill", "norwalk"}
+INK_SNAP = {"montebello", "bigbluebus", "foothill", "norwalk",
+            "culvercity"}
 
 
 def refine_color(shape_pts, seed, r2=55 * 55, need=250):
