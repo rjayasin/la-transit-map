@@ -1845,6 +1845,7 @@ PINNED_ANCHORS = {
 # in map px. Standing within ANCHOR_GATE of an end of the shape, they anchor it
 # and pull that end onto a corridor the route never covers.
 SKIP_ANCHORS = {
+    ("gtfs_bus", "108"): [(2104.9, 2190.6)],
     ("foothill", "10195"): [(3463.6, 1865.9), (3478.7, 1888.5)],
     ("ladot", "571"): [(1499, 1800)],
     ("ladot", "572"): [(1499, 1800)],
@@ -2113,6 +2114,25 @@ OVERRIDE_PATHS = {
             (1226.76, 2837.14),
         ],
     }],
+    ("beachcities", "4815"): {
+        "shape_ids": ("27992",),
+        "box": (1192, 2630, 1216, 2652),
+        "path": [
+            (1160.00, 2567.22), (1169.00, 2567.22), (1169.89, 2567.29),
+            (1170.76, 2567.48), (1171.58, 2567.80), (1172.34, 2568.22),
+            (1173.04, 2568.74), (1173.65, 2569.36), (1174.17, 2570.05),
+            (1174.59, 2570.81), (1174.91, 2571.63), (1175.10, 2572.51),
+            (1175.17, 2573.42), (1175.17, 2594.22), (1175.10, 2595.13),
+            (1174.91, 2596.01), (1174.59, 2596.83), (1174.17, 2597.59),
+            (1173.65, 2598.28), (1173.04, 2598.90), (1172.35, 2599.42),
+            (1171.58, 2599.84), (1170.76, 2600.15), (1169.89, 2600.35),
+            (1168.97, 2600.42), (1148.47, 2600.42), (1147.92, 2600.46),
+            (1147.39, 2600.58), (1146.89, 2600.76), (1146.43, 2601.02),
+            (1146.02, 2601.34), (1145.65, 2601.71), (1145.33, 2602.12),
+            (1145.08, 2602.58), (1144.89, 2603.08), (1144.77, 2603.61),
+            (1144.73, 2604.16), (1144.73, 2612.50),
+        ],
+    },
     ("foothill", "20188"): {
         "box": (3758, 1648, 3845, 1730),
         "path": [
@@ -3982,7 +4002,7 @@ def solid_pixels(tree):
 
 def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
                   anchor_gate=ANCHOR_GATE, min_frac=0.5, tail=(10.0, 11), region="main",
-                  speckled=True, sole=False):
+                  speckled=True, sole=False, aim=None):
     """Snap a warped polyline onto a drawn-line mask. The displacement field is
     smoothed along the line so whole stretches move to the same drawn street
     instead of individual points grabbing different parallels. Returns None if
@@ -4082,11 +4102,12 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
         if used and default_caps:
             caps = (26.0, 14.0)            # anchors pin the street; stay tight
     idx = np.arange(n)
+    qt = tree if aim is None else aim
     passes = [(cap, win) for cap in caps] + ([tail] if tail else [])
     for ci, (cap, pwin) in enumerate(passes):
         pwin = min(pwin, max(3, (n // 2) * 2 - 1))
         is_tail = bool(tail) and ci == len(passes) - 1
-        d, j = tree.query(P)
+        d, j = qt.query(P)
         # A point where no mask could hold artwork is not a point that failed to
         # find any: it is one the sheet never drew. Interpolating a correction
         # into it carries the last one the line had off into blank page, and
@@ -4108,7 +4129,7 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
                 break                      # nothing close enough to refine; keep it
             return None
         disp = np.full((n, 2), np.nan)
-        disp[ok] = tree.data[j[ok]] - P[ok]
+        disp[ok] = qt.data[j[ok]] - P[ok]
         k = np.ones(pwin) / pwin
         for c in (0, 1):
             col = np.interp(idx, idx[~np.isnan(disp[:, c])], disp[:, c][~np.isnan(disp[:, c])])
@@ -4116,11 +4137,11 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
                 col[~cov] = 0.0
             disp[:, c] = np.convolve(np.pad(col, pwin // 2, mode="edge"), k, "valid")
         P = P + disp
-    d, j = tree.query(P)                   # final tight snap + light smoothing
+    d, j = qt.query(P)                     # final tight snap + light smoothing
     ok = (d < 8) & (maskable(P, region) | sole)
     if speckled:
-        ok &= solid_pixels(tree)[j]        # onto artwork, never onto a speck
-    P[ok] = tree.data[j[ok]]
+        ok &= solid_pixels(qt)[j]          # onto artwork, never onto a speck
+    P[ok] = qt.data[j[ok]]
     k = np.ones(7) / 7
     for c in (0, 1):
         P[:, c] = np.convolve(np.pad(P[:, c], 3, mode="edge"), k, "valid")
@@ -5386,7 +5407,8 @@ def build_schedule(feeds):
                     anchored += bool(anc)
                     can_refit = True
                     out_pts = snap_recording(pts, tree, anchors=anc, caps=RAIL_CAPS,
-                                            win=RAIL_WIN, speckled=False)
+                                            win=RAIL_WIN, speckled=False,
+                                            aim=rail_dir_tree(tree))
             elif feed == "ladot":
                 # LADOT's two liveries are two stroke styles of one olive ink,
                 # DASH solid and Commuter Express dashed, so each snaps to its
