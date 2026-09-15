@@ -117,6 +117,10 @@ off its drawing is one of three things.
   smoothed along the line, so the corner's radius is the smoothing window's.
   The last and tightest pass of the ladder is what fixes that.
 
+Metrolink is not in this. It snaps through `snap_coherent`, anchored by the line
+name the sheet writes along the track, so both tables reach it. Its passes read
+the same directional tree, handed in as `snap_coherent`'s `aim`.
+
 ## Hand-tuned tables
 
 Everything the artwork can't settle on its own is named in a table near the code

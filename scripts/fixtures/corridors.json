@@ -137,5 +137,10 @@
     "name": "Metro 108 Slauson Av through the Eastern Av corner",
     "system": "Metro Bus", "route": "108", "gate": 4, "tolerance": 3, "min_matches": 2,
     "path": [[2000,2224.2],[2059.3,2224.2],[2194,2302]]
+  },
+  {
+    "name": "Metrolink VC Chatsworth corner",
+    "system": "Metrolink", "route": "VC", "gate": 4, "tolerance": 3, "min_matches": 2,
+    "path": [[360,939.5],[413.3,939.5],[422.7,940.8],[431,944.7],[437.9,950.7],[442.9,958.4],[445.6,967.3],[446,972.2],[446,1024.5],[447.3,1034.2],[451.1,1043.5],[456.9,1051.9],[464.4,1058.7],[473,1063.6]]
   }
 ]

@@ -3985,7 +3985,7 @@ def solid_pixels(tree):
 
 def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
                   anchor_gate=ANCHOR_GATE, min_frac=0.5, tail=(10.0, 11), region="main",
-                  speckled=True, sole=False):
+                  speckled=True, sole=False, aim=None):
     """Snap a warped polyline onto a drawn-line mask. The displacement field is
     smoothed along the line so whole stretches move to the same drawn street
     instead of individual points grabbing different parallels. Returns None if
@@ -4027,6 +4027,13 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
 
     speckled: whether the tree came out of the raster, and so needs the final
     landing guarded against stray pixels. A tree of PDF strokes does not.
+
+    aim: the tree the displacement passes read, where that is not the tree the
+    anchors walk. A directional tree (`rail_dir_tree`) rejects drawn line more
+    than a bin or so off the shape's own heading, which is what turns a corner
+    the warp cuts: the limb the shape is not on is the nearer of the two all the
+    way up to the turn, and undirected it claims the whole run. The walks keep
+    the plain tree, since a lattice cell arrives with no heading to match on.
 
     sole: the mask holds this one route's drawn line and nothing else, so
     whatever it finds is this route's, and the regions the mask skips stop being
@@ -4085,11 +4092,12 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
         if used and default_caps:
             caps = (26.0, 14.0)            # anchors pin the street; stay tight
     idx = np.arange(n)
+    qt = tree if aim is None else aim
     passes = [(cap, win) for cap in caps] + ([tail] if tail else [])
     for ci, (cap, pwin) in enumerate(passes):
         pwin = min(pwin, max(3, (n // 2) * 2 - 1))
         is_tail = bool(tail) and ci == len(passes) - 1
-        d, j = tree.query(P)
+        d, j = qt.query(P)
         # A point where no mask could hold artwork is not a point that failed to
         # find any: it is one the sheet never drew. Interpolating a correction
         # into it carries the last one the line had off into blank page, and
@@ -4111,7 +4119,7 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
                 break                      # nothing close enough to refine; keep it
             return None
         disp = np.full((n, 2), np.nan)
-        disp[ok] = tree.data[j[ok]] - P[ok]
+        disp[ok] = qt.data[j[ok]] - P[ok]
         k = np.ones(pwin) / pwin
         for c in (0, 1):
             col = np.interp(idx, idx[~np.isnan(disp[:, c])], disp[:, c][~np.isnan(disp[:, c])])
@@ -4119,11 +4127,11 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
                 col[~cov] = 0.0
             disp[:, c] = np.convolve(np.pad(col, pwin // 2, mode="edge"), k, "valid")
         P = P + disp
-    d, j = tree.query(P)                   # final tight snap + light smoothing
+    d, j = qt.query(P)                     # final tight snap + light smoothing
     ok = (d < 8) & (maskable(P, region) | sole)
     if speckled:
-        ok &= solid_pixels(tree)[j]        # onto artwork, never onto a speck
-    P[ok] = tree.data[j[ok]]
+        ok &= solid_pixels(qt)[j]          # onto artwork, never onto a speck
+    P[ok] = qt.data[j[ok]]
     k = np.ones(7) / 7
     for c in (0, 1):
         P[:, c] = np.convolve(np.pad(P[:, c], 3, mode="edge"), k, "valid")
@@ -5388,8 +5396,11 @@ def build_schedule(feeds):
                     anc = line_name_anchors(rid or "", tree) + pins
                     anchored += bool(anc)
                     can_refit = True
+                    # A railroad turns corners the schematic redraws a block
+                    # away, so the passes read the track by heading (`aim`).
                     out_pts = snap_recording(pts, tree, anchors=anc, caps=RAIL_CAPS,
-                                            win=RAIL_WIN, speckled=False)
+                                            win=RAIL_WIN, speckled=False,
+                                            aim=rail_dir_tree(tree))
             elif feed == "ladot":
                 # LADOT's two liveries are two stroke styles of one olive ink,
                 # DASH solid and Commuter Express dashed, so each snaps to its
