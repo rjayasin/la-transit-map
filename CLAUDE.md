@@ -55,6 +55,10 @@ user watching) go through review rather than landing directly.
 
 - **A merged PR is finished.** Never add commits on top of merged history and
   never reuse or reopen a merged PR. Treat follow-up work as a fresh change.
+- **Commit as `rjayasin <rjayasin@users.noreply.github.com>`.** That is the
+  address the rest of the history carries. A sandbox's own git identity, or an
+  address taken from anywhere else, attributes the commit to whichever GitHub
+  account owns that email.
 
 ## Documentation and comments
 
