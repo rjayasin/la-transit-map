@@ -1842,9 +1842,12 @@ PINNED_ANCHORS = {
 
 
 # Badges the sheet prints for a route on a stretch its GTFS shapes don't run,
-# in map px. Standing within ANCHOR_GATE of an end of the shape, they anchor it
-# and pull that end onto a corridor the route never covers.
+# in map px. Standing within ANCHOR_GATE of the shape, they anchor it and pull
+# it onto a corridor the route never covers. A badge on a drawn stub only some
+# variants approach is the same fault where the warp stands off the drawing:
+# branch_anchors then reads every variant as near enough to keep it.
 SKIP_ANCHORS = {
+    ("gtfs_bus", "108"): [(2104.9, 2190.6)],
     ("foothill", "10195"): [(3463.6, 1865.9), (3478.7, 1888.5)],
     ("ladot", "571"): [(1499, 1800)],
     ("ladot", "572"): [(1499, 1800)],

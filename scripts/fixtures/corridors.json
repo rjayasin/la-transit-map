@@ -132,5 +132,10 @@
   {
     "name": "C Line Hawthorne/Lennox platform",
     "system": "Metro Rail", "route": "C", "platform": [1319,2474], "tolerance": 5, "min_matches": 2
+  },
+  {
+    "name": "Metro 108 Slauson Av through the Eastern Av corner",
+    "system": "Metro Bus", "route": "108", "gate": 4, "tolerance": 3, "min_matches": 2,
+    "path": [[2000,2224.2],[2059.3,2224.2],[2194,2302]]
   }
 ]
