@@ -1842,10 +1842,8 @@ PINNED_ANCHORS = {
 
 
 # Badges the sheet prints for a route on a stretch its GTFS shapes don't run,
-# in map px. Standing within ANCHOR_GATE of the shape, they anchor it and pull
-# it onto a corridor the route never covers. A badge on a drawn stub only some
-# variants approach is the same fault where the warp stands off the drawing:
-# branch_anchors then reads every variant as near enough to keep it.
+# in map px. Standing within ANCHOR_GATE of an end of the shape, they anchor it
+# and pull that end onto a corridor the route never covers.
 SKIP_ANCHORS = {
     ("gtfs_bus", "108"): [(2104.9, 2190.6)],
     ("foothill", "10195"): [(3463.6, 1865.9), (3478.7, 1888.5)],
@@ -4047,13 +4045,6 @@ def snap_coherent(pts, tree, caps=None, win=61, anchors=None,
     speckled: whether the tree came out of the raster, and so needs the final
     landing guarded against stray pixels. A tree of PDF strokes does not.
 
-    aim: the tree the displacement passes read, where that is not the tree the
-    anchors walk. A directional tree (`rail_dir_tree`) rejects drawn line more
-    than a bin or so off the shape's own heading, which is what turns a corner
-    the warp cuts: the limb the shape is not on is the nearer of the two all the
-    way up to the turn, and undirected it claims the whole run. The walks keep
-    the plain tree, since a lattice cell arrives with no heading to match on.
-
     sole: the mask holds this one route's drawn line and nothing else, so
     whatever it finds is this route's, and the regions the mask skips stop being
     a reason to leave a point where it is. Ordinarily they are: a point the
@@ -5415,8 +5406,6 @@ def build_schedule(feeds):
                     anc = line_name_anchors(rid or "", tree) + pins
                     anchored += bool(anc)
                     can_refit = True
-                    # A railroad turns corners the schematic redraws a block
-                    # away, so the passes read the track by heading (`aim`).
                     out_pts = snap_recording(pts, tree, anchors=anc, caps=RAIL_CAPS,
                                             win=RAIL_WIN, speckled=False,
                                             aim=rail_dir_tree(tree))
