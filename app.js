@@ -170,6 +170,8 @@ panelCss.textContent = `
   #filters .hint { opacity: .7; margin: 8px 0 10px; padding-bottom: 10px;
                    border-bottom: 1px solid rgba(255,255,255,.25); }
   #bar :disabled { opacity: .35; }
+  /* Stops iOS Safari double-tap zoom on the controls; taps, drags and pinch still work. */
+  #bar, #filters, #bar *, #filters * { touch-action: manipulation; }
 `;
 document.head.append(panelCss);
 sysBtn.onclick = () => {
