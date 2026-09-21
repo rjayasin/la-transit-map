@@ -22,6 +22,10 @@ python3 -m http.server 8741
   two-finger swipe pans, pinch zooms. A mouse wheel zooms.
 - **Tap a vehicle** to trace the line it runs, on the map or inside the
   Downtown call-out. Tap another to switch, empty space to clear.
+- **Find a line.** ⌘F (Ctrl+F) opens a search box. Type a designation and
+  press Enter to zoom to that line and highlight it. The arrow keys pick
+  between systems that share a designation. Escape closes the box, and a second
+  Escape clears the highlight.
 - **URL params.** `?t=8:30&speed=150&paused=1`, or `?live` to open live.
 
 ## How it works

@@ -89,6 +89,7 @@ scrub.oninput = () => { simT = +scrub.value; };
 // space always plays/pauses, and never re-activates the last-clicked control
 addEventListener("keydown", e => {
   if (e.code !== "Space" || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.target.id === "find") return;   // a space typed into the find box
   e.preventDefault();
   togglePlay();
 });
@@ -155,6 +156,7 @@ const bar = document.getElementById("bar");
 const filtersEl = document.getElementById("filters");
 const sysBtn = document.getElementById("sys");
 let sysOn = [];
+let sysBoxes = [];      // the popover's per-system checkboxes, by system index
 // index.html has to stay byte-identical across deploys, so markup added since
 // brings its own styles, since a cached copy would not carry them.
 sysBtn.title = "view mode & transit systems";
@@ -246,6 +248,7 @@ function buildFilters(systems) {
   const boxes = systems.map((name, i) => {
     const cb = document.createElement("input");
     cb.type = "checkbox"; cb.checked = true;
+    sysBoxes[i] = cb;
     cb.onchange = () => {
       sysOn[i] = cb.checked;
       const on = sysOn.filter(Boolean).length;
@@ -1041,7 +1044,202 @@ function pickVehicle(cx, cy) {
 // reading a frozen one. Only another tap (or filtering the system out) clears it.
 function handleTap(cx, cy) {
   pathTrip = pickVehicle(cx, cy);
+  findShapes = null;
 }
+
+// ---- find a line ----
+// ⌘F / Ctrl+F opens a box over the map. Enter on a designation highlights every
+// shape that line runs and flies the view to fit them. The browser's own find
+// has nothing to search on a canvas, so the shortcut is taken over.
+let findShapes = null;   // shape indices of the found line, or null
+let findLabel = "";      // "720 · Metro Bus", for the stats line
+let findSy = -1;         // the found line's system
+let flight = null;       // {from, to, t0} view animation, or null
+const FLY_MS = 700;
+const findCss = document.createElement("style");
+findCss.textContent = `
+  #findbox { position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+             width: min(320px, calc(100vw - 32px)); box-sizing: border-box;
+             background: rgba(20,20,25,.92); color: #fff; border-radius: 12px;
+             padding: 8px; display: none; backdrop-filter: blur(6px);
+             box-shadow: 0 4px 18px rgba(0,0,0,.3); font-size: 14px; }
+  #findbox.open { display: block; }
+  #find { width: 100%; box-sizing: border-box; background: rgba(255,255,255,.12);
+          color: #fff; border: 0; border-radius: 8px; padding: 8px 10px;
+          font: inherit; font-size: 16px; outline: none; }
+  #find::placeholder { color: rgba(255,255,255,.5); }
+  #findbox ul { list-style: none; margin: 6px 0 0; padding: 0; max-height: 40vh;
+                overflow-y: auto; }
+  #findbox li { padding: 6px 10px; border-radius: 6px; cursor: pointer;
+                display: flex; gap: 10px; align-items: baseline; }
+  #findbox li b { min-width: 3em; }
+  #findbox li span { opacity: .7; font-size: 13px; }
+  #findbox li[aria-selected=true] { background: #e8a33d; color: #201800; }
+  #findbox li[aria-selected=true] span { opacity: .8; }
+  #findbox .none { padding: 6px 10px; opacity: .7; }
+`;
+document.head.append(findCss);
+const findBox = document.createElement("div");
+findBox.id = "findbox";
+const findInput = document.createElement("input");
+findInput.id = "find";
+findInput.type = "text";
+findInput.placeholder = "Find a line: 720, NH, A…";
+findInput.autocomplete = "off";
+findInput.spellcheck = false;
+const findList = document.createElement("ul");
+findBox.append(findInput, findList);
+document.body.append(findBox);
+
+// One entry per designation and system. A line the feed splits into several
+// routes (a clockwise and a counterclockwise loop) is one entry with the shapes
+// of all of them.
+let findIndex = null;
+function buildFindIndex() {
+  const byKey = new Map();
+  const routeShapes = data.routes.map(() => new Set());
+  for (const t of data.trips) {
+    const pat = data.patterns[t[1]];
+    if (pat) routeShapes[t[0]].add(pat.s);
+  }
+  data.routes.forEach((r, i) => {
+    const key = `${r.n}\u0000${r.sy}`;
+    let e = byKey.get(key);
+    if (!e) byKey.set(key, e = { n: r.n, norm: normLine(r.n), sy: r.sy, shapes: new Set() });
+    for (const s of routeShapes[i]) e.shapes.add(s);
+  });
+  findIndex = [...byKey.values()].filter(e => e.shapes.size);
+}
+function normLine(s) { return s.toUpperCase().replace(/[\s\-]+/g, ""); }
+
+let findHits = [], findSel = 0;
+function findMatches(q) {
+  const n = normLine(q);
+  if (!n || !findIndex) return [];
+  // exact designations first, then ones that start with the query; each in the
+  // order the systems are listed, so Metro comes before a municipal namesake
+  const rank = e => e.norm === n ? 0 : e.norm.startsWith(n) ? 1 : 2;
+  return findIndex.filter(e => rank(e) < 2)
+    .sort((a, b) => rank(a) - rank(b) || a.sy - b.sy
+                    || a.norm.length - b.norm.length || a.norm.localeCompare(b.norm))
+    .slice(0, 12);
+}
+function renderFindList() {
+  findList.textContent = "";
+  if (!findInput.value.trim()) return;
+  if (!findHits.length) {
+    const li = document.createElement("li");
+    li.className = "none"; li.textContent = "No line with that designation";
+    findList.append(li);
+    return;
+  }
+  findHits.forEach((e, i) => {
+    const li = document.createElement("li");
+    li.setAttribute("aria-selected", String(i === findSel));
+    const b = document.createElement("b"); b.textContent = e.n;
+    const sp = document.createElement("span"); sp.textContent = data.systems[e.sy];
+    li.append(b, sp);
+    li.onmousedown = ev => { ev.preventDefault(); chooseFind(e); };
+    findList.append(li);
+  });
+  findList.children[findSel]?.scrollIntoView({ block: "nearest" });
+}
+findInput.addEventListener("input", () => {
+  findHits = findMatches(findInput.value);
+  findSel = 0;
+  renderFindList();
+});
+findInput.addEventListener("keydown", e => {
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    if (!findHits.length) return;
+    findSel = (findSel + (e.key === "ArrowDown" ? 1 : findHits.length - 1)) % findHits.length;
+    renderFindList();
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    if (findHits[findSel]) chooseFind(findHits[findSel]);
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    closeFind();
+  }
+});
+findInput.addEventListener("blur", () => closeFind());
+
+function openFind() {
+  if (!data) return;
+  if (!findIndex) buildFindIndex();
+  findBox.classList.add("open");
+  findInput.focus();
+  findInput.select();
+  findHits = findMatches(findInput.value);
+  findSel = 0;
+  renderFindList();
+}
+function closeFind() {
+  findBox.classList.remove("open");
+  if (document.activeElement === findInput) findInput.blur();
+}
+addEventListener("keydown", e => {
+  if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "f") {
+    e.preventDefault();
+    openFind();
+  } else if (e.key === "Escape" && !findBox.classList.contains("open") && findShapes) {
+    findShapes = null;   // a second Escape drops the highlight
+  }
+});
+
+function chooseFind(e) {
+  closeFind();
+  // a line whose system is filtered out would highlight nothing; show it
+  if (!sysOn[e.sy] && sysBoxes[e.sy]) {
+    sysBoxes[e.sy].checked = true;
+    sysBoxes[e.sy].dispatchEvent(new Event("change"));
+  }
+  findShapes = [...e.shapes];
+  findSy = e.sy;
+  findLabel = `${e.n} · ${data.systems[e.sy]}`;
+  pathTrip = -1;
+  flyToShapes(findShapes);
+}
+
+// Fit the shapes' bounding box in the window, less a margin and the control
+// bar, zoomed no deeper than a street-level view.
+const FIND_PAD = 48, FIND_BAR = 72, FIND_MAX_K = 3;
+function flyToShapes(ids) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const s of ids) {
+    const p = shapes[s].pts;
+    for (let i = 0; i < p.length; i += 2) {
+      if (p[i] < x0) x0 = p[i]; if (p[i] > x1) x1 = p[i];
+      if (p[i+1] < y0) y0 = p[i+1]; if (p[i+1] > y1) y1 = p[i+1];
+    }
+  }
+  if (!(x1 >= x0)) return;
+  const aw = Math.max(1, W - 2 * FIND_PAD), ah = Math.max(1, H - FIND_BAR - 2 * FIND_PAD);
+  const k = Math.min(FIND_MAX_K, 8 / DPR, aw / Math.max(1, x1 - x0), ah / Math.max(1, y1 - y0));
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+  const to = { k, x: cx - W / 2 / k, y: cy - (H - FIND_BAR) / 2 / k };
+  flight = { from: { ...view }, to, t0: performance.now() };
+}
+
+// Advance the flight one frame. Zoom is interpolated in log scale, so each
+// frame zooms by the same factor, and the center moves in a straight line.
+function stepFlight(now) {
+  if (!flight) return;
+  const { from, to, t0 } = flight;
+  const u = Math.min(1, (now - t0) / FLY_MS);
+  const e = u < 0.5 ? 4 * u * u * u : 1 - (-2 * u + 2) ** 3 / 2;
+  const k = from.k * (to.k / from.k) ** e;
+  const fcx = from.x + W / 2 / from.k, fcy = from.y + H / 2 / from.k;
+  const tcx = to.x + W / 2 / to.k, tcy = to.y + H / 2 / to.k;
+  view.k = k;
+  view.x = fcx + (tcx - fcx) * e - W / 2 / k;
+  view.y = fcy + (tcy - fcy) * e - H / 2 / k;
+  if (u >= 1) flight = null;
+}
+// Any hand on the map takes the view back.
+for (const ev of ["mousedown", "wheel", "touchstart", "gesturestart"])
+  cv.addEventListener(ev, () => { flight = null; }, { passive: true });
 
 // ---- diagnostics ----
 // The next frame is scheduled whatever happens, so a throwing frame is a dropped
@@ -1887,6 +2085,25 @@ function frame(now) {
 // which it should be played.
 const MAX_STEP_SEC = 0.25;   // 4 fps; below this, real frame pacing is preserved
 
+function highlightShapes(ids) {
+  ctx.globalAlpha = PATH_ALPHA;
+  ctx.lineJoin = ctx.lineCap = "round";
+  const stroke = shape => {
+    ctx.lineWidth = 8 / view.k; ctx.strokeStyle = "rgba(0,0,0,.7)"; strokeShape(shape);
+    ctx.lineWidth = 4.5 / view.k; ctx.strokeStyle = PATH_INK; strokeShape(shape);
+  };
+  for (const s of ids) stroke(shapes[s]);
+  if (insetRect && ids.some(s => insetRuns[s])) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(insetRect[0], insetRect[1], insetRect[2] - insetRect[0], insetRect[3] - insetRect[1]);
+    ctx.clip();
+    for (const s of ids) for (const run of insetRuns[s] || []) if (run) stroke(run);
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+}
+
 function drawFrame(now) {
   const dt = Math.min(MAX_STEP_SEC, Math.max(0, (now - lastFrame) / 1000));
   lastFrame = now;
@@ -1908,6 +2125,7 @@ function drawFrame(now) {
     scrub.value = simT | 0;
   }
   showDay(laDay());   // both modes play today, whichever day today has become
+  stepFlight(now);
   // Whether tiles may be fetched this frame; see getTile. Decided once, here,
   // so every lookup in the frame agrees, and so the moment the view lands can be
   // seen: nothing has changed at that instant, so composeBackground would skip,
@@ -1939,28 +2157,15 @@ function drawFrame(now) {
   ctx.fillText(`${hh}:${mm}`, 240, 3590);
 
   // path inspector: stroke the whole line the selected vehicle runs (and its
-  // downtown mirror), so its variant reads against the artwork
+  // downtown mirror), so its variant reads against the artwork. A found line
+  // is drawn the same way, every shape it runs.
   if (pathTrip >= 0) {
     const tr = trips[pathTrip], pat = tr && data.patterns[tr.p];
-    if (pat && sysOn[data.routes[tr.r].sy]) {
-      ctx.globalAlpha = PATH_ALPHA;
-      ctx.lineJoin = ctx.lineCap = "round";
-      const stroke = shape => {
-        ctx.lineWidth = 8 / view.k; ctx.strokeStyle = "rgba(0,0,0,.7)"; strokeShape(shape);
-        ctx.lineWidth = 4.5 / view.k; ctx.strokeStyle = PATH_INK; strokeShape(shape);
-      };
-      stroke(shapes[pat.s]);
-      const runs = insetRuns[pat.s];
-      if (runs && insetRect) {
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(insetRect[0], insetRect[1], insetRect[2] - insetRect[0], insetRect[3] - insetRect[1]);
-        ctx.clip();
-        for (const run of runs) if (run) stroke(run);
-        ctx.restore();
-      }
-      ctx.globalAlpha = 1;
-    } else pathTrip = -1;   // the trip's system was filtered out
+    if (pat && sysOn[data.routes[tr.r].sy]) highlightShapes([pat.s]);
+    else pathTrip = -1;   // the trip's system was filtered out
+  } else if (findShapes) {
+    if (sysOn[findSy]) highlightShapes(findShapes);
+    else findShapes = null;   // its system was filtered out
   }
 
   // vehicles
@@ -2051,6 +2256,7 @@ function drawFrame(now) {
   spriteDraws = drawn;
   const hhmm = `${hh}:${mm}`;
   stats.textContent = (live ? "live · " : "") + `${hhmm} · ${active} vehicles` +
-    (pathTrip >= 0 && trips[pathTrip] ? ` · path: ${data.routes[trips[pathTrip].r].n}` : "") +
+    (pathTrip >= 0 && trips[pathTrip] ? ` · path: ${data.routes[trips[pathTrip].r].n}`
+      : findShapes ? ` · ${findLabel}` : "") +
     (DEBUG ? ` · tiles:${tilesDrawn}/${tileCache.size}` : "");
 }
