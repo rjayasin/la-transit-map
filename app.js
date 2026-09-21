@@ -170,6 +170,13 @@ panelCss.textContent = `
   #filters .hint { opacity: .7; margin: 8px 0 10px; padding-bottom: 10px;
                    border-bottom: 1px solid rgba(255,255,255,.25); }
   #bar :disabled { opacity: .35; }
+  /* The canvas refuses every gesture already, so the bar and the popover are
+     what iOS Safari has left to double-tap-zoom on: tapping ⏸ or a checkbox
+     twice zooms the page instead of pressing it twice. manipulation keeps
+     taps, drags and pinch and drops that one gesture. Set on the controls as
+     well as the panels: the effective behaviour is the intersection up the
+     ancestor chain, but a touch target that names it cannot depend on that. */
+  #bar, #filters, #bar *, #filters * { touch-action: manipulation; }
 `;
 document.head.append(panelCss);
 sysBtn.onclick = () => {
