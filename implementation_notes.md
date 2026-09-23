@@ -439,8 +439,8 @@ end of the path.
 
 ## Verifying a change
 
-The build is deterministic: same inputs, byte-identical `schedule.json`. Diff
-two runs to see exactly what a change did. Then:
+The build is deterministic on one platform: same inputs, byte-identical
+`schedule.json`. Diff two runs to see exactly what a change did. Then:
 
 ```sh
 .venv/bin/python scripts/drift_check.py    # how far each route is off its drawn line
@@ -459,10 +459,24 @@ the rest and their trip counts are a week's, not a day's.
 Count the shapes that changed, too. A fix aimed at one route should touch that
 route's shapes and no others, and a table entry that reaches further than
 intended shows up here first. Diff against a rebuild of the *unchanged* tree
-rather than against the committed `schedule.json`: the build is deterministic
-for one set of libraries, not across them, and a numpy or scipy upgrade moves a
-hundred shapes on its own. Two builds, one at HEAD and one with the change,
-cost four minutes and are the only way to read that count.
+rather than against the committed `schedule.json`. Two builds, one at HEAD and
+one with the change, cost four minutes and are the only way to read that count.
+
+**The committed `schedule.json` is built on macOS arm64.** numpy and scipy
+return different last bits on different platforms (Accelerate against
+OpenBLAS, NEON against AVX), and the fit makes discrete choices on them:
+nearest-ink ties, the `settle` ballot, which vertices `simplify` keeps. With
+the same code and the pinned libraries, a Linux build differs from a Mac build
+in about 130 shapes. Most move a pixel, but a few move to the next street. A
+library upgrade does the same. So:
+
+- On the Mac, commit the full build.
+- Anywhere else, including a cloud session, build at HEAD and with the change,
+  and copy into the committed file only the shapes and patterns that differ
+  between those two builds. Committing a full Linux build moves every
+  platform-sensitive shape at once.
+- A route that flips between platforms is sitting on a near-tie. Hold it with a
+  table entry rather than accepting whichever way this machine's build falls.
 
 **`drift_check` moves its own measure.** It refines the mask color off the
 *stored* shapes, so a change that moves shapes onto their lines also changes
