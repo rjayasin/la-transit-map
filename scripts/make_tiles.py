@@ -1,7 +1,9 @@
 """Render the map's WebP tile pyramid.
 
 Detail tiles are rasterized from PDF vectors at their target resolution.
-Overview levels 0.25, 0.5 and 1 are reduced from map.png.
+Overview levels 0.25, 0.5 and 1 are reduced from one PDF render at level 1.
+map.png is not used: it is tagged Display P3, and its pixels saved as untagged
+WebP display as sRGB, duller than the PDF-rendered detail levels.
 Detail levels are scale factors relative to the 4096px base image: 2, 4, 8
 (8192 / 16384 / 32768 px equivalent; level 8 ~ 700 dpi of the 47" map).
 
@@ -21,10 +23,14 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--overview-only", action="store_true", help="skip the PDF detail tiles")
 args = parser.parse_args()
 
-source = Image.open("map.png").convert("RGBA")
-# Match the PDF renderer's white background in transparent margins.
-base = Image.new("RGBA", source.size, "white")
-base = Image.alpha_composite(base, source).convert("RGB")
+doc = fitz.open(PDF)
+page = doc[0]
+dl = page.get_displaylist()
+pw, ph = page.rect.width, page.rect.height
+base_scale = BASE_W / pw          # map px per pt at level 1
+
+pix = dl.get_pixmap(matrix=fitz.Matrix(base_scale, base_scale), alpha=False)
+base = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
 for level in (0.25, 0.5, 1):
     im = base.resize((round(base.width * level), round(base.height * level)),
                      Image.Resampling.LANCZOS) if level != 1 else base
@@ -40,12 +46,6 @@ for level in (0.25, 0.5, 1):
 
 if args.overview_only:
     raise SystemExit(0)
-
-doc = fitz.open(PDF)
-page = doc[0]
-dl = page.get_displaylist()
-pw, ph = page.rect.width, page.rect.height
-base_scale = BASE_W / pw          # map px per pt at level 1
 
 for lvl in LEVELS:
     s = base_scale * lvl          # output px per pt
