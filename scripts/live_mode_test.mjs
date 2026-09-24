@@ -150,6 +150,7 @@ check("it plays today's timetable", await evaluate("dayShown"), laDay());
 check("and only the vehicles that run today are on it",
       await evaluate("trips.length === data.tripDays.filter(m => m >> dayShown & 1).length"
                      + " && trips.every(t => t.days >> dayShown & 1)"), true);
+check("unused weekdays are not decoded at startup", await evaluate("allTrips.some(t => t.times === null)"), true);
 const liveHint = await evaluate(`filtersEl.querySelector(".hint").textContent`);
 check("and the panel names that day", liveHint.includes(DAYS[laDay()]), true);
 

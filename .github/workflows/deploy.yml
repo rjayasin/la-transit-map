@@ -38,6 +38,7 @@ jobs:
           python scripts/timing_test.py
           python scripts/geometry_check.py
           node scripts/motion_test.mjs
+          node scripts/trip_index_test.mjs
           node scripts/stall_test.mjs
 
   build:
