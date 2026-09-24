@@ -6,6 +6,8 @@ name: Deploy map
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch: {}
 
 permissions:
@@ -15,13 +17,13 @@ permissions:
 
 # Queue deploys; cancelling mid-deploy collides with the in-flight one.
 concurrency:
-  group: pages
+  group: ${{ github.event_name == 'pull_request' && github.ref || 'pages' }}
   cancel-in-progress: false
 
 jobs:
-  # Reports on its own, and nothing depends on it. A failing check marks the
-  # commit red without holding back the deploy.
   check:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,11 +38,15 @@ jobs:
           python -m pip install -r requirements.txt
           python scripts/build_test.py
           python scripts/timing_test.py
+          python scripts/feed_audit_test.py
           python scripts/geometry_check.py
           node scripts/motion_test.mjs
+          node scripts/trip_index_test.mjs
           node scripts/stall_test.mjs
 
   build:
+    if: github.event_name != 'pull_request'
+    needs: check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

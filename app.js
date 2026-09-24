@@ -169,7 +169,8 @@ panelCss.textContent = `
   #filters .modes button:hover { background: rgba(255,255,255,.22); }
   #filters .modes button[aria-pressed=true] { background: #e8a33d; color: #201800;
                                               font-weight: 600; }
-  #filters .hint { opacity: .7; margin: 8px 0 10px; padding-bottom: 10px;
+  #filters .hint { max-width: min(340px, calc(100vw - 52px));
+                   opacity: .7; margin: 8px 0 10px; padding-bottom: 10px;
                    border-bottom: 1px solid rgba(255,255,255,.25); }
   #bar :disabled { opacity: .35; }
   /* Stops iOS Safari double-tap zoom on the controls; taps, drags and pinch still work. */
@@ -215,8 +216,11 @@ function refreshHint() {
   if (!hintEl) return;
   const day = DAY_NAMES[laDay()];
   hintEl.textContent = live
-    ? `Today's service (${day}), on Los Angeles' clock at 1×.`
-    : `The whole of today's service (${day}), sped up.`;
+    ? `Stored ${day} schedule, on Los Angeles' clock at 1×.`
+    : `Stored ${day} schedule, sped up.`;
+  const stamp = data?.date;
+  if (stamp) hintEl.textContent += ` Reference week: ${stamp.slice(0,4)}-${stamp.slice(4,6)}-${stamp.slice(6,8)}. Some agencies use older dates.`;
+  hintEl.textContent += ' Scheduled positions, not real-time tracking. Holidays are not applied.';
 }
 
 function buildPanel(systems) {
@@ -822,18 +826,45 @@ function effDist(pat) {
 }
 
 function buildTrips() {
-  const out = data.trips.map((t, i) => {
-    const times = new Float64Array(t.length - 2);
-    times[0] = t[2];
-    for (let i = 3; i < t.length; i++) times[i-2] = times[i-3] + t[i];
-    const pat = data.patterns[t[1]];
-    if (pat) detie(times, effDist(pat));
-    return { r: t[0], p: t[1], times, t0: times[0], t1: times[times.length-1],
-             days: data.tripDays[i] };
-  });
-  // draw rail last so trains sit on top of the bus swarm
+  const out = data.trips.map((raw, i) => ({
+    r: raw[0], p: raw[1], raw, days: data.tripDays[i], times: null,
+  }));
   out.sort((a, b) => (data.routes[a.r].rail ? 1 : 0) - (data.routes[b.r].rail ? 1 : 0));
   return out;
+}
+
+const patternDistances = new Map();
+function decodeTrip(tr) {
+  if (tr.times) return;
+  const t = tr.raw, times = new Float64Array(t.length - 2);
+  times[0] = t[2];
+  for (let i = 3; i < t.length; i++) times[i-2] = times[i-3] + t[i];
+  const pat = data.patterns[tr.p];
+  if (pat) {
+    if (!patternDistances.has(tr.p)) patternDistances.set(tr.p, effDist(pat));
+    detie(times, patternDistances.get(tr.p));
+  }
+  tr.times = times;
+  tr.t0 = times[0];
+  tr.t1 = times[times.length - 1];
+}
+
+// Buckets preserve draw order and include every trip touching their interval.
+const TRIP_BUCKET_SEC = 300;
+let tripBuckets = [], fadingTrips = new Set();
+function indexTrips(rows) {
+  const buckets = Array.from({ length: 86400 / TRIP_BUCKET_SEC }, () => []);
+  rows.forEach((tr, i) => {
+    const first = Math.max(0, Math.floor(tr.t0 / TRIP_BUCKET_SEC));
+    const last = Math.min(buckets.length - 1, Math.floor(tr.t1 / TRIP_BUCKET_SEC));
+    for (let b = first; b <= last; b++) buckets[b].push(i);
+  });
+  return buckets;
+}
+function frameTripIndices(t) {
+  const bucket = tripBuckets[Math.floor(t / TRIP_BUCKET_SEC)] || [];
+  if (!fadingTrips.size) return bucket;
+  return [...new Set([...bucket, ...fadingTrips])].sort((a, b) => a - b);
 }
 
 // Play weekday `day`'s timetable.
@@ -843,6 +874,10 @@ function showDay(day) {
   if (!allTrips.length) allTrips = buildTrips();
   if (!byDay.has(day)) byDay.set(day, allTrips.filter(t => t.days >> day & 1));
   trips = byDay.get(day);
+  trips.forEach(decodeTrip);
+  tripBuckets = indexTrips(trips);
+  fadingTrips.clear();
+  refreshHint();
   vAlpha = new Float32Array(trips.length);   // all hidden; they fade in on the next frame
   pathTrip = -1;                             // trip indices are this day's own
 }
@@ -859,7 +894,10 @@ const overviewLevel = TILE_LEVELS[0], overviewSpan = TILE / overviewLevel;
 for (let r = 0; r < Math.ceil(map.height / overviewSpan); r++)
   for (let c = 0; c < Math.ceil(map.width / overviewSpan); c++) getTile(overviewLevel, c, r);
 drawTiles(bgCtx);
-fetch(`schedule.json?v=${V_SCHEDULE}`).then(r => r.json()).then(d => {
+fetch(`schedule.json?v=${V_SCHEDULE}`).then(r => {
+  if (!r.ok) throw new Error(`Schedule request failed (${r.status})`);
+  return r.json();
+}).then(d => {
   data = d;
 
   function toShape(flat) {
@@ -880,6 +918,10 @@ fetch(`schedule.json?v=${V_SCHEDULE}`).then(r => r.json()).then(d => {
   insetRanges = d.insetRanges || [];
   showDay(laDay());
   armFrame();
+}).catch(error => {
+  stats.textContent = "Could not load schedules. Reload to retry.";
+  stats.title = error.message;
+  console.error(error);
 });
 
 // average speed (map px / sec) of segment i -> i+1; 0 if degenerate
@@ -2187,7 +2229,7 @@ function drawFrame(now) {
   // run costs nothing to skip when the panel is off-screen too.
   const insetVisible = !!insetRect && insetRect[0] <= vx1 && insetRect[2] >= vx0
                                    && insetRect[1] <= vy1 && insetRect[3] >= vy0;
-  for (let i = 0; i < trips.length; i++) {
+  for (const i of frameTripIndices(t)) {
     const tr = trips[i];
     const pat = data.patterns[tr.p];
     // a vehicle is "present" while its trip is running and its system is shown;
@@ -2196,7 +2238,11 @@ function drawFrame(now) {
     let a = vAlpha[i] + (present ? step : -step);
     a = a < 0 ? 0 : a > 1 ? 1 : a;
     vAlpha[i] = a;
-    if (a <= 0.01 || !pat) continue;
+    if (a <= 0.01 || !pat) {
+      fadingTrips.delete(i);
+      continue;
+    }
+    fadingTrips.add(i);
     // position from the trip clock, clamped to the trip window so a vehicle
     // fading out past its last stop lingers at the terminal, not at (0,0)
     const tc = t < tr.t0 ? tr.t0 : t > tr.t1 ? tr.t1 : t;
@@ -2255,7 +2301,7 @@ function drawFrame(now) {
   // read `costSprites` against.
   spriteDraws = drawn;
   const hhmm = `${hh}:${mm}`;
-  stats.textContent = (live ? "live · " : "") + `${hhmm} · ${active} vehicles` +
+  stats.textContent = (live ? "live · " : "") + `${hhmm} · ${active} scheduled vehicles` +
     (pathTrip >= 0 && trips[pathTrip] ? ` · path: ${data.routes[trips[pathTrip].r].n}`
       : findShapes ? ` · ${findLabel}` : "") +
     (DEBUG ? ` · tiles:${tilesDrawn}/${tileCache.size}` : "");

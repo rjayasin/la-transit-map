@@ -1,0 +1,17 @@
+{
+  "gtfs_bus": "https://gitlab.com/LACMTA/gtfs_bus/-/raw/master/gtfs_bus.zip",
+  "gtfs_rail": "https://gitlab.com/LACMTA/gtfs_rail/-/raw/master/gtfs_rail.zip",
+  "metrolink": "https://metrolinktrains.com/globalassets/about/gtfs/gtfs.zip",
+  "bigbluebus": "https://gtfs.bigbluebus.com/current.zip",
+  "culvercity": "https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-culver-city-bus-gtfs-38.zip?alt=media",
+  "ladot": "https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-los-angeles-department-of-transportation-ladot-gtfs-1210.zip?alt=media",
+  "longbeach": "https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-long-beach-transit-lbt-gtfs-1198.zip?alt=media",
+  "foothill": "https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-foothill-transit-gtfs-101.zip?alt=media",
+  "torrance": "https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-torrance-transit-gtfs-34.zip?alt=media",
+  "montebello": "https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-montebello-bus-lines-gtfs-2201.zip?alt=media",
+  "gtrans": "https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-gtrans-gtfs-2270.zip?alt=media",
+  "pasadena": "https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-pasadena-transit-gtfs-41.zip?alt=media",
+  "burbank": "https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-burbankbus-gtfs-2149.zip?alt=media",
+  "beachcities": "https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-beach-cities-transit-gtfs-1999.zip?alt=media",
+  "norwalk": "https://nts.rideralerts.com/infopoint/gtfs-zip.ashx"
+}

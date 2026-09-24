@@ -15,9 +15,11 @@ python3 -m http.server 8741
 
 - **Controls.** Play/pause, scrubber, speed (30-400×). It opens at the current
   Los Angeles time and runs on from there.
-- **View mode.** Both modes play today's timetable. The popover switches
+- **View mode.** Both modes replay the stored timetable for today's weekday.
+  The popover switches
   between the time-lapse, which scrubs the whole day at 30-400×, and **Live**,
-  which holds the map to Los Angeles' clock at 1×.
+  which holds the map to Los Angeles' clock at 1×. The panel names the
+  reference week and explains that positions are scheduled.
 - **Navigation.** Drag to pan. On a Mac trackpad, gestures follow Maps.app:
   two-finger swipe pans, pinch zooms. A mouse wheel zooms.
 - **Tap a vehicle** to trace the line it runs, on the map or inside the
@@ -151,6 +153,19 @@ On each push, `scripts/geometry_check.py` checks fixed artwork corridors
 and a rail platform, `scripts/build_test.py` checks caching and stop assignment,
 and `scripts/motion_test.mjs` checks path interpolation and inset transitions.
 The geometry check also validates the complete schedule structure.
+
+Audit cached service coverage before rebuilding:
+
+```sh
+.venv/bin/python scripts/feed_audit.py --out scratch/feed-audit.json
+.venv/bin/python scripts/feed_audit.py --remote --strict --out scratch/feed-audit.json
+```
+
+`--remote` compares the published downloads in `data/feed_sources.json` without
+replacing inputs. `--date YYYY-MM-DD` makes the check reproducible. `--strict`
+fails on expired feeds or failed source checks. A calendar covering a date does
+not prove that its routes and stop times reflect current service. Review the
+report, update feed inputs, rebuild, and run the geometry checks before publishing.
 
 ## Checking a line against the artwork
 

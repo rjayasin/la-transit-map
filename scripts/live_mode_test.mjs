@@ -152,6 +152,9 @@ check("and only the vehicles that run today are on it",
                      + " && trips.every(t => t.days >> dayShown & 1)"), true);
 const liveHint = await evaluate(`filtersEl.querySelector(".hint").textContent`);
 check("and the panel names that day", liveHint.includes(DAYS[laDay()]), true);
+check("the panel identifies stored schedules", liveHint.includes('Stored') && liveHint.includes('Reference week:'), true);
+check("the panel explains realtime and holiday limits", liveHint.includes('not real-time') && liveHint.includes('Holidays'), true);
+check("unused weekdays are not decoded at startup", await evaluate('allTrips.some(t => t.times === null)'), true);
 
 await sleep(400);   // a frame or two to take the clock over
 const here = laNow(), there = await evaluate("simT");
