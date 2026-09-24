@@ -825,6 +825,7 @@ function buildTrips() {
   const out = data.trips.map((raw, i) => ({
     r: raw[0], p: raw[1], raw, days: data.tripDays[i], times: null,
   }));
+  // draw rail last so trains sit on top of the bus swarm
   out.sort((a, b) => (data.routes[a.r].rail ? 1 : 0) - (data.routes[b.r].rail ? 1 : 0));
   return out;
 }
@@ -914,7 +915,7 @@ fetch(`schedule.json?v=${V_SCHEDULE}`).then(r => {
   insetRanges = d.insetRanges || [];
   showDay(laDay());
   armFrame();
-}).catch(error => {
+}, error => {   // download failures only; a fault in the handler above still throws
   stats.textContent = "Could not load schedules. Reload to retry.";
   stats.title = error.message;
   console.error(error);
@@ -2235,6 +2236,8 @@ function drawFrame(now) {
     a = a < 0 ? 0 : a > 1 ? 1 : a;
     vAlpha[i] = a;
     if (a <= 0.01 || !pat) {
+      // a trip leaving the candidates stops being stepped, so settle it at 0
+      if (!present) vAlpha[i] = 0;
       fadingTrips.delete(i);
       continue;
     }
