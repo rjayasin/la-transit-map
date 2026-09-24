@@ -169,8 +169,7 @@ panelCss.textContent = `
   #filters .modes button:hover { background: rgba(255,255,255,.22); }
   #filters .modes button[aria-pressed=true] { background: #e8a33d; color: #201800;
                                               font-weight: 600; }
-  #filters .hint { max-width: min(340px, calc(100vw - 52px));
-                   opacity: .7; margin: 8px 0 10px; padding-bottom: 10px;
+  #filters .hint { opacity: .7; margin: 8px 0 10px; padding-bottom: 10px;
                    border-bottom: 1px solid rgba(255,255,255,.25); }
   #bar :disabled { opacity: .35; }
   /* Stops iOS Safari double-tap zoom on the controls; taps, drags and pinch still work. */
@@ -216,11 +215,8 @@ function refreshHint() {
   if (!hintEl) return;
   const day = DAY_NAMES[laDay()];
   hintEl.textContent = live
-    ? `Stored ${day} schedule, on Los Angeles' clock at 1×.`
-    : `Stored ${day} schedule, sped up.`;
-  const stamp = data?.date;
-  if (stamp) hintEl.textContent += ` Reference week: ${stamp.slice(0,4)}-${stamp.slice(4,6)}-${stamp.slice(6,8)}. Some agencies use older dates.`;
-  hintEl.textContent += ' Scheduled positions, not real-time tracking. Holidays are not applied.';
+    ? `Today's service (${day}), on Los Angeles' clock at 1×.`
+    : `The whole of today's service (${day}), sped up.`;
 }
 
 function buildPanel(systems) {
@@ -2301,7 +2297,7 @@ function drawFrame(now) {
   // read `costSprites` against.
   spriteDraws = drawn;
   const hhmm = `${hh}:${mm}`;
-  stats.textContent = (live ? "live · " : "") + `${hhmm} · ${active} scheduled vehicles` +
+  stats.textContent = (live ? "live · " : "") + `${hhmm} · ${active} vehicles` +
     (pathTrip >= 0 && trips[pathTrip] ? ` · path: ${data.routes[trips[pathTrip].r].n}`
       : findShapes ? ` · ${findLabel}` : "") +
     (DEBUG ? ` · tiles:${tilesDrawn}/${tileCache.size}` : "");

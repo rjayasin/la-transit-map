@@ -675,17 +675,3 @@ rail seeds the snap config) and `FEED_NAMES`. Seed its drawn color in
 page by color. An agency the sheet draws no line for gets a sprite color in
 `DRAWN_COLORS` instead and keeps the warp. Then run the checks above. A feed
 that warps far off the sheet shows up immediately in `speed_check` as off-map.
-
-## Schedule audit and trip indexing
-
-`feed_audit.py` reports input coverage and the builder's chosen weekday dates.
-These are source-input checks, not proof of the provenance of an older generated
-schedule. `--remote` compares core GTFS file hashes; changed bytes still need
-review for service and geometry changes. Keep current download URLs in
-`data/feed_sources.json`; the README source table identifies the original inputs.
-
-The client decodes trip times on first use by a weekday. Five-minute buckets
-contain trip indices in draw order. Fading trips remain candidates across bucket
-boundaries and scrub jumps. Clear fades and rebuild the index when switching days.
-`trip_index_test.mjs` checks candidates against a full scan and decoded times
-against the previous algorithm.

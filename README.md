@@ -15,11 +15,9 @@ python3 -m http.server 8741
 
 - **Controls.** Play/pause, scrubber, speed (30-400×). It opens at the current
   Los Angeles time and runs on from there.
-- **View mode.** Both modes replay the stored timetable for today's weekday.
-  The popover switches
+- **View mode.** Both modes play today's timetable. The popover switches
   between the time-lapse, which scrubs the whole day at 30-400×, and **Live**,
-  which holds the map to Los Angeles' clock at 1×. The panel names the
-  reference week and explains that positions are scheduled.
+  which holds the map to Los Angeles' clock at 1×.
 - **Navigation.** Drag to pan. On a Mac trackpad, gestures follow Maps.app:
   two-finger swipe pans, pinch zooms. A mouse wheel zooms.
 - **Tap a vehicle** to trace the line it runs, on the map or inside the
@@ -42,7 +40,7 @@ and emits `schedule.json`.
   the 47″ sheet. Zoom is capped at the deepest level's 1:1. `map.png` is an
   offline input for geometry tools and overview generation.
 - **Data.** 15 static GTFS feeds are reduced to one service date per weekday
-  and emitted as `schedule.json` (~12 MB): 49,960 trips on 337 routes for a
+  and emitted as `schedule.json` (~12 MB): 50,413 trips on 345 routes for a
   whole week, around 26,000 of them on any one weekday. Each carries route
   colors and labels, shape polylines in map pixels, per-stop distance along
   each shape, stop arrival times, and a bitmask of the days the trip runs, so
@@ -153,19 +151,6 @@ On each push, `scripts/geometry_check.py` checks fixed artwork corridors
 and a rail platform, `scripts/build_test.py` checks caching and stop assignment,
 and `scripts/motion_test.mjs` checks path interpolation and inset transitions.
 The geometry check also validates the complete schedule structure.
-
-Audit cached service coverage before rebuilding:
-
-```sh
-.venv/bin/python scripts/feed_audit.py --out scratch/feed-audit.json
-.venv/bin/python scripts/feed_audit.py --remote --strict --out scratch/feed-audit.json
-```
-
-`--remote` compares the published downloads in `data/feed_sources.json` without
-replacing inputs. `--date YYYY-MM-DD` makes the check reproducible. `--strict`
-fails on expired feeds or failed source checks. A calendar covering a date does
-not prove that its routes and stop times reflect current service. Review the
-report, update feed inputs, rebuild, and run the geometry checks before publishing.
 
 ## Checking a line against the artwork
 
@@ -289,25 +274,24 @@ and so cannot be suppressed by it.
 Background map: [LA Metro "Bus and Rail System" map (May 2026)](https://www.metro.net/riding/maps/)
 — the PDF in this repo, © LACMTA.
 
-GTFS feeds (cached in `data/gtfs/`, fetched 2026-07-19). Metro feeds come from
-LACMTA's GitLab; municipal feeds are the latest-copy mirrors of the
-[Mobility Database](https://mobilitydatabase.org) catalog; Metrolink is from
-its official site.
+GTFS feeds are cached in `data/gtfs/`. The table records each archive's latest
+download date. Agency downloads are used where available; other feeds use the
+[Mobility Database](https://mobilitydatabase.org) mirrors.
 
-| Feed | Agency | Source |
-|---|---|---|
-| `gtfs_bus` | LA Metro bus | [gitlab.com/LACMTA/gtfs_bus](https://gitlab.com/LACMTA/gtfs_bus) |
-| `gtfs_rail` | LA Metro rail | [gitlab.com/LACMTA/gtfs_rail](https://gitlab.com/LACMTA/gtfs_rail) |
-| `metrolink` | Metrolink | [metrolinktrains.com GTFS](https://metrolinktrains.com/globalassets/about/gtfs/gtfs.zip) |
-| `bigbluebus` | Big Blue Bus (Santa Monica) | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-big-blue-bus-gtfs-37.zip?alt=media) |
-| `culvercity` | Culver CityBus | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-culver-city-bus-gtfs-38.zip?alt=media) |
-| `ladot` | LADOT (DASH, Commuter Express) | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-los-angeles-department-of-transportation-ladot-gtfs-1210.zip?alt=media) |
-| `longbeach` | Long Beach Transit | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-long-beach-transit-lbt-gtfs-1198.zip?alt=media) |
-| `foothill` | Foothill Transit | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-foothill-transit-gtfs-101.zip?alt=media) |
-| `torrance` | Torrance Transit | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-torrance-transit-gtfs-34.zip?alt=media) |
-| `montebello` | Montebello Bus Lines | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-montebello-bus-lines-gtfs-2201.zip?alt=media) |
-| `gtrans` | GTrans (Gardena) | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-gtrans-gtfs-2270.zip?alt=media) |
-| `pasadena` | Pasadena Transit | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-pasadena-transit-gtfs-41.zip?alt=media) |
-| `burbank` | BurbankBus | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-burbankbus-gtfs-2149.zip?alt=media) |
-| `beachcities` | Beach Cities Transit (Redondo) | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-beach-cities-transit-gtfs-1999.zip?alt=media) |
-| `norwalk` | Norwalk Transit System | [City of Norwalk GTFS](https://nts.rideralerts.com/infopoint/gtfs-zip.ashx) |
+| Feed | Agency | Source | Downloaded |
+|---|---|---|---|
+| `gtfs_bus` | LA Metro bus | [Agency GTFS](https://gitlab.com/LACMTA/gtfs_bus/-/raw/master/gtfs_bus.zip) | 2026-09-24 |
+| `gtfs_rail` | LA Metro rail | [Agency GTFS](https://gitlab.com/LACMTA/gtfs_rail/-/raw/master/gtfs_rail.zip) | 2026-09-24 |
+| `metrolink` | Metrolink | [metrolinktrains.com GTFS](https://metrolinktrains.com/globalassets/about/gtfs/gtfs.zip) | 2026-07-19 |
+| `bigbluebus` | Big Blue Bus (Santa Monica) | [Agency GTFS](https://gtfs.bigbluebus.com/current.zip) | 2026-09-24 |
+| `culvercity` | Culver CityBus | [Agency GTFS](https://web.culvercity.org/gtfs/gtfsexport.zip) | 2026-09-24 |
+| `ladot` | LADOT (DASH, Commuter Express) | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-los-angeles-department-of-transportation-ladot-gtfs-1210.zip?alt=media) | 2026-07-19 |
+| `longbeach` | Long Beach Transit | [Agency GTFS](https://rapid.nationalrtap.org/GTFSFileManagement/UserUploadFiles/14866/google_transit.zip) | 2026-09-24 |
+| `foothill` | Foothill Transit | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-foothill-transit-gtfs-101.zip?alt=media) | 2026-07-19 |
+| `torrance` | Torrance Transit | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-torrance-transit-gtfs-34.zip?alt=media) | 2026-07-19 |
+| `montebello` | Montebello Bus Lines | [Agency GTFS](https://mbl.rideralerts.com/infopoint/gtfs-zip.ashx) | 2026-09-24 |
+| `gtrans` | GTrans (Gardena) | [Agency GTFS](https://ridegtrans.com/gtfs.zip) | 2026-09-24 |
+| `pasadena` | Pasadena Transit | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-pasadena-transit-gtfs-41.zip?alt=media) | 2026-07-19 |
+| `burbank` | BurbankBus | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-burbankbus-gtfs-2149.zip?alt=media) | 2026-07-19 |
+| `beachcities` | Beach Cities Transit (Redondo) | [Mobility DB mirror](https://storage.googleapis.com/storage/v1/b/mdb-latest/o/us-california-beach-cities-transit-gtfs-1999.zip?alt=media) | 2026-07-19 |
+| `norwalk` | Norwalk Transit System | [City of Norwalk GTFS](https://nts.rideralerts.com/infopoint/gtfs-zip.ashx) | 2026-07-19 |
