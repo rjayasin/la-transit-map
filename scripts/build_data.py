@@ -1935,7 +1935,9 @@ def trim_terminus(pts, pins, with_offset=False):
 # the warp rather than against what the last one left. A spec with `shape_ids`
 # applies only to those GTFS variants. A spec with `pass` replaces only that
 # pass through the box (0 the first, -1 the last), for a circuit whose two ends
-# run the same stretch of warp, where a box around either end holds both.
+# run the same stretch of warp, where a box around either end holds both. A spec
+# with `exact` keeps its path's corners to HAND_TOL rather than the 1.2 px the
+# stored shapes are simplified to, for a drawn jog shorter than that.
 OVERRIDE_PATHS = {
     ("ladot", "4577"): {
         "box": (1495, 1520, 1548, 1600),
@@ -1972,6 +1974,7 @@ OVERRIDE_PATHS = {
     },
     ("ladot", "573"): [{          # DASH Crenshaw, clockwise
         "pass": 0,
+        "exact": True,
         "box": (1315, 2060, 1340.9, 2110),
         "path": [
             (1331.70, 2134.50), (1323.78, 2134.50), (1323.46, 2134.48),
@@ -2047,6 +2050,7 @@ OVERRIDE_PATHS = {
         ],
     }, {
         "pass": -1,
+        "exact": True,
         "box": (1315, 2060, 1340.9, 2110),
         "path": [
             (1299.15, 2085.20), (1299.15, 2099.89), (1299.18, 2100.37),
@@ -5305,6 +5309,9 @@ def square_ends(P, tree):
     return P
 
 
+HAND_TOL = 0.4    # px; simplify tolerance inside an `exact` override path
+
+
 def simplify(pts, tol=1.2, mask=False):
     """Douglas-Peucker. With mask=True also returns which points survived, so
     a caller can carry a parameterization of the original through it."""
@@ -6358,11 +6365,19 @@ def build_schedule(feeds):
             if out_pts is not None:
                 full = unjitter(full, tree=line_ink)
             override = OVERRIDE_PATHS.get((feed, (rid or "").split("-")[0]))
+            hand = None
             if override is not None and len(full) == len(base):
+                hand = np.zeros(len(full), bool)
                 for spec in (override if isinstance(override, list) else [override]):
+                    before = np.array(full, dtype=float)
                     full = np.asarray(apply_override(full, base, spec, sid), dtype=float)
+                    if spec.get("exact"):
+                        hand |= np.any(full != before, axis=1)
             if len(full) == len(base):
                 stored, keep = simplify(full, mask=True)
+                if hand is not None and hand.any():
+                    keep |= simplify(full, tol=HAND_TOL, mask=True)[1] & hand
+                    stored = full[keep]
                 cb = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(base, axis=0).T))])
                 shape_param[(feed, sid)] = (base, cb, cb[keep])
             else:
