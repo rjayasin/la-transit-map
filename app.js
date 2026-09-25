@@ -174,7 +174,12 @@ panelCss.textContent = `
   #bar :disabled { opacity: .35; }
   /* Stops iOS Safari double-tap zoom on the controls; taps, drags and pinch still work. */
   #bar, #filters, #bar *, #filters * { touch-action: manipulation; }
-  #filters .count { display: none; font-variant-numeric: tabular-nums; margin-bottom: 10px; }
+  #filters .headrow { display: flex; align-items: center; justify-content: space-between;
+                      gap: 16px; border-bottom: 1px solid rgba(255,255,255,.25);
+                      padding-bottom: 8px; }
+  #filters .headrow .head { border: 0; padding: 0; }
+  #filters .count { display: none; font-variant-numeric: tabular-nums; opacity: .7;
+                    white-space: nowrap; }
   /* Phones: the bar spans the screen, the play button narrows and the vehicle
      count moves into the popover, so the slider gets the freed width. */
   @media (max-width: 640px) {
@@ -250,7 +255,7 @@ function buildPanel(systems) {
   });
   hintEl = document.createElement("div");
   hintEl.className = "hint";
-  filtersEl.append(countEl, modes, hintEl);
+  filtersEl.append(modes, hintEl);
   buildFilters(systems);
   setLive(live);
 }
@@ -284,7 +289,10 @@ function buildFilters(systems) {
     sysOn.fill(allCb.checked);
     boxes.forEach(b => { b.checked = allCb.checked; });
   };
-  filtersEl.append(head, grid);
+  const headRow = document.createElement("div");
+  headRow.className = "headrow";
+  headRow.append(head, countEl);
+  filtersEl.append(headRow, grid);
 }
 
 // ---- auto-hide the control bar; wake on activity near the bottom edge ----
@@ -2321,7 +2329,7 @@ function drawFrame(now) {
   const hhmm = `${hh}:${mm}`;
   statsTime.textContent = (live ? "live · " : "") + hhmm;
   statsCount.textContent = ` · ${active} vehicles`;
-  countEl.textContent = `${active} vehicles in service`;
+  countEl.textContent = `${active} vehicles`;
   statsExtra.textContent =
     (pathTrip >= 0 && trips[pathTrip] ? ` · path: ${data.routes[trips[pathTrip].r].n}`
       : findShapes ? ` · ${findLabel}` : "") +
