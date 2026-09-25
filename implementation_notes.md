@@ -372,7 +372,10 @@ whole fix.
 **Placing an override.** `box` is matched against the warp, and the replaced
 run goes from the first to the last warp point inside it. An excursion that
 leaves the box in between is harmless, but a second pass through the box later
-in the route swallows everything between the two. One `path` serves both
+in the route swallows everything between the two. `pass` replaces one of them
+instead (0 the first, -1 the last). A circuit needs it at its ends, where the
+first and last legs run the same stretch of warp and no box holds one without
+the other. One `path` serves both
 directions, since the orientation comes from the direction of travel rather
 than from which end the shape enters by. Use `shape_ids` when variants of one
 route follow different drawn paths. Trace the corridor off the artwork and draw
