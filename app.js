@@ -174,6 +174,16 @@ panelCss.textContent = `
   #bar :disabled { opacity: .35; }
   /* Stops iOS Safari double-tap zoom on the controls; taps, drags and pinch still work. */
   #bar, #filters, #bar *, #filters * { touch-action: manipulation; }
+  #filters .count { display: none; font-variant-numeric: tabular-nums; margin-bottom: 10px; }
+  /* Phones: the bar spans the screen, the play button narrows and the vehicle
+     count moves into the popover, so the slider gets the freed width. */
+  @media (max-width: 640px) {
+    #bar { left: 10px; right: 10px; transform: none; max-width: none; padding-left: 8px; }
+    #bar #play { width: 24px; }
+    #bar input[type=range] { flex: 1 1 0; width: auto; }
+    #stats .cnt { display: none; }
+    #filters .count { display: block; }
+  }
 `;
 document.head.append(panelCss);
 sysBtn.onclick = () => {
@@ -194,6 +204,15 @@ sysBtn.onclick = () => {
 const liveSpeed = new Option("1×", "1");
 let speedWas = "";
 let hintEl = null, modeBtns = [];
+// The bar's readout in three parts so the count can be hidden on its own. The
+// popover repeats the count for when it is.
+const statsTime = document.createElement("span");
+const statsCount = document.createElement("span");
+const statsExtra = document.createElement("span");
+statsCount.className = "cnt";
+stats.append(statsTime, statsCount, statsExtra);
+const countEl = document.createElement("div");
+countEl.className = "count";
 function setLive(on) {
   live = on;
   if (live) {
@@ -231,7 +250,7 @@ function buildPanel(systems) {
   });
   hintEl = document.createElement("div");
   hintEl.className = "hint";
-  filtersEl.append(modes, hintEl);
+  filtersEl.append(countEl, modes, hintEl);
   buildFilters(systems);
   setLive(live);
 }
@@ -2300,7 +2319,10 @@ function drawFrame(now) {
   // read `costSprites` against.
   spriteDraws = drawn;
   const hhmm = `${hh}:${mm}`;
-  stats.textContent = (live ? "live · " : "") + `${hhmm} · ${active} vehicles` +
+  statsTime.textContent = (live ? "live · " : "") + hhmm;
+  statsCount.textContent = ` · ${active} vehicles`;
+  countEl.textContent = `${active} vehicles in service`;
+  statsExtra.textContent =
     (pathTrip >= 0 && trips[pathTrip] ? ` · path: ${data.routes[trips[pathTrip].r].n}`
       : findShapes ? ` · ${findLabel}` : "") +
     (DEBUG ? ` · tiles:${tilesDrawn}/${tileCache.size}` : "");
