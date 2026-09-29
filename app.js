@@ -1080,14 +1080,11 @@ function pickVehicle(cx, cy) {
   if (!data) return -1;
   const mx = view.x + cx / view.k, my = view.y + cy / view.k;
   const s = spriteScale(), tol = 6 / view.k;   // a few screen px of slack for touch
-  // Inside the call-out the panel's own sprites are what the eye sees: they are
-  // drawn last and clipped to the frame, over whatever the main map put there.
-  // So a tap in the panel is offered them first, and only falls through to the
-  // main map when it hits none, which keeps a tap on blank panel from picking
-  // a vehicle hidden underneath it.
+  // Inside the call-out only the panel's own sprites are drawn. Main-map
+  // vehicles passing under it are hidden, so a tap there tests the mirrors only.
   const inPanel = insetRect && mx >= insetRect[0] && mx <= insetRect[2]
                             && my >= insetRect[1] && my <= insetRect[3];
-  for (const where of inPanel ? [insetVehiclePos, vehiclePos] : [vehiclePos]) {
+  for (const where of inPanel ? [insetVehiclePos] : [vehiclePos]) {
     let best = -1, bestD = Infinity;
     for (let i = 0; i < trips.length; i++) {
       const tr = trips[i];
@@ -2282,10 +2279,25 @@ function drawFrame(now) {
     // are running on the network, not how many the window happens to frame.
     // Drawn only where it can be seen.
     if (present) active++;
-    if (x >= vx0 && x <= vx1 && y >= vy0 && y <= vy1) {
-      const sp = sprites[tr.r];
-      if (a < 1) ctx.globalAlpha = a;
+    // The call-out covers this part of the main map, so a vehicle passing
+    // under it is hidden there. One straddling the frame is clipped to the
+    // part outside it. The panel shows its own mirrors, drawn below.
+    const sp = sprites[tr.r];
+    const r = (sp.half + 6) * s;   // sprite plus the path ring
+    const under = !!insetRect && x + r > insetRect[0] && x - r < insetRect[2]
+                              && y + r > insetRect[1] && y - r < insetRect[3];
+    const hidden = under && x - r >= insetRect[0] && x + r <= insetRect[2]
+                         && y - r >= insetRect[1] && y + r <= insetRect[3];
+    if (!hidden && x >= vx0 && x <= vx1 && y >= vy0 && y <= vy1) {
       const [spx, sw] = spriteSize(sp.half, s);
+      if (under) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(x - r, y - r, 2 * r, 2 * r);
+        ctx.rect(insetRect[0], insetRect[1], insetRect[2] - insetRect[0], insetRect[3] - insetRect[1]);
+        ctx.clip("evenodd");
+      }
+      if (a < 1) ctx.globalAlpha = a;
       ctx.drawImage(spriteAt(tr.r, spx), x - sw / 2, y - sw / 2, sw, sw);
       drawn++;
       if (i === pathTrip) {   // ring the vehicle whose path is shown
@@ -2293,6 +2305,7 @@ function drawFrame(now) {
         ctx.lineWidth = 2 * s; ctx.strokeStyle = "#111"; ctx.stroke();
       }
       if (a < 1) ctx.globalAlpha = 1;
+      if (under) ctx.restore();
     }
     // mirror into the DTLA inset panel; see insetPosAt, which the picker goes
     // through too so a tap in the panel tests the position drawn there
