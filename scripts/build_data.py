@@ -1358,7 +1358,7 @@ LADOT_WIN = 9
 _INK = {}
 
 
-def pdf_ink(colors, dashed=None, step=INK_STEP):
+def pdf_ink(colors, dashed=None, step=INK_STEP, region="main"):
     """Points along every stroke the sheet draws in one of `colors`, in map px.
 
     dashed picks the stroke style: False for the solid strokes, True for the
@@ -1366,17 +1366,18 @@ def pdf_ink(colors, dashed=None, step=INK_STEP):
     their control points: a drawn line follows long curves, and the endpoints
     alone leave gaps a snap falls into. Points inside the regions the masks
     skip are dropped, so a shape on the main map can't reach ink drawn in the
-    legend or inside the Downtown call-out."""
-    key = (tuple(map(tuple, colors)), dashed, step)
+    legend or inside the Downtown call-out. region "inset" keeps the strokes
+    inside the Downtown call-out panel instead, less its legend."""
+    key = (tuple(map(tuple, colors)), dashed, step, region)
     if key not in _INK:
         _INK[key] = cached_pixels(
-            ("pdf-ink", key, art_stamp(PDF), EXCLUDE, CALLOUT,
-             code_stamp(pdf_ink, _ink_build, inside_callout)),
-            lambda: _ink_build(colors, dashed, step))
+            ("pdf-ink", key, art_stamp(PDF), EXCLUDE, CALLOUT, INSET_RECT, INSET_LEGEND,
+             code_stamp(pdf_ink, _ink_build, inside_callout, maskable)),
+            lambda: _ink_build(colors, dashed, step, region))
     return _INK[key]
 
 
-def _ink_build(colors, dashed, step):
+def _ink_build(colors, dashed, step, region="main"):
     try:
         import fitz
     except Exception as e:
@@ -1407,6 +1408,8 @@ def _ink_build(colors, dashed, step):
         if len(r) > 1:
             out += densify(r, step)
     P = np.asarray(out, dtype=float) if out else np.zeros((0, 2))
+    if region == "inset":
+        return P[maskable(P, "inset")]
     keep = map_image()[1]
     h, w = keep.shape
     P = P[(P[:, 0] >= 0) & (P[:, 0] < w) & (P[:, 1] >= 0) & (P[:, 1] < h)]
@@ -1417,11 +1420,21 @@ def _ink_build(colors, dashed, step):
 _INK_TREES = {}
 
 
-def ink_tree(colors, dashed=None):
+def ink_tree(colors, dashed=None, region="main"):
     """KD-tree over one ink's strokes, or None where the sheet draws too few."""
-    key = (tuple(map(tuple, colors)), dashed)
+    key = (tuple(map(tuple, colors)), dashed, region)
     if key not in _INK_TREES:
-        P = pdf_ink(colors, dashed)
+        P = pdf_ink(colors, dashed, region=region)
+        _INK_TREES[key] = cKDTree(P) if len(P) > 300 else None
+    return _INK_TREES[key]
+
+
+def inset_ink_tree(parts):
+    """KD-tree over the call-out's strokes in several inks, each (colors,
+    dashed), or None where the panel draws too few."""
+    key = ("inset",) + tuple((tuple(map(tuple, c)), d) for c, d in parts)
+    if key not in _INK_TREES:
+        P = np.concatenate([pdf_ink(c, d, region="inset") for c, d in parts])
         _INK_TREES[key] = cKDTree(P) if len(P) > 300 else None
     return _INK_TREES[key]
 
@@ -5218,8 +5231,16 @@ def maskable(P, region="main"):
     """Which points lie where a mask could have artwork to offer: on the sheet,
     outside the regions the masks deliberately skip. Points under the title
     banner or a call-out box have nothing to snap to no matter how well the
-    route is drawn, so they must not count against it."""
+    route is drawn, so they must not count against it.
+
+    "inset-ink" is the whole call-out frame. The panel's legend box is printed
+    over streets whose lines run on round it, and its own swatches are left out
+    of the panel's strokes, so a run snapped on the strokes can take a
+    correction from them under the box. A mask would find the swatches."""
     x, y = P[:, 0], P[:, 1]
+    if region == "inset-ink":
+        x0, y0, x1, y1 = INSET_RECT
+        return (x >= x0) & (x < x1) & (y >= y0) & (y < y1)
     if region == "inset":
         x0, y0, x1, y1 = INSET_RECT
         lx0, ly0, lx1, ly1 = INSET_LEGEND
@@ -6000,21 +6021,13 @@ def outside_inset(ix, iy, ll):
 # route's colour can reach as far there as rail's does on the main map, and
 # needs to: the panel magnifies downtown about fourfold, so the same warp error
 # is four times the pixels, and the corner by Union Station is still tens of px
-# out. A mask holding every bus line in the panel at once gets the short reach
+# out. A tree holding every bus line in the panel at once gets the short reach
 # it always had, since a longer one would only find a neighbour sooner. Both
 # take the shorter window, which the magnified grid's right-angle turns want
 # rather than the livery.
 INSET_CAPS = (60.0, 30.0, 14.0)
 INSET_SOLE_CAPS = (120.0, 60.0, 30.0, 14.0)
 INSET_WIN = 15
-
-
-INSET_COLORS = {"ladot": [(107, 103, 61), (128, 126, 85)]}
-
-# Metro's bus orange as the call-out prints it. ORANGE is that colour after
-# map.png's reduction has blended it with the page, which is 30 away and what
-# every mask read off the raster has to match; the pyramid has the ink itself.
-INSET_ORANGE = (245, 132, 70)
 
 
 # Diversions the call-out doesn't draw, in inset px. A feed sometimes routes
@@ -6050,6 +6063,169 @@ def undivert(pts, boxes):
             continue
         t = np.linspace(0, 1, hi - lo + 1)[:, None]
         P[lo:hi + 1] = a + t * n
+    return P
+
+
+# Corridors drawn by hand for the call-out, in inset px, keyed by (feed, route).
+# The panel's counterpart of OVERRIDE_PATHS, for a run the snap leaves off the
+# line the panel draws. `box` is matched against the snapped run, and the points
+# from the first to the last inside it are replaced by `path`, which is traced
+# off the panel's strokes. Its direction comes from the run, so one path serves
+# both directions. `pass` picks one of several passes through the box (0 the
+# first, -1 the last), for a run that crosses it twice with the stretch between
+# outside it. `paths` in place of `path` offers alternatives, for two drawn
+# lines side by side, and the one whose ends meet the run best is used.
+# `shape_ids` limits an entry to some variants. Stops are
+# projected onto the run afterwards, so nothing needs to stay index-aligned.
+INSET_OVERRIDE_PATHS = {
+    ("foothill", "20707"): [   # Silver Streak, westbound
+        {"box": (3375, 3375, 3455, 3460),
+         "path": [(3438.4, 3375.0), (3438.4, 3400.3)],
+         "shape_ids": {"22814_shp-v4E-a2", "22819_shp-v4E-a2", "22841_shp-v4E-a2"}},
+    ],
+    ("ladot", "567"): [        # DASH Lincoln Heights/Chinatown, clockwise
+        {"box": (3292, 2600, 3425, 2718),
+         "path": [(3376.1, 2718.3), (3306.8, 2690.5), (3302.5, 2687.6), (3300.0, 2680.5),
+                  (3305.3, 2639.6), (3309.4, 2636.2), (3315.2, 2635.0), (3425.0, 2616.2)]},
+        {"box": (3428, 2570, 3592, 2665),
+         "path": [(3429.9, 2615.4), (3495.0, 2604.0), (3517.0, 2601.3), (3590.1, 2566.4)]},
+        {"box": (3622, 2495, 3720, 2716),
+         "path": [(3709.1, 2714.1), (3703.1, 2711.6), (3698.2, 2704.1), (3678.3, 2662.1),
+                  (3673.5, 2643.9), (3652.2, 2599.7), (3629.5, 2552.3), (3629.6, 2549.8),
+                  (3632.6, 2546.4), (3648.8, 2539.8), (3662.2, 2537.6), (3690.1, 2537.5),
+                  (3694.3, 2536.5), (3696.9, 2532.4), (3697.0, 2499.6)]},
+    ],
+    ("ladot", "568"): [        # DASH Lincoln Heights/Chinatown, counterclockwise
+        {"box": (3292, 2600, 3425, 2718),
+         "path": [(3376.1, 2718.3), (3306.8, 2690.5), (3302.5, 2687.6), (3300.0, 2680.5),
+                  (3305.3, 2639.6), (3309.4, 2636.2), (3315.2, 2635.0), (3425.0, 2616.2)]},
+        {"box": (3428, 2570, 3592, 2665),
+         "path": [(3429.9, 2615.4), (3495.0, 2604.0), (3517.0, 2601.3), (3590.1, 2566.4)]},
+        {"box": (3622, 2495, 3720, 2716),
+         "path": [(3709.1, 2714.1), (3703.1, 2711.6), (3698.2, 2704.1), (3678.3, 2662.1),
+                  (3673.5, 2643.9), (3652.2, 2599.7), (3629.5, 2552.3), (3629.6, 2549.8),
+                  (3632.6, 2546.4), (3648.8, 2539.8), (3662.2, 2537.6), (3690.1, 2537.5),
+                  (3694.3, 2536.5), (3696.9, 2532.4), (3697.0, 2499.6)]},
+    ],
+    ("ladot", "867"): [        # Commuter Express 419
+        {"box": (3355, 3480, 3480, 3706),
+         "paths": [[(3372.4, 3480.0), (3372.4, 3706.0)], [(3417.8, 3480.0), (3417.8, 3706.0)]]},
+    ],
+    ("ladot", "30"): [         # Commuter Express 422
+        {"box": (3355, 3480, 3480, 3706),
+         "paths": [[(3372.4, 3480.0), (3372.4, 3706.0)], [(3417.8, 3480.0), (3417.8, 3706.0)]]},
+    ],
+    ("ladot", "31"): [         # Commuter Express 423
+        {"box": (3355, 2875, 3470, 3479),
+         "paths": [[(3456.6, 2875.0), (3456.6, 2918.3), (3453.7, 2937.1), (3447.9, 2951.2),
+                    (3426.3, 2988.0), (3420.5, 3000.5), (3418.1, 3040.0), (3418.1, 3174.8),
+                    (3417.8, 3479.0)],
+                   [(3456.6, 2875.0), (3456.6, 2918.3), (3459.3, 2938.9), (3458.9, 3028.5),
+                    (3456.3, 3031.1), (3451.1, 3031.9), (3386.7, 3032.1), (3383.5, 3033.3),
+                    (3379.8, 3036.8), (3377.1, 3044.4), (3377.1, 3132.1), (3372.4, 3150.5),
+                    (3372.4, 3479.0)]]},
+        {"box": (3355, 3480, 3480, 3706),
+         "paths": [[(3372.4, 3480.0), (3372.4, 3706.0)], [(3417.8, 3480.0), (3417.8, 3706.0)]]},
+    ],
+    ("ladot", "27"): [         # Commuter Express 438
+        {"box": (3355, 2875, 3470, 3479),
+         "paths": [[(3456.6, 2875.0), (3456.6, 2918.3), (3453.7, 2937.1), (3447.9, 2951.2),
+                    (3426.3, 2988.0), (3420.5, 3000.5), (3418.1, 3040.0), (3418.1, 3174.8),
+                    (3417.8, 3479.0)],
+                   [(3456.6, 2875.0), (3456.6, 2918.3), (3459.3, 2938.9), (3458.9, 3028.5),
+                    (3456.3, 3031.1), (3451.1, 3031.9), (3386.7, 3032.1), (3383.5, 3033.3),
+                    (3379.8, 3036.8), (3377.1, 3044.4), (3377.1, 3132.1), (3372.4, 3150.5),
+                    (3372.4, 3479.0)]]},
+        {"box": (3355, 3480, 3480, 3706),
+         "paths": [[(3372.4, 3480.0), (3372.4, 3706.0)], [(3417.8, 3480.0), (3417.8, 3706.0)]]},
+    ],
+    ("ladot", "1458"): [       # Commuter Express 438B
+        {"box": (3355, 2875, 3470, 3479),
+         "paths": [[(3456.6, 2875.0), (3456.6, 2918.3), (3453.7, 2937.1), (3447.9, 2951.2),
+                    (3426.3, 2988.0), (3420.5, 3000.5), (3418.1, 3040.0), (3418.1, 3174.8),
+                    (3417.8, 3479.0)],
+                   [(3456.6, 2875.0), (3456.6, 2918.3), (3459.3, 2938.9), (3458.9, 3028.5),
+                    (3456.3, 3031.1), (3451.1, 3031.9), (3386.7, 3032.1), (3383.5, 3033.3),
+                    (3379.8, 3036.8), (3377.1, 3044.4), (3377.1, 3132.1), (3372.4, 3150.5),
+                    (3372.4, 3479.0)]]},
+        {"box": (3355, 3480, 3480, 3706),
+         "paths": [[(3372.4, 3480.0), (3372.4, 3706.0)], [(3417.8, 3480.0), (3417.8, 3706.0)]]},
+    ],
+    ("ladot", "4278"): [       # Commuter Express 438B
+        {"box": (3355, 2875, 3470, 3479),
+         "paths": [[(3456.6, 2875.0), (3456.6, 2918.3), (3453.7, 2937.1), (3447.9, 2951.2),
+                    (3426.3, 2988.0), (3420.5, 3000.5), (3418.1, 3040.0), (3418.1, 3174.8),
+                    (3417.8, 3479.0)],
+                   [(3456.6, 2875.0), (3456.6, 2918.3), (3459.3, 2938.9), (3458.9, 3028.5),
+                    (3456.3, 3031.1), (3451.1, 3031.9), (3386.7, 3032.1), (3383.5, 3033.3),
+                    (3379.8, 3036.8), (3377.1, 3044.4), (3377.1, 3132.1), (3372.4, 3150.5),
+                    (3372.4, 3479.0)]]},
+        {"box": (3355, 3480, 3480, 3706),
+         "paths": [[(3372.4, 3480.0), (3372.4, 3706.0)], [(3417.8, 3480.0), (3417.8, 3706.0)]]},
+    ],
+    ("ladot", "4291"): [       # Commuter Express 439
+        {"box": (3355, 3480, 3480, 3706),
+         "paths": [[(3372.4, 3480.0), (3372.4, 3706.0)], [(3417.8, 3480.0), (3417.8, 3706.0)]]},
+    ],
+    ("ladot", "28"): [         # Commuter Express 448
+        {"box": (3355, 2875, 3470, 3479),
+         "paths": [[(3456.6, 2875.0), (3456.6, 2918.3), (3453.7, 2937.1), (3447.9, 2951.2),
+                    (3426.3, 2988.0), (3420.5, 3000.5), (3418.1, 3040.0), (3418.1, 3174.8),
+                    (3417.8, 3479.0)],
+                   [(3456.6, 2875.0), (3456.6, 2918.3), (3459.3, 2938.9), (3458.9, 3028.5),
+                    (3456.3, 3031.1), (3451.1, 3031.9), (3386.7, 3032.1), (3383.5, 3033.3),
+                    (3379.8, 3036.8), (3377.1, 3044.4), (3377.1, 3132.1), (3372.4, 3150.5),
+                    (3372.4, 3479.0)]]},
+        {"box": (3355, 3480, 3480, 3706),
+         "paths": [[(3372.4, 3480.0), (3372.4, 3706.0)], [(3417.8, 3480.0), (3417.8, 3706.0)]]},
+    ],
+    ("ladot", "4443"): [       # DASH B
+        {"box": (3440, 2490, 3711, 2760), "pass": 0,
+         "path": [(3453.1, 2507.9), (3495.6, 2596.3), (3498.6, 2600.1), (3502.3, 2602.0),
+                  (3508.1, 2602.7), (3518.9, 2600.7), (3621.0, 2551.7), (3624.6, 2551.4),
+                  (3629.1, 2553.3), (3636.7, 2567.2), (3650.9, 2597.0), (3649.9, 2598.9),
+                  (3536.5, 2653.6), (3529.6, 2657.2), (3528.2, 2659.3), (3528.3, 2664.2),
+                  (3547.2, 2702.4), (3550.3, 2703.7), (3554.5, 2702.8), (3662.9, 2650.5),
+                  (3668.9, 2648.7), (3673.5, 2652.0), (3700.8, 2709.0), (3704.5, 2712.5),
+                  (3709.1, 2714.1)]},
+        {"box": (3440, 2490, 3711, 2760), "pass": -1,
+         "path": [(3709.1, 2714.1), (3704.5, 2712.5), (3700.8, 2709.0), (3673.5, 2652.0),
+                  (3668.9, 2648.7), (3654.7, 2654.4), (3554.5, 2702.8), (3550.3, 2703.7),
+                  (3545.7, 2700.4), (3528.3, 2664.2), (3527.7, 2661.7), (3529.6, 2657.2),
+                  (3649.9, 2598.9), (3650.9, 2597.0), (3636.7, 2567.2), (3630.7, 2555.2),
+                  (3627.0, 2552.0), (3622.2, 2551.4), (3618.8, 2552.6), (3518.9, 2600.7),
+                  (3508.1, 2602.7), (3499.8, 2600.9), (3495.7, 2602.2), (3492.6, 2605.1),
+                  (3481.4, 2607.1), (3466.7, 2609.0), (3459.2, 2606.2), (3456.1, 2601.8),
+                  (3412.7, 2511.5)]},
+    ],
+    ("ladot", "4445"): [       # DASH F
+        {"box": (3365, 3480, 3425, 3610), "path": [(3377.1, 3479.6), (3377.1, 3700.1)]},
+    ],
+    ("foothill", "10490"): [{"box": (3450, 3270, 3500, 3335), "path": [(3460.8, 3270.0), (3460.8, 3286.8)]}],
+    ("foothill", "10495"): [{"box": (3450, 3270, 3500, 3335), "path": [(3460.8, 3270.0), (3460.8, 3286.8)]}],
+    ("foothill", "10499"): [{"box": (3450, 3270, 3500, 3335), "path": [(3460.8, 3270.0), (3460.8, 3286.8)]}],
+    ("foothill", "10699"): [{"box": (3450, 3270, 3500, 3335), "path": [(3460.8, 3270.0), (3460.8, 3286.8)]}],
+    ("foothill", "20493"): [{"box": (3450, 3270, 3500, 3335), "path": [(3460.8, 3270.0), (3460.8, 3286.8)]}],
+    ("foothill", "20498"): [{"box": (3450, 3270, 3500, 3335), "path": [(3460.8, 3270.0), (3460.8, 3286.8)]}],
+}
+
+
+def inset_override(pts, specs):
+    """`pts` with the run inside each spec's box replaced by its path."""
+    P = np.asarray(pts, dtype=float)
+    for spec in specs:
+        x0, y0, x1, y1 = spec["box"]
+        k = np.nonzero((P[:, 0] >= x0) & (P[:, 0] <= x1)
+                       & (P[:, 1] >= y0) & (P[:, 1] <= y1))[0]
+        if not len(k):
+            continue
+        if "pass" in spec:
+            k = np.split(k, np.nonzero(np.diff(k) > 1)[0] + 1)[spec["pass"]]
+        lo, hi = int(k[0]), int(k[-1])
+        ends = lambda p: (np.hypot(*(P[lo] - p[0])) + np.hypot(*(P[hi] - p[-1])))
+        paths = [np.asarray(p, dtype=float) for p in spec.get("paths", [spec.get("path")])]
+        path = min((q for p in paths for q in (p, p[::-1])), key=ends)
+        P = np.vstack([P[:lo], path, P[hi + 1:]])
     return P
 
 
@@ -6106,7 +6282,7 @@ def measured_positions(ll, measures, stops, distances):
 
 
 def inset_runs(ll, snap_tree=None, anchors=None, sole=False,
-               boxes=()):
+               boxes=(), speckled=True, overrides=()):
     """Inset polylines with entry and exit distances on the geographic shape."""
     ll = np.asarray(ll, dtype=float)
     if TR_INSET is None or len(ll) < 2:
@@ -6166,9 +6342,12 @@ def inset_runs(ll, snap_tree=None, anchors=None, sole=False,
             sc = snap_coherent([tuple(p) for p in pts], snap_tree,
                                caps=INSET_SOLE_CAPS if sole else INSET_CAPS,
                                win=INSET_WIN, anchors=anchors, anchor_gate=75.0,
-                               min_frac=0.35, region="inset", sole=sole)
+                               min_frac=0.35, sole=sole, speckled=speckled,
+                               region="inset" if speckled else "inset-ink")
             if sc is not None:
                 pts = unjitter(np.asarray(sc), tree=snap_tree)
+        if overrides:
+            pts = inset_override(pts, overrides)
         # drop edge-hugging slivers that never meaningfully enter the frame
         vis = ((pts[:, 0] > x0 + 8) & (pts[:, 0] < x1 - 8) &
                (pts[:, 1] > y0 + 8) & (pts[:, 1] < y1 - 8))
@@ -6270,6 +6449,7 @@ def build_schedule(feeds):
     shapes_raw = {}                 # (feed, shape_id) -> [(x,y)...] px
     shape_ll = {}                   # shape key -> [(lon,lat)...] original
     shape_isnap = {}                # (feed, shape_id) -> (colors, tol, tokens)
+    shape_iink = {}                 # (feed, shape_id) -> [(inks, dashed)] in the panel
     stops_name = {}                 # (feed, stop_id) -> printed name
     route_stops = {}                # (feed, route_id) -> {stop_id}
     shape_param = {}                # (feed, shape_id) -> pre-snap polyline,
@@ -6654,7 +6834,7 @@ def build_schedule(feeds):
                     # in orange (see runs_for), and this one is not a Metro bus
                     # line down there: it is the gray transitway, drawn in the
                     # panel the same as it is drawn outside it. Registering it
-                    # here would snap its downtown run onto the mask of every
+                    # here would snap its downtown run onto the orange of every
                     # other route in the panel. It stays unsnapped there,
                     # exactly as it was.
                     if rid0 != "910":
@@ -6708,6 +6888,12 @@ def build_schedule(feeds):
                     out_pts = snap_recording(pts, tree, anchors=anc, caps=LADOT_CAPS,
                                             win=LADOT_WIN, speckled=False)
                 shape_isnap[(feed, sid)] = (good, 30.0, toks)
+                # In the panel, Commuter Express south of Bunker Hill runs the
+                # Harbor Transitway, drawn as the gray busway with the route
+                # numbers set beside it rather than as a dashed line.
+                dashed = tree is ink_tree(LADOT_INK, dashed=True)
+                shape_iink[(feed, sid)] = [(LADOT_INK, dashed)] + (
+                    [(JLINE_INK, False)] if dashed else [])
             elif feed in SYMBOL_FEEDS:
                 # Snapped and anchored on the sheet's own strokes; see
                 # SYMBOL_FEEDS for why the mask can hold neither. Beach Cities
@@ -6736,6 +6922,7 @@ def build_schedule(feeds):
                     out_pts = snap_recording(pts, tree, anchors=anc,
                                              caps=INK_CAPS, win=61, speckled=False)
                 shape_isnap[(feed, sid)] = (good, 30.0, toks)
+                shape_iink[(feed, sid)] = [([LEGEND_INK[feed]], None)]
             elif agency_tree is not None:
                 anchor_tree = agency_tree
                 anchor_cols = list(good)
@@ -6774,10 +6961,9 @@ def build_schedule(feeds):
                                          caps=INK_CAPS if ink else None,
                                          speckled=ink is None)
                 line_ink = ink or agency_tree
-                # The call-out keeps the mask whatever the main map does:
-                # pdf_ink drops every stroke inside the panel, so there is no
-                # ink down there to snap a downtown run onto.
                 shape_isnap[(feed, sid)] = (good, 30.0, toks)
+                if feed in LEGEND_INK:
+                    shape_iink[(feed, sid)] = [([LEGEND_INK[feed]], None)]
             elif feed in STREET_SNAP:
                 # No livery, so no anchors either: the sheet prints "PT" beside
                 # the street, never a route number, so there is nothing to tell
@@ -6986,20 +7172,21 @@ def build_schedule(feeds):
             runs = None
             if ll is not None and TR_INSET is not None:
                 cols, tol, toks = shape_isnap.get(key, (None, 0, set()))
-                if key[0] == "gtfs_bus" and cols:
-                    # one orange for every Metro bus line down there. The Rapid
-                    # does keep a red ribbon of its own, but drawn beside the
-                    # orange on the same street rather than instead of it, and
-                    # the orange is the denser thing to snap on.
-                    cols = [INSET_ORANGE]
-                elif cols and key[0] in INSET_COLORS:
-                    cols = INSET_COLORS[key[0]]
-                # Metro's networks are masked on the pyramid, where the panel
-                # prints its colours faithfully and its badge chips come away
-                # from the lines; see inset_tile_tree. Every other agency is
-                # masked on the reading its colour was refined from.
-                tree = (inset_tile_tree(cols)
-                        if cols and key[0] in ("gtfs_rail", "gtfs_bus")
+                # The panel is snapped on the PDF's strokes inside it. It
+                # letters its streets and prints its chips in the same olive,
+                # sage and orange as the lines, so a mask read off the raster
+                # holds all of that as well, and a run walks onto it. Every
+                # Metro bus line is drawn there in one orange, the Rapid's red
+                # ribbon running beside it on the same street. LADOT keeps the
+                # dash style its livery picked on the main map, and an agency
+                # with a legend ink snaps on that ink.
+                # Metro rail keeps the pyramid mask of its own colour, which
+                # has its badge chips cut out; see inset_tile_tree. Anything
+                # else keeps the mask of the colour it was refined to.
+                inks = [(ORANGE_INK, False)] if key[0] == "gtfs_bus" and cols \
+                    else shape_iink.get(key)
+                tree = (inset_ink_tree(inks) if inks
+                        else inset_tile_tree(cols) if cols and key[0] == "gtfs_rail"
                         else mask_tree(cols, tol, region="inset") if cols else None)
                 # No badge anchors down here. They exist to pull a shape onto
                 # its street where the warp is out by more than the streets are
@@ -7008,8 +7195,13 @@ def build_schedule(feeds):
                 # was already sitting on.
                 runs = inset_runs(ll, tree,
                                   sole=key[0] == "gtfs_rail",
+                                  speckled=not inks,
                                   boxes=INSET_DIVERSIONS.get(
-                                      (key[0], shape_route.get(key)), ()))
+                                      (key[0], shape_route.get(key)), ()),
+                                  overrides=[
+                                      o for o in INSET_OVERRIDE_PATHS.get(
+                                          (key[0], shape_route.get(key)), ())
+                                      if key[1] in o.get("shape_ids", (key[1],))])
             shape_runs[si] = runs
         return shape_runs[si]
 

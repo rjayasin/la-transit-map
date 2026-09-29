@@ -139,6 +139,7 @@ fix. Try them in this order, least invasive first.
 | `TRIM_TERMINI` | A pin can't both anchor and trim; give the terminus in *warp* px for the trim alone |
 | `OVERRIDE_PATHS` | Nothing above can reach it. A corridor drawn by hand, spliced into the snapped shape. Last resort |
 | `INSET_DIVERSIONS` | The feed routes some workings off the line the sheet draws, and only the call-out is magnified enough to show it. A box in inset px; the run inside it is flattened onto its chord |
+| `INSET_OVERRIDE_PATHS` | A call-out run leaves the panel's drawn line. A box and a path in inset px, traced off the panel's strokes, replace the run inside the box. `pass` picks one pass through the box; `paths` offers side-by-side lines and the one whose ends meet the run is used |
 
 A DASH is a special case of the first row. It is named rather than numbered, so
 the designation its name yields is one the sheet never prints, and
@@ -532,12 +533,13 @@ everything, without either leg moving a street.
 
 ## Gotchas
 
-- **The panel's Metro masks come off the pyramid.** `INSET_ORANGE` is the ink
-  itself. `ORANGE` is that colour after map.png's reduction has blended it with
-  the page, 30 away. The pyramid also lets `inset_tile_tree` cut the badge chips
-  out, which matters more in the panel than anywhere else: a chip is a solid
-  disc of the line's own colour a few tens of px off the line, and on the raster
-  it is fused to it.
+- **The panel snaps on the PDF's strokes.** `pdf_ink(..., region="inset")`
+  keeps the strokes inside the call-out, less its legend. Metro buses snap on
+  `ORANGE_INK`, LADOT on the dash style its livery picked on the main map,
+  and every agency with a `LEGEND_INK` entry on that ink. A raster mask of the panel also holds the street
+  lettering and route chips printed in the lines' own colours. Metro rail
+  keeps a pyramid mask of its colour, where `inset_tile_tree` cuts the chips
+  out.
 - **A colour mask can be mostly lettering.** Where an agency's line is thin and
   its colour muted, map.png's reduction blends the line toward the page while
   the place names set in the same grey survive intact. Big Blue Bus through
