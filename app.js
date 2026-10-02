@@ -702,9 +702,67 @@ cv.addEventListener("gestureend", e => e.preventDefault());
 let touches = new Map();
 let tapStart = null;   // {x, y} of a candidate single-finger tap, else null
 function touchPts(e) { for (const t of e.changedTouches) touches.set(t.identifier, [t.clientX, t.clientY]); }
+
+// Touch momentum. Each move records the gesture's running pan (screen px) and
+// zoom (log scale). On release, the rate over the last FLING_WINDOW_MS carries
+// on and decays exponentially, so a flick glides to a stop. A finger held still
+// before lifting has no recent samples and releases nothing.
+const FLING_WINDOW_MS = 100;   // motion this recent sets the release rate
+const FLING_MIN_SPAN_MS = 16;  // fewer ms of samples than this is not a rate
+const FLING_PAN_TAU = 325;     // ms for pan speed to fall to 1/e
+const FLING_ZOOM_TAU = 200;    // ms for zoom rate to fall to 1/e
+const FLING_MAX_PAN = 6;       // px/ms
+const FLING_MAX_ZOOM = 0.008;  // log-scale per ms
+const FLING_STOP_PAN = 0.02;   // px/ms below which the pan stops
+const FLING_STOP_ZOOM = 0.0002;// log-scale per ms below which the zoom stops
+let fling = null;              // {vx, vy, vz, fx, fy, at} while gliding, else null
+let gestPan = [0, 0], gestZoom = 0, gestFocus = [0, 0];
+let gestSamples = [];          // [{t, x, y, z}] newest last
+function noteGesture() {
+  const t = performance.now();
+  gestSamples.push({ t, x: gestPan[0], y: gestPan[1], z: gestZoom });
+  while (gestSamples.length > 2 && t - gestSamples[1].t > FLING_WINDOW_MS) gestSamples.shift();
+}
+function startFling() {
+  const now = performance.now();
+  const recent = gestSamples.filter(s => now - s.t <= FLING_WINDOW_MS);
+  if (recent.length < 2) return;
+  const a = recent[0], b = recent[recent.length - 1], span = b.t - a.t;
+  if (span < FLING_MIN_SPAN_MS) return;
+  let vx = (b.x - a.x) / span, vy = (b.y - a.y) / span;
+  let vz = Math.max(-FLING_MAX_ZOOM, Math.min(FLING_MAX_ZOOM, (b.z - a.z) / span));
+  const pan = Math.hypot(vx, vy);
+  if (pan > FLING_MAX_PAN) { vx *= FLING_MAX_PAN / pan; vy *= FLING_MAX_PAN / pan; }
+  if (pan < FLING_STOP_PAN) vx = vy = 0;
+  if (Math.abs(vz) < FLING_STOP_ZOOM) vz = 0;
+  if (vx || vy || vz) fling = { vx, vy, vz, fx: gestFocus[0], fy: gestFocus[1], at: now };
+}
+// Advance the glide to `now`. Integrating the decay exactly over the frame gap
+// keeps the distance covered independent of the frame rate.
+function stepFling(now) {
+  if (!fling) return;
+  const dt = Math.max(0, now - fling.at);
+  fling.at = Math.max(fling.at, now);
+  const dp = Math.exp(-dt / FLING_PAN_TAU), dz = Math.exp(-dt / FLING_ZOOM_TAU);
+  const sx = fling.vx * FLING_PAN_TAU * (1 - dp), sy = fling.vy * FLING_PAN_TAU * (1 - dp);
+  view.x -= sx / view.k; view.y -= sy / view.k;
+  if (fling.vz) zoomAt(fling.fx + sx, fling.fy + sy, Math.exp(fling.vz * FLING_ZOOM_TAU * (1 - dz)));
+  fling.fx += sx; fling.fy += sy;
+  fling.vx *= dp; fling.vy *= dp; fling.vz *= dz;
+  if (Math.hypot(fling.vx, fling.vy) < FLING_STOP_PAN) fling.vx = fling.vy = 0;
+  if (Math.abs(fling.vz) < FLING_STOP_ZOOM) fling.vz = 0;
+  if (!fling.vx && !fling.vy && !fling.vz) fling = null;
+}
+
 cv.addEventListener("touchstart", e => {
-  e.preventDefault(); touchPts(e);
-  tapStart = e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null;
+  e.preventDefault();
+  // A touch that stops a glide only stops it; it is not a tap on what is under it.
+  const stopped = fling !== null;
+  fling = null;
+  if (touches.size === 0) { gestPan = [0, 0]; gestZoom = 0; gestSamples = []; }
+  touchPts(e);
+  noteGesture();
+  tapStart = e.touches.length === 1 && !stopped ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null;
 }, { passive: false });
 cv.addEventListener("touchmove", e => {
   e.preventDefault();
@@ -714,13 +772,18 @@ cv.addEventListener("touchmove", e => {
   if (ids.length === 1 && prev.has(ids[0])) {
     const [px, py] = prev.get(ids[0]), [cx, cy] = touches.get(ids[0]);
     view.x -= (cx - px) / view.k; view.y -= (cy - py) / view.k;
+    gestPan[0] += cx - px; gestPan[1] += cy - py; gestFocus = [cx, cy];
+    noteGesture();
   } else if (ids.length >= 2 && prev.has(ids[0]) && prev.has(ids[1])) {
     const [ax0, ay0] = prev.get(ids[0]), [bx0, by0] = prev.get(ids[1]);
     const [ax1, ay1] = touches.get(ids[0]), [bx1, by1] = touches.get(ids[1]);
     const d0 = Math.hypot(bx0 - ax0, by0 - ay0), d1 = Math.hypot(bx1 - ax1, by1 - ay1);
     const mx = (ax1 + bx1) / 2, my = (ay1 + by1) / 2;
-    view.x -= (mx - (ax0 + bx0) / 2) / view.k; view.y -= (my - (ay0 + by0) / 2) / view.k;
-    if (d0 > 0) zoomAt(mx, my, d1 / d0);
+    const dx = mx - (ax0 + bx0) / 2, dy = my - (ay0 + by0) / 2;
+    view.x -= dx / view.k; view.y -= dy / view.k;
+    if (d0 > 0 && d1 > 0) { zoomAt(mx, my, d1 / d0); gestZoom += Math.log(d1 / d0); }
+    gestPan[0] += dx; gestPan[1] += dy; gestFocus = [mx, my];
+    noteGesture();
   }
   // any second finger or meaningful drift disqualifies the tap
   if (tapStart) {
@@ -735,6 +798,7 @@ const endTouch = e => {
   }
   tapStart = null;
   for (const t of e.changedTouches) touches.delete(t.identifier);
+  if (touches.size === 0 && e.type === "touchend") startFling();
 };
 cv.addEventListener("touchend", endTouch);
 cv.addEventListener("touchcancel", endTouch);
@@ -1283,6 +1347,7 @@ function flyToShapes(ids) {
   const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
   const to = { k, x: cx - W / 2 / k, y: cy - (H - FIND_BAR) / 2 / k };
   flight = { from: { ...view }, to, t0: performance.now() };
+  fling = null;
 }
 
 // Advance the flight one frame. Zoom is interpolated in log scale, so each
@@ -1302,7 +1367,7 @@ function stepFlight(now) {
 }
 // Any hand on the map takes the view back.
 for (const ev of ["mousedown", "wheel", "touchstart", "gesturestart"])
-  cv.addEventListener(ev, () => { flight = null; }, { passive: true });
+  cv.addEventListener(ev, () => { flight = null; fling = null; }, { passive: true });
 
 // ---- diagnostics ----
 // The next frame is scheduled whatever happens, so a throwing frame is a dropped
@@ -2189,6 +2254,7 @@ function drawFrame(now) {
   }
   showDay(laDay());   // both modes play today, whichever day today has become
   stepFlight(now);
+  stepFling(now);
   // Whether tiles may be fetched this frame; see getTile. Decided once, here,
   // so every lookup in the frame agrees, and so the moment the view lands can be
   // seen: nothing has changed at that instant, so composeBackground would skip,
