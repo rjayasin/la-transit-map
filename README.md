@@ -19,7 +19,9 @@ python3 -m http.server 8741
   between the time-lapse, which scrubs the whole day at 30-400×, and **Live**,
   which holds the map to Los Angeles' clock at 1×.
 - **Navigation.** Drag to pan. On a Mac trackpad, gestures follow Maps.app:
-  two-finger swipe pans, pinch zooms. A mouse wheel zooms.
+  two-finger swipe pans, pinch zooms. A mouse wheel zooms. On a touch screen,
+  one finger pans and two pinch. A flicked pan or pinch keeps going after
+  release and slows to a stop. A touch during the glide stops it.
 - **Tap a vehicle** to trace the line it runs, on the map or inside the
   Downtown call-out. Tap another to switch, empty space to clear.
 - **Find a line.** ⌘F (Ctrl+F) opens a search box. Type a designation and
