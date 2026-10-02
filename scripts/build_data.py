@@ -1882,6 +1882,7 @@ TRIM_TERMINI = {
     ("torrance", "5"): [(1412, 3189)],   # PCH & Crenshaw, in warp px
     ("torrance", "10"): [(1412, 3189)],
     ("gtfs_bus", "182"): [(1970.4, 1732.1)],   # Rose Hill Transit Center
+    ("bigbluebus", "4098"): [(836.2, 2189.9)],  # Big Blue Bus 1, Main St
 }
 
 TERMINUS_REACH = 35.0   # px a shape must pass within of a pin to be cut to it
