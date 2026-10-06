@@ -135,6 +135,7 @@ fix. Try them in this order, least invasive first.
 | `AGENCY_SYMBOLS` | A municipal operator printed under one code for the whole agency. Every route takes it as label and anchor |
 | `SYMBOL_INK` | One symbol of a feed is drawn in a different ink from the rest of that feed |
 | `SHEET_ROUTES` | A feed runs routes the sheet does not draw. Only the listed routes are kept |
+| `TRIP_ROUTE_IDS` | A feed's trips name a route id its routes.txt spells differently |
 | `BADGE_FILLS` | An agency's badge chips are its saturated legend ink, far enough from its washed line color that the color gate rejects its own badges |
 | `LEGEND_SEEDS` | A refined line color has drifted somewhere the artwork isn't; name the stroke the legend actually uses |
 | `PINNED_ANCHORS` | The sheet prints no badge over a stretch that needs one. A point on the drawn line then acts as a badge |
@@ -691,3 +692,9 @@ vector strokes, so read the ink off the strokes nearest the agency's symbol
 words on the map, which match the symbol's text colour. Most of these inks are
 shared with a larger operator. A trip with no `shape_id` gets a shape drawn
 through its own stops, which the snap then pulls onto the line.
+
+The new symbol feeds take one more step after the snap: `onto_strokes` moves
+each point onto the nearest stroke of the agency's ink (or, closer in, another
+bus line's ink) and walks the gaps along the strokes, so corners come out
+square. It only reaches `MATCH_OWN` px, so a stretch the warp leaves further
+off than that keeps the snap's answer and needs an override.

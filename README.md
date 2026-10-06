@@ -3,7 +3,7 @@
 **[Live map → rjayasin.github.io/la-transit-map](https://rjayasin.github.io/la-transit-map/)**
 
 Animated 24-hour visualization of every scheduled transit vehicle in LA: Metro
-bus and rail, 39 municipal systems and Metrolink, played over Metro's official
+bus and rail, 41 municipal systems and Metrolink, played over Metro's official
 "Bus and Rail System" map (May 2026).
 
 ## Run
@@ -41,9 +41,9 @@ and emits `schedule.json`.
   schedule. Higher levels come from the PDF vectors, up to about 700 dpi of
   the 47″ sheet. Zoom is capped at the deepest level's 1:1. `map.png` is an
   offline input for geometry tools and overview generation.
-- **Data.** 42 static GTFS feeds are reduced to one service date per weekday
-  and emitted as `schedule.json` (~12 MB): 52,730 trips on 459 routes for a
-  whole week, around 28,800 of them on any one weekday. Each carries route
+- **Data.** 44 static GTFS feeds are reduced to one service date per weekday
+  and emitted as `schedule.json` (~12 MB): 53,485 trips on 476 routes for a
+  whole week, around 29,250 of them on any one weekday. Each carries route
   colors and labels, shape polylines in map pixels, per-stop distance along
   each shape, stop arrival times, and a bitmask of the days the trip runs, so
   the week costs one list rather than seven. Trips crossing midnight are
@@ -254,11 +254,13 @@ and so cannot be suppressed by it.
 
 ## Known limitations
 
-- **Missing systems.** Glendale Beeline and West Hollywood Cityline (downloads
-  blocked), South Gate GATE (no public GTFS), OCTA and Amtrak. AVTA, Santa
-  Clarita and Simi Valley run only the routes the sheet draws.
-- **Old timetables.** Calabasas (2021) and Sierra Madre (2023-24) publish
-  nothing newer, so their vehicles run an old week's service.
+- **Missing systems.** South Gate GATE (no public GTFS), OCTA and Amtrak.
+  AVTA, Santa Clarita and Simi Valley run only the routes the sheet draws.
+- **Old timetables.** Sierra Madre publishes nothing newer than 2023-24, so its
+  vehicles run an old week's service.
+- **Manual downloads.** The Glendale, West Hollywood, Calabasas, Cudahy and
+  Glendora sites refuse scripted requests, so those archives are fetched in a
+  browser.
 - **Stale feeds.** Some municipal calendars end before the target service week.
   Those systems animate their busiest covered date of the same weekday instead.
 - **Scheduled, not realtime.** There is no vehicle feed behind either mode.
@@ -306,15 +308,17 @@ download date. Agency downloads are used where available; other feeds use the
 | `baldwinpark` | Baldwin Park Transit | [Agency GTFS](https://passio3.com/baldwinpark/passioTransit/gtfs/google_transit.zip) | 2026-10-06 |
 | `bellflower` | Bellflower Bus | [Remix GTFS](https://gtfs.remix.com/CalITP.zip) | 2026-10-06 |
 | `bellgardens` | Bell Gardens Transit | [Agency GTFS](https://www.ips-systems.com/GTFS/Schedule/21) | 2026-10-06 |
-| `calabasas` | Calabasas Shuttle | [Mobility DB mirror](https://files.mobilitydatabase.org/mdb-296/latest.zip) | 2026-10-06 |
+| `calabasas` | Calabasas Shuttle | [Agency GTFS](https://www.cityofcalabasas.com/home/showpublisheddocument/32961/638749699548630000) | 2026-10-06 |
 | `cerritos` | Cerritos on Wheels | [Mobility DB mirror](https://files.mobilitydatabase.org/tld-4667/latest.zip) | 2026-10-06 |
 | `commerce` | City of Commerce Transit | [Agency GTFS](https://citycommbus.com/gtfs) | 2026-10-06 |
 | `compton` | Compton Renaissance | [Agency GTFS](https://rapid.nationalrtap.org/GTFSFileManagement/UserUploadFiles/14915/20260522-GTFS.zip) | 2026-10-06 |
-| `cudahy` | Cudahy Area Rapid Transit | [Mobility DB mirror](https://files.mobilitydatabase.org/mdb-2248/latest.zip) | 2026-10-06 |
+| `cudahy` | Cudahy Area Rapid Transit | [Agency GTFS](https://www.cityofcudahyca.gov/DocumentCenter/View/2638/City_of_Cudahy_CART_-_8-20-26-2026-08-21-19-35-00-gtfs) | 2026-10-06 |
 | `downey` | DowneyLINK | [Agency GTFS](https://downey.rideralerts.com/infopoint/gtfs-zip.ashx) | 2026-10-06 |
 | `elmonte` | El Monte Transit | [Agency GTFS](https://rapid.nationalrtap.org/GTFSFileManagement/UserUploadFiles/11664/Google_Transit.zip) | 2026-10-06 |
 | `flyaway` | LAX FlyAway | [Agency GTFS](https://laxflyaway.transloc.com/Secure/Admin/Reports/GTFSDownload.aspx) | 2026-10-06 |
-| `glendora` | Glendora Transit | [Mobility DB mirror](https://files.mobilitydatabase.org/mdb-3097/latest.zip) | 2026-10-06 |
+| `glendora` | Glendora Transit | [Agency GTFS](https://www.cityofglendora.gov/files/assets/city/v/3/recreation-amp-human-services/transportation/documents/gtfs-6-2025.zip) | 2026-10-06 |
+| `glendale` | Glendale Beeline | [Agency GTFS](https://www.glendaleca.gov/home/showdocument?id=29549) | 2026-10-06 |
+| `westhollywood` | West Hollywood Cityline | [Agency GTFS](https://www.weho.org/home/showdocument?id=53383&t=637901042129473913) | 2026-10-06 |
 | `huntingtonpark` | Huntington Park COMBI | [Agency GTFS](https://www.hpca.gov/DocumentCenter/View/11702) | 2026-10-06 |
 | `lacampana` | La Campana (City of Bell) | [Agency GTFS](https://rapid.nationalrtap.org/GTFSFileManagement/UserUploadFiles/13119/LaCampanaGTFS-2025-01-17.zip) | 2026-10-06 |
 | `lacounty` | LA County Public Works shuttles (El Sol, Sunshine Shuttle, The Link) | [Mobility DB mirror](https://files.mobilitydatabase.org/mdb-28/latest.zip) | 2026-10-06 |

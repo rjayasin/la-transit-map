@@ -57,7 +57,7 @@ FEEDS = ["gtfs_rail", "gtfs_bus", "bigbluebus", "culvercity", "ladot", "longbeac
          "bellgardens", "calabasas", "cerritos", "commerce", "compton", "cudahy",
          "downey", "elmonte", "flyaway", "glendora", "huntingtonpark", "lacampana",
          "lacounty", "lawndale", "lynwood", "montereypark", "pvpta", "santaclarita",
-         "sierramadre", "simivalley", "westcovina",
+         "sierramadre", "simivalley", "westcovina", "glendale", "westhollywood",
          "metrolink"]
 WORKERS = min(8, (os.cpu_count() or 4))   # threads for the mask fits
 METRO_BUS_COLOR, METRO_BUS_TEXT = "E16710", "FFFFFF"
@@ -86,7 +86,14 @@ FEED_NAMES = {
     "lynwood": "Lynwood Breeze", "montereypark": "Monterey Park Spirit Bus",
     "pvpta": "Palos Verdes Peninsula Transit", "santaclarita": "Santa Clarita Transit",
     "sierramadre": "Sierra Madre Gateway Coach", "simivalley": "Simi Valley Transit",
-    "westcovina": "Go West",
+    "westcovina": "Go West", "glendale": "Glendale Beeline",
+    "westhollywood": "West Hollywood Cityline",
+}
+
+# Route ids a feed's trips.txt uses that its routes.txt spells differently.
+# Without the mapping those trips have no route to belong to.
+TRIP_ROUTE_IDS = {
+    ("calabasas", "CalabasasTrolley"): "Trolley",
 }
 
 # Routes the sheet draws, for feeds that run more than it draws. Commuter
@@ -95,7 +102,7 @@ FEED_NAMES = {
 # leaves out. A route not listed is dropped, since it has no line to ride.
 SHEET_ROUTES = {
     "avta": {"785", "786", "787"},
-    "calabasas": {"16949", "16954", "16955", "19724"},
+    "calabasas": {"Line1", "Line3", "Line4", "Trolley"},
     "lacounty": {"13050", "13051", "13055", "13056", "13057", "13058", "13059",
                  "13060", "13062", "13063", "13065", "13066", "13067", "13068",
                  "13315"},
@@ -361,7 +368,7 @@ AGENCY_SYMBOLS = {
     "downey": "DL", "elmonte": "EM", "flyaway": "FA", "glendora": "GT",
     "huntingtonpark": "HP", "lacampana": "LC", "lawndale": "LW", "lynwood": "LY",
     "montereypark": "MP", "pvpta": "PV", "santaclarita": "SC", "sierramadre": "GC",
-    "simivalley": "SV", "westcovina": "GW",
+    "simivalley": "SV", "westcovina": "GW", "glendale": "GB", "westhollywood": "CL",
 }
 
 
@@ -1180,6 +1187,8 @@ LEGEND_INK = {
     "sierramadre": (0.8051, 0.8047, 0.4456),
     "simivalley": (0.1677, 0.4166, 0.3111),
     "westcovina": (0.7995, 0.5765, 0.74),
+    "glendale": (0.8051, 0.8047, 0.4456),
+    "westhollywood": (0.2691, 0.5799, 0.5177),
 }
 
 # A symbol drawn in a different ink from the rest of its feed. The County's
@@ -6407,6 +6416,111 @@ SEAT_PASSES = 2       # the correction is smoothed like the line it corrects,
                       # nothing left to give back, so this is a count not a cap.
 
 
+# ---- onto the strokes themselves, for the municipal symbol feeds ----
+#
+# The snap moves a whole stretch by a smoothed displacement, so it rounds every
+# corner by the smoothing window and leaves thin lines a few px off. The
+# municipal operators are drawn thin and square, so for them the snapped shape
+# is taken the last step onto the strokes: each point goes to the nearest stroke
+# of its own ink within reach, or of another bus line's ink a little closer in
+# (an operator riding a street the sheet draws in another agency's colour), and
+# wherever consecutive points land apart the gap is walked along the strokes, so
+# a corner comes back as the drawn corner rather than a chord across it.
+MATCH_OWN = 20.0     # px a point may move onto its own agency's ink
+MATCH_OTHER = 8.0    # px it may move onto another bus line's ink
+MATCH_JUMP = 3.0     # px between neighbours that counts as a gap to walk
+MATCH_DETOUR = 3.0   # a walk longer than this many times the gap is refused,
+                     # since the two points are then on different lines
+STROKE_BRIDGE = 12.0  # px a stroke end is joined across to the next stroke
+
+
+def stroke_graph(P, cell=2.0, r=3.0, bridge=STROKE_BRIDGE):
+    """Ink points on a `cell` grid, joined where they touch. A drawn line is
+    split into strokes at corners and crossings and the pieces stop a few px
+    short of each other, so a stroke end, a node with neighbours on one side
+    only, is joined to everything within `bridge` as well."""
+    q = np.unique(np.round(np.asarray(P) / cell).astype(np.int64), axis=0) * cell
+    tree = cKDTree(q)
+    pairs = tree.query_pairs(r, output_type="ndarray")
+    nb = [[] for _ in range(len(q))]
+    for i, j in pairs:
+        nb[i].append(j)
+        nb[j].append(i)
+    extra = []
+    for i, js in enumerate(nb):
+        if js:
+            v = q[js] - q[i]
+            u = v / np.maximum(np.hypot(*v.T), 1e-9)[:, None]
+            if np.hypot(*u.mean(0)) <= 0.7:
+                continue
+        extra += [(min(i, j), max(i, j)) for j in tree.query_ball_point(q[i], bridge) if j != i]
+    if extra:
+        pairs = np.unique(np.vstack([pairs.reshape(-1, 2), np.array(extra)]), axis=0)
+    w = np.hypot(*(q[pairs[:, 0]] - q[pairs[:, 1]]).T)
+    G = sparse.coo_matrix((w, (pairs[:, 0], pairs[:, 1])), shape=(len(q), len(q))).tocsr()
+    return q, tree, G
+
+
+def onto_strokes(prior, own, other):
+    """`prior` moved onto the drawn strokes, index for index."""
+    prior = np.asarray(prior, float)
+    n = len(prior)
+    d, j = cKDTree(own).query(prior)
+    on = d <= MATCH_OWN
+    snap = prior.copy()
+    snap[on] = own[j[on]]
+    allp = own
+    if len(other):
+        d, j = cKDTree(other).query(prior)
+        use = ~on & (d <= MATCH_OTHER)
+        snap[use] = other[j[use]]
+        on |= use
+        allp = np.vstack([own, other])
+    if not on.any():
+        return prior
+    near = cKDTree(allp).query_ball_point(snap[on], 30.0)
+    keep = np.unique(np.concatenate([np.asarray(v, int) for v in near if v]))
+    nodes, ntree, G = stroke_graph(allp[keep])
+    nid = ntree.query(snap)[1]
+    out = prior.copy()
+    i = 0
+    while i < n:
+        if not on[i]:
+            i += 1
+            continue
+        j, poly = i, [snap[i][None]]
+        while j + 1 < n and on[j + 1]:
+            gap = math.hypot(*(snap[j + 1] - snap[j]))
+            if gap > MATCH_JUMP:
+                D, pred = dijkstra(G, indices=[nid[j]], limit=MATCH_DETOUR * gap + 10,
+                                   return_predecessors=True)
+                if np.isfinite(D[0][nid[j + 1]]):
+                    path = [nid[j + 1]]
+                    while path[-1] != nid[j]:
+                        path.append(pred[0][path[-1]])
+                    poly.append(nodes[path[::-1]][1:])
+            poly.append(snap[j + 1][None])
+            j += 1
+        # spread the run's points along what was walked, at the prior's pace,
+        # so the stops keep their places along it
+        pl = np.vstack(poly)
+        cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(pl, axis=0).T))])
+        pa = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(prior[i:j + 1], axis=0).T))])
+        t = pa / pa[-1] * cum[-1] if pa[-1] > 0 else np.linspace(0, cum[-1], j - i + 1)
+        out[i:j + 1] = np.c_[np.interp(t, cum, pl[:, 0]), np.interp(t, cum, pl[:, 1])]
+        i = j + 1
+    return out
+
+
+@lru_cache(maxsize=None)
+def bus_ink_except(ink):
+    """Every bus line's strokes but those of `ink`."""
+    cols = {tuple(c) for c in LEGEND_INK.values()} | {tuple(c) for c in ORANGE_INK} \
+        | {tuple(c) for c in LADOT_INK}
+    cols.discard(tuple(ink))
+    return pdf_ink(sorted(cols))
+
+
 def unjitter(P, span=JITTER_SPAN, tree=None):
     """A fitted shape with the feed's own tracing wander taken out of it.
 
@@ -7397,6 +7511,8 @@ def build_schedule(feeds):
         is_metro = feed in ("gtfs_rail", "gtfs_bus")
 
         trip_rows = read_csv(feed, "trips.txt")
+        for row in trip_rows:
+            row["route_id"] = TRIP_ROUTE_IDS.get((feed, row["route_id"]), row["route_id"])
         tps = defaultdict(int)
         for row in trip_rows:
             tps[row["service_id"]] += 1
@@ -8015,6 +8131,9 @@ def build_schedule(feeds):
             # by hand, so it goes on after this rather than through it.
             if out_pts is not None:
                 full = unjitter(full, tree=line_ink)
+            if (feed in AGENCY_SYMBOLS or feed == "lacounty") and len(full) == len(base):
+                ink = symbol_ink(feed, rmeta[rid][0] if rid in rmeta else None)
+                full = onto_strokes(full, pdf_ink([ink]), bus_ink_except(ink))
             override = OVERRIDE_PATHS.get((feed, (rid or "").split("-")[0]))
             hand = None
             if override is not None and len(full) == len(base):
