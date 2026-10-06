@@ -42,7 +42,7 @@ and emits `schedule.json`.
   the 47″ sheet. Zoom is capped at the deepest level's 1:1. `map.png` is an
   offline input for geometry tools and overview generation.
 - **Data.** 44 static GTFS feeds are reduced to one service date per weekday
-  and emitted as `schedule.json` (~12 MB): 53,485 trips on 476 routes for a
+  and emitted as `schedule.json` (~12 MB): 53,465 trips on 475 routes for a
   whole week, around 29,250 of them on any one weekday. Each carries route
   colors and labels, shape polylines in map pixels, per-stop distance along
   each shape, stop arrival times, and a bitmask of the days the trip runs, so
