@@ -132,6 +132,9 @@ fix. Try them in this order, least invasive first.
 | `MAP_LABELS` | The sheet badges a route differently from the feed's `route_short_name` (or the name is prose, as for a DASH). Also fixes `orphan_check` rows |
 | `SPLIT_LABELS` | The feed pairs two designations under one route (`235/236`) and the sheet draws them as two lines rather than one line renamed along its length |
 | `SYMBOL_OWNERS` | The sheet symbolises by *operator*, so a shared symbol must be assigned to a specific route by hand |
+| `AGENCY_SYMBOLS` | A municipal operator printed under one code for the whole agency. Every route takes it as label and anchor |
+| `SYMBOL_INK` | One symbol of a feed is drawn in a different ink from the rest of that feed |
+| `SHEET_ROUTES` | A feed runs routes the sheet does not draw. Only the listed routes are kept |
 | `BADGE_FILLS` | An agency's badge chips are its saturated legend ink, far enough from its washed line color that the color gate rejects its own badges |
 | `LEGEND_SEEDS` | A refined line color has drifted somewhere the artwork isn't; name the stroke the legend actually uses |
 | `PINNED_ANCHORS` | The sheet prints no badge over a stretch that needs one. A point on the drawn line then acts as a badge |
@@ -681,3 +684,10 @@ rail seeds the snap config) and `FEED_NAMES`. Seed its drawn color in
 page by color. An agency the sheet draws no line for gets a sprite color in
 `DRAWN_COLORS` instead and keeps the warp. Then run the checks above. A feed
 that warps far off the sheet shows up immediately in `speed_check` as off-map.
+
+A municipal operator from the legend's "Municipal & Neighboring Bus Lines"
+table goes in `AGENCY_SYMBOLS` and `LEGEND_INK`. The legend swatches are not
+vector strokes, so read the ink off the strokes nearest the agency's symbol
+words on the map, which match the symbol's text colour. Most of these inks are
+shared with a larger operator. A trip with no `shape_id` gets a shape drawn
+through its own stops, which the snap then pulls onto the line.

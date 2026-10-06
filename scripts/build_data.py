@@ -52,7 +52,13 @@ PDF = "26-1720_blt_system_map_47x47.5-2.pdf"   # the sheet itself, read for both
 # Norwalk Transit District, and warps a quarter of a million px off the sheet.
 FEEDS = ["gtfs_rail", "gtfs_bus", "bigbluebus", "culvercity", "ladot", "longbeach",
          "foothill", "torrance", "montebello", "gtrans", "pasadena",
-         "burbank", "beachcities", "norwalk", "metrolink"]
+         "burbank", "beachcities", "norwalk",
+         "alhambra", "arcadia", "artesia", "avta", "baldwinpark", "bellflower",
+         "bellgardens", "calabasas", "cerritos", "commerce", "compton", "cudahy",
+         "downey", "elmonte", "flyaway", "glendora", "huntingtonpark", "lacampana",
+         "lacounty", "lawndale", "lynwood", "montereypark", "pvpta", "santaclarita",
+         "sierramadre", "simivalley", "westcovina",
+         "metrolink"]
 WORKERS = min(8, (os.cpu_count() or 4))   # threads for the mask fits
 METRO_BUS_COLOR, METRO_BUS_TEXT = "E16710", "FFFFFF"
 FALLBACK_COLOR, FALLBACK_TEXT = "888888", "FFFFFF"
@@ -67,6 +73,34 @@ FEED_NAMES = {
     "gtrans": "GTrans", "pasadena": "Pasadena Transit",
     "burbank": "BurbankBus", "beachcities": "Beach Cities Transit",
     "norwalk": "Norwalk Transit", "metrolink": "Metrolink",
+    "alhambra": "Alhambra Community Transit", "arcadia": "Arcadia Transit",
+    "artesia": "Artesia Transit", "avta": "Antelope Valley Transit",
+    "baldwinpark": "Baldwin Park Transit", "bellflower": "Bellflower Bus",
+    "bellgardens": "Bell Gardens Transit", "calabasas": "Calabasas Shuttle",
+    "cerritos": "Cerritos on Wheels", "commerce": "Commerce Transit",
+    "compton": "Compton Renaissance", "cudahy": "Cudahy Area Rapid Transit",
+    "downey": "DowneyLINK", "elmonte": "El Monte Transit",
+    "flyaway": "LAX FlyAway", "glendora": "Glendora Transit",
+    "huntingtonpark": "Huntington Park COMBI", "lacampana": "La Campana",
+    "lacounty": "LA County Shuttles", "lawndale": "Lawndale Beat",
+    "lynwood": "Lynwood Breeze", "montereypark": "Monterey Park Spirit Bus",
+    "pvpta": "Palos Verdes Peninsula Transit", "santaclarita": "Santa Clarita Transit",
+    "sierramadre": "Sierra Madre Gateway Coach", "simivalley": "Simi Valley Transit",
+    "westcovina": "Go West",
+}
+
+# Routes the sheet draws, for feeds that run more than it draws. Commuter
+# operators from beyond the sheet's edge are drawn only for their express
+# routes into the county, and the County's feed carries shuttles the sheet
+# leaves out. A route not listed is dropped, since it has no line to ride.
+SHEET_ROUTES = {
+    "avta": {"785", "786", "787"},
+    "calabasas": {"16949", "16954", "16955", "19724"},
+    "lacounty": {"13050", "13051", "13055", "13056", "13057", "13058", "13059",
+                 "13060", "13062", "13063", "13065", "13066", "13067", "13068",
+                 "13315"},
+    "santaclarita": {"757", "791", "792", "794", "796", "797", "799"},
+    "simivalley": {"15202"},
 }
 
 # Metrolink trips.txt leaves shape_id empty; shapes.txt carries per-line
@@ -263,6 +297,21 @@ MAP_LABELS = {
     ("beachcities", "4819"): "BC",  # 102, Redondo Beach Pier / Green Line
     ("burbank", "3162"): "BU",      # Pink Route
     ("burbank", "3163"): "BU",      # NoHo - Airport
+    ("lacounty", "13050"): "TL",    # Avocado Heights/Bassett/West Valinda
+    ("lacounty", "13051"): "TL",    # East Valinda
+    ("lacounty", "13055"): "ES",    # Union Pacific/Salazar Park
+    ("lacounty", "13056"): "ES",    # City Terrace/ELAC
+    ("lacounty", "13057"): "ES",    # Whittier Blvd/Saybrook Park
+    ("lacounty", "13058"): "SU",    # Sunshine Shuttle C
+    ("lacounty", "13059"): "SU",    # Sunshine Shuttle A
+    ("lacounty", "13060"): "SU",    # Sunshine Shuttle B
+    ("lacounty", "13062"): "TL",    # Athens
+    ("lacounty", "13063"): "TL",    # Baldwin Hills Parklands
+    ("lacounty", "13065"): "TL",    # Florence-Firestone/Walnut Park
+    ("lacounty", "13066"): "TL",    # King Medical Center
+    ("lacounty", "13067"): "TL",    # Lennox
+    ("lacounty", "13068"): "TL",    # Willowbrook A
+    ("lacounty", "13315"): "TL",    # Willowbrook B
     ("ladot", "708"): "WM",         # DASH Wilmington, clockwise
     ("ladot", "710"): "WM",         # DASH Wilmington, counterclockwise
     ("ladot", "711"): "SP",         # DASH San Pedro
@@ -299,6 +348,20 @@ MAP_LABELS = {
     ("ladot", "715"): "VM",        # DASH Vermont/Main, clockwise
     ("ladot", "716"): "VM",        # DASH Vermont/Main, counterclockwise
     ("ladot", "4869"): "PE",       # DASH Pico Union/Echo Park
+}
+
+# The symbol a municipal operator is printed under, where the sheet gives one
+# code for the whole agency rather than one per route. Every route of the feed
+# takes it, as label and as anchor, unless MAP_LABELS names the route. See
+# SYMBOL_FEEDS.
+AGENCY_SYMBOLS = {
+    "alhambra": "AC", "arcadia": "AT", "artesia": "AR", "avta": "AV",
+    "baldwinpark": "BP", "bellflower": "BF", "bellgardens": "BG", "calabasas": "CS",
+    "cerritos": "CW", "commerce": "CC", "compton": "CR", "cudahy": "CT",
+    "downey": "DL", "elmonte": "EM", "flyaway": "FA", "glendora": "GT",
+    "huntingtonpark": "HP", "lacampana": "LC", "lawndale": "LW", "lynwood": "LY",
+    "montereypark": "MP", "pvpta": "PV", "santaclarita": "SC", "sierramadre": "GC",
+    "simivalley": "SV", "westcovina": "GW",
 }
 
 
@@ -1040,15 +1103,19 @@ LEGEND_SEEDS = {
     "norwalk": [(168, 208, 208)],
 }
 
-# The two operators the sheet symbolises by *agency* rather than by route, and
-# so the two that snap on their legend ink rather than on a colour mask. Neither
-# has a route number printed anywhere: one code beside every line the operator
+# The operators the sheet symbolises by *agency* rather than by route, and so
+# the ones that snap on their legend ink rather than on a colour mask. None has
+# a route number printed anywhere: one code beside every line the operator
 # runs, set as plain text rather than on a chip, so the mask's presence test (the
 # agency's own pixels *under* the word) finds only antialiased glyph strokes and
-# rejects them, leaving both agencies with no anchors at all. The legend strokes
+# rejects them, leaving the agency with no anchors at all. The legend strokes
 # answer both halves: they are where the line is, and distance to them is a test
 # a word standing beside a line can pass. See `route_anchors`'s `near`.
-SYMBOL_FEEDS = {"beachcities", "burbank"}
+#
+# Most of these inks are shared with a larger operator's colour, so the tree a
+# route snaps on holds other agencies' lines too. The anchors and the snap's
+# short reach keep a route on its own.
+SYMBOL_FEEDS = {"beachcities", "burbank"} | set(AGENCY_SYMBOLS) | {"lacounty"}
 
 # Which route each of those symbols stands for, where the sheet's own answer is
 # "the operator" and the routes cannot be told apart any other way.
@@ -1086,7 +1153,46 @@ LEGEND_INK = {
     "norwalk": (0.5768, 0.8258, 0.8628),
     "torrance": (0.4859, 0.5034, 0.7086),
     "burbank": (0.2691, 0.5799, 0.5177),
+    "alhambra": (0.6098, 0.5633, 0.5832),
+    "arcadia": (0.3941, 0.773, 0.7071),
+    "artesia": (0.8051, 0.8047, 0.4456),
+    "avta": (0.3941, 0.773, 0.7071),
+    "baldwinpark": (0.8051, 0.8047, 0.4456),
+    "bellflower": (0.1677, 0.4166, 0.3111),
+    "bellgardens": (0.4859, 0.5034, 0.7086),
+    "calabasas": (0.6031, 0.5597, 0.5794),
+    "cerritos": (0.4859, 0.5034, 0.7086),
+    "commerce": (0.4995, 0.1196, 0.2324),
+    "compton": (0.8051, 0.8047, 0.4456),
+    "cudahy": (0.3941, 0.773, 0.7071),
+    "downey": (0.604, 0.5608, 0.5794),
+    "elmonte": (0.7995, 0.5765, 0.74),
+    "flyaway": (0.7995, 0.5765, 0.74),
+    "glendora": (0.4995, 0.1196, 0.2324),
+    "huntingtonpark": (0.604, 0.5608, 0.5794),
+    "lacampana": (0.8051, 0.8047, 0.4456),
+    "lacounty": (0.604, 0.5608, 0.5794),
+    "lawndale": (0.6284, 0.7163, 0.5526),
+    "lynwood": (0.1677, 0.4166, 0.3111),
+    "montereypark": (0.3941, 0.773, 0.7071),
+    "pvpta": (0.604, 0.5608, 0.5794),
+    "santaclarita": (0.4859, 0.5034, 0.7086),
+    "sierramadre": (0.8051, 0.8047, 0.4456),
+    "simivalley": (0.1677, 0.4166, 0.3111),
+    "westcovina": (0.7995, 0.5765, 0.74),
 }
+
+# A symbol drawn in a different ink from the rest of its feed. The County's
+# feed runs three services the sheet symbolises apart, and Sunshine Shuttle is
+# drawn in yellow where El Sol and The Link are gray.
+SYMBOL_INK = {
+    ("lacounty", "SU"): (0.8051, 0.8047, 0.4456),
+}
+
+
+def symbol_ink(feed, label):
+    """The stroke colour a symbol feed's route is drawn in."""
+    return SYMBOL_INK.get((feed, label), LEGEND_INK[feed])
 
 # Agencies that snap onto those strokes rather than onto their colour mask, the
 # way Metro and LADOT do: the mask still supplies the anchors, since a badge is
@@ -7307,7 +7413,9 @@ def build_schedule(feeds):
 
         rmeta, badge_tokens, sheet_tokens, is_dash = {}, {}, {}, {}
         for row in read_csv(feed, "routes.txt"):
-            label = MAP_LABELS.get((feed, row["route_id"])) or route_label(
+            sheet_label = (MAP_LABELS.get((feed, row["route_id"]))
+                           or AGENCY_SYMBOLS.get(feed))
+            label = sheet_label or route_label(
                 row.get("route_short_name", ""), row.get("route_long_name", ""))
             extra = set()          # designations the sheet prints that the
                                    # feed's short name doesn't carry; see 910
@@ -7353,13 +7461,13 @@ def build_schedule(feeds):
                 set(short.replace("/", " ").split()) | {label} | extra)
             # ...and, apart, the ones read off the artwork rather than out of
             # the feed. A DASH is anchored on those alone; see ladot_livery.
-            sheet_tokens[row["route_id"]] = (
-                {MAP_LABELS[(feed, row["route_id"])]}
-                if (feed, row["route_id"]) in MAP_LABELS else set())
+            sheet_tokens[row["route_id"]] = {sheet_label} if sheet_label else set()
 
         trip_info, trip_dow, trip_block = {}, {}, {}
         for row in trip_rows:
             if row["service_id"] not in dow_of:
+                continue
+            if feed in SHEET_ROUTES and row["route_id"] not in SHEET_ROUTES[feed]:
                 continue
             sid = row.get("shape_id", "")
             if feed == "metrolink":
@@ -7397,11 +7505,21 @@ def build_schedule(feeds):
         chained = chain_block_trips(stop_times, trip_info, trip_block)
         n_before = len(trips_out)
         used_shapes = set()
+        # Some feeds publish trips with no shape at all. Such a trip gets one
+        # drawn straight through its own stops, one per stop sequence, and the
+        # snap pulls it onto the drawn line like any other warp. Without it the
+        # trip has no geometry and is dropped.
+        stop_shapes = {}
         for ti, sts in stop_times.items():
             if len(sts) < 2:
                 continue
             rid, sid = trip_info[ti]
             sts.sort()
+            if not sid and feed != "metrolink":
+                seq = tuple(s for _, _, _, s, _, _ in sts)
+                sid = "stops-" + hashlib.sha1("|".join(seq).encode()).hexdigest()[:12]
+                stop_shapes[sid] = (rid, seq)
+                trip_info[ti] = (rid, sid)
             route_stops.setdefault((feed, rid), set()).update(s for _, _, _, s, _, _ in sts)
             # A bus laying over at its origin before it enters service is not yet
             # a vehicle anyone can ride, and drawing it parked there for the
@@ -7438,7 +7556,10 @@ def build_schedule(feeds):
                 ("shape_id", "shape_pt_sequence", "shape_pt_lon", "shape_pt_lat", "shape_dist_traveled")):
             if sid_ in used_shapes:
                 tmp[sid_].append((int(seq), float(lon), float(lat), parse_distance(measure)))
+        for sid_, (_, seq) in stop_shapes.items():
+            tmp[sid_] = [(i, *stops_ll[(feed, s)], None) for i, s in enumerate(seq)]
         route_by_shape = {row.get("shape_id", ""): row["route_id"] for row in trip_rows}
+        route_by_shape.update({s: r for s, (r, _) in stop_shapes.items()})
         if feed == "metrolink":
             # trips.txt leaves shape_id empty here, so the line above keys every
             # Metrolink route under "" and no shape can find the route it
@@ -7492,7 +7613,7 @@ def build_schedule(feeds):
             return _slide[key]
 
         # snap shapes onto the drawn lines of this system where they exist
-        agency_tree, sprite_cols = None, None
+        agency_tree, sprite_cols, good = None, None, []
         if feed in LEGEND_SEEDS and warped:
             seeds = LEGEND_SEEDS[feed]
             # The seed refined against the artwork the routes lie over, and,
@@ -7515,6 +7636,8 @@ def build_schedule(feeds):
             print(f"  {feed} drawn color(s): {good}")
         elif feed in DRAWN_COLORS:
             sprite_cols = [DRAWN_COLORS[feed]]
+        elif feed in SYMBOL_FEEDS:
+            sprite_cols = [tuple(round(v * 255) for v in LEGEND_INK[feed])]
 
         # recolor this agency's sprites to match the line color the map draws
         # (GTFS route_color is the agency's own branding, not the map's)
@@ -7522,7 +7645,10 @@ def build_schedule(feeds):
             for (f, rid), ridx in route_idx.items():
                 if f != feed:
                     continue
-                routes[ridx]["c"] = "#%02X%02X%02X" % tuple(sprite_cols[0])
+                col = sprite_cols[0]
+                if (feed, routes[ridx]["n"]) in SYMBOL_INK:
+                    col = tuple(round(v * 255) for v in SYMBOL_INK[(feed, routes[ridx]["n"])])
+                routes[ridx]["c"] = "#%02X%02X%02X" % tuple(col)
                 routes[ridx]["t"] = "#FFFFFF"
 
         snapped = anchored = fitted = 0
@@ -7715,7 +7841,8 @@ def build_schedule(feeds):
                 # is explicit about and the geography makes harmless: the
                 # nearest Foothill stroke is most of the county away, further
                 # than any cap here can reach.
-                tree = line_ink = ink_tree([LEGEND_INK[feed]])
+                sym_ink = symbol_ink(feed, rmeta[rid][0] if rid in rmeta else None)
+                tree = line_ink = ink_tree([sym_ink])
                 anc = route_anchors(toks, tree, near=BADGE_NEAR_INK)
                 owned = SYMBOL_OWNERS.get((feed, rid))
                 if owned is None:
@@ -7736,7 +7863,7 @@ def build_schedule(feeds):
                     out_pts = snap_recording(pts, tree, anchors=anc,
                                              caps=INK_CAPS, win=61, speckled=False)
                 shape_isnap[(feed, sid)] = (good, 30.0, toks)
-                shape_iink[(feed, sid)] = [([LEGEND_INK[feed]], None)]
+                shape_iink[(feed, sid)] = [([sym_ink], None)]
             elif agency_tree is not None:
                 anchor_tree = agency_tree
                 anchor_cols = list(good)
