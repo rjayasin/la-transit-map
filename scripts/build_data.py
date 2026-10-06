@@ -3535,6 +3535,17 @@ OVERRIDE_PATHS = {
             (3252.4, 3376.5), (3310.0, 3409.7),
         ],
     },
+    ("avta", "787"): {
+        "shape_ids": ("9661_shp", "9797_shp"),
+        "box": (600, 800, 866, 930),
+        "path": [
+            (652.6, 949.4), (652.6, 927.9), (657.0, 919.7), (663.2, 917.5),
+            (707.4, 917.5), (725.9, 921.5), (740.4, 927.9), (812.0, 973.6),
+            (830.3, 981.1), (840.9, 982.8), (885.8, 982.7), (889.2, 982.6),
+            (893.4, 978.1), (894.0, 908.2), (889.8, 886.9), (893.7, 882.2),
+            (880.3, 865.8), (862.0, 835.1), (861.7, 831.8), (856.3, 824.5),
+        ],
+    },
     ("gtfs_bus", "460"): [{
         "shape_ids": ("4600199_JUNE26", "4600200_JUNE26", "4600207_JUNE26",
                       "4600208_JUNE26"),
@@ -6556,6 +6567,38 @@ def onto_strokes(prior, own, other):
         t = pa / pa[-1] * cum[-1] if pa[-1] > 0 else np.linspace(0, cum[-1], j - i + 1)
         out[i:j + 1] = np.c_[np.interp(t, cum, pl[:, 0]), np.interp(t, cum, pl[:, 1])]
         i = j + 1
+    return bridge_off_ink(out, on, nodes, ntree, G)
+
+
+GAP_SPAN = 400.0     # px of shape a bridge over open map may replace
+GAP_STRETCH = 1.6    # a walk along the strokes up to this many times the gap's
+                     # own length stands for it
+
+
+def bridge_off_ink(out, on, nodes, ntree, G):
+    """Each stretch left off the ink between two stretches on it, walked along
+    the strokes instead where the walk is about as long as the stretch. A
+    stretch the sheet draws nothing under has no such walk and is kept."""
+    n = len(out)
+    idx = np.where(on)[0]
+    for a, b in zip(idx, idx[1:]):
+        if b - a < 2:
+            continue
+        arc = np.hypot(*np.diff(out[a:b + 1], axis=0).T).sum()
+        if arc > GAP_SPAN:
+            continue
+        na, nb = ntree.query(out[a])[1], ntree.query(out[b])[1]
+        D, pred = dijkstra(G, indices=[na], limit=GAP_STRETCH * arc + 10,
+                           return_predecessors=True)
+        if not np.isfinite(D[0][nb]):
+            continue
+        path = [nb]
+        while path[-1] != na:
+            path.append(pred[0][path[-1]])
+        pl = np.vstack([out[a][None], nodes[path[::-1]], out[b][None]])
+        cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(pl, axis=0).T))])
+        t = np.linspace(0, cum[-1], b - a + 1)
+        out[a:b + 1] = np.c_[np.interp(t, cum, pl[:, 0]), np.interp(t, cum, pl[:, 1])]
     return out
 
 
