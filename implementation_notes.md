@@ -136,6 +136,7 @@ fix. Try them in this order, least invasive first.
 | `SYMBOL_INK` | One symbol of a feed is drawn in a different ink from the rest of that feed |
 | `SHEET_ROUTES` | A feed runs routes the sheet does not draw. Only the listed routes are kept |
 | `TRIP_ROUTE_IDS` | A feed's trips name a route id its routes.txt spells differently |
+| `ALIGN_SKIP` | `align_to_ink` shifts a municipal feed onto a neighbour's line of the same ink |
 | `BADGE_FILLS` | An agency's badge chips are its saturated legend ink, far enough from its washed line color that the color gate rejects its own badges |
 | `LEGEND_SEEDS` | A refined line color has drifted somewhere the artwork isn't; name the stroke the legend actually uses |
 | `PINNED_ANCHORS` | The sheet prints no badge over a stretch that needs one. A point on the drawn line then acts as a badge |
@@ -692,6 +693,14 @@ vector strokes, so read the ink off the strokes nearest the agency's symbol
 words on the map, which match the symbol's text colour. Most of these inks are
 shared with a larger operator. A trip with no `shape_id` gets a shape drawn
 through its own stops, which the snap then pulls onto the line.
+
+Before snapping, each municipal symbol feed spanning under `ALIGN_SPAN` is
+moved by `align_to_ink`: one similarity transform, fitted by trimmed ICP from
+the warp to the agency's ink, with turn and scale clamped. It is kept only when
+it cuts the median distance by `ALIGN_GAIN`, and the feed's stops move with it.
+Judge it on the stored shapes, not on the warp: a single route among parallel
+lines of a shared ink can fit a neighbour better, which is what `ALIGN_SKIP` is
+for.
 
 The new symbol feeds take one more step after the snap: `onto_strokes` moves
 each point onto the nearest stroke of the agency's ink (or, closer in, another

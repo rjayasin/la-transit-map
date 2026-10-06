@@ -6434,6 +6434,53 @@ MATCH_DETOUR = 3.0   # a walk longer than this many times the gap is refused,
 STROKE_BRIDGE = 12.0  # px a stroke end is joined across to the next stroke
 
 
+ALIGN_SPAN = 1200.0    # px across a feed's shapes beyond which one transform
+                       # cannot stand for the warp's error
+ALIGN_GAIN = 0.8       # kept only if it cuts the median distance to the ink
+                       # to this fraction or less
+# Feeds the alignment moves onto the wrong line. Their ink is shared with
+# neighbours drawn a street or two away, so the nearest strokes after a shift
+# belong to another operator.
+ALIGN_SKIP = {"westcovina", "huntingtonpark"}
+
+
+def align_to_ink(W, ink, iters=30, r0=60.0, r1=12.0):
+    """The similarity transform taking a feed's warped points `W` onto its ink,
+    as a function of points, or None. The warp's error is smooth over a few
+    miles, so over a small operator's patch it is mostly one shift, turn and
+    scale, and taking that off first brings thin lines within the snap's reach.
+    Fitted as trimmed ICP with a shrinking radius; turn and scale are clamped
+    so a sparse drawing cannot spin the network onto a neighbour."""
+    W = np.asarray(W, float)
+    if not len(W) or not len(ink) or np.hypot(*(W.max(0) - W.min(0))) > ALIGN_SPAN:
+        return None
+    t = cKDTree(ink)
+    c = W.mean(0)
+    A, b = np.eye(2), np.zeros(2)
+    for k in range(iters):
+        r = r0 + (r1 - r0) * k / (iters - 1)
+        d, j = t.query((W - c) @ A.T + c + b)
+        m = d < r
+        if m.sum() < 20:
+            return None
+        P, Q = W[m] - c, ink[j[m]] - c
+        pm, qm = P.mean(0), Q.mean(0)
+        U, S, Vt = np.linalg.svd((P - pm).T @ (Q - qm))
+        R = (U @ Vt).T
+        if np.linalg.det(R) < 0:
+            Vt[-1] *= -1
+            R = (U @ Vt).T
+        ang = np.clip(math.atan2(R[1, 0], R[0, 0]), -0.09, 0.09)
+        sc = np.clip(S.sum() / ((P - pm) ** 2).sum(), 0.9, 1.1)
+        A = sc * np.array([[math.cos(ang), -math.sin(ang)], [math.sin(ang), math.cos(ang)]])
+        b = qm - A @ pm
+    before = np.median(t.query(W)[0])
+    after = np.median(t.query((W - c) @ A.T + c + b)[0])
+    if after > ALIGN_GAIN * before:
+        return None
+    return lambda X: (np.asarray(X, float) - c) @ A.T + c + b
+
+
 def stroke_graph(P, cell=2.0, r=3.0, bridge=STROKE_BRIDGE):
     """Ink points on a `cell` grid, joined where they touch. A drawn line is
     split into strokes at corners and crossings and the pieces stop a few px
@@ -7697,6 +7744,13 @@ def build_schedule(feeds):
             p.sort()
             x, y = to_px(np.array([q[1] for q in p]), np.array([q[2] for q in p]))
             warped[sid] = list(zip(x, y))
+        if feed in AGENCY_SYMBOLS and feed not in ALIGN_SKIP and warped:
+            move = align_to_ink(np.vstack([densify(w, 4.0) for w in warped.values()]),
+                                pdf_ink([LEGEND_INK[feed]]))
+            if move is not None:
+                warped = {sid: [tuple(q) for q in move(w)] for sid, w in warped.items()}
+                for k in [k for k in stops_px if k[0] == feed]:
+                    stops_px[k] = tuple(move([stops_px[k]])[0])
 
         # the shapes each route runs, and their warps as trees, so a badge can
         # be handed to the variant that actually passes it (branch_anchors)
