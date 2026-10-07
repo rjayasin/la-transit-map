@@ -8646,12 +8646,12 @@ def match_stroke_network(prior, base, ink):
     Nearest-stroke snapping fails where the sheet draws two streets a dozen px
     apart: the shape sews between them. Here each point picks among nearby
     stroke points, and a step costs the difference between the walk along the
-    strokes and the step the shape takes, so the match holds one stroke. Where
-    the shape crosses between strokes the sheet leaves unjoined, or the walk
-    between two matches is far longer than the step, the crossing is drawn
-    straight: the route runs a street the sheet does not draw there, and a
-    walk round the drawn network would have the vehicle cover it at several
-    times its speed."""
+    strokes and the step the shape takes, so the match holds one stroke.
+    Consecutive matches are joined by the walk along the strokes, however much
+    longer than the step, so the path stays on the drawing. Where the route
+    runs a street the sheet leaves out, the vehicle covers the way round in the
+    step's time. Only a crossing between strokes the sheet leaves unjoined is
+    drawn straight."""
     prior, base = np.asarray(prior, float), np.asarray(base, float)
     lo, hi = prior.min(0) - 150, prior.max(0) + 150
     ink = ink[np.all((ink >= lo) & (ink <= hi), axis=1)]
@@ -8703,8 +8703,7 @@ def match_stroke_network(prior, base, ink):
         path = np.array([nodes[pc], nodes[c]])
         if pc != c:
             D, pred = dijkstra(graph, indices=pc, return_predecessors=True)
-            straight = math.dist(nodes[pc], nodes[c])
-            if np.isfinite(D[c]) and D[c] <= 3 * straight + 12:
+            if np.isfinite(D[c]):
                 route = [c]
                 while route[-1] != pc:
                     route.append(int(pred[route[-1]]))
@@ -8719,8 +8718,10 @@ def match_stroke_network(prior, base, ink):
 
 # Feeds matched onto their drawn network by match_stroke_network: a dense
 # schematic of parallel streets close enough that nearest-stroke snapping
-# sews between them.
-STROKE_MATCH = {"pvpta"}
+# sews between them. The value lists other inks the network includes, for a
+# line drawn on top of the feed's own stroke where the two share a street.
+# Without it the feed's network breaks there and the match hops straight across.
+STROKE_MATCH = {"pvpta": ORANGE_INK}
 
 
 def onto_strokes(prior, own, other):
@@ -10478,7 +10479,7 @@ def build_schedule(feeds):
             hand = None
             if feed in STROKE_MATCH and len(full) == len(base):
                 full, base = match_stroke_network(
-                    full, base, pdf_ink([LEGEND_INK[feed]], step=0.5))
+                    full, base, pdf_ink([LEGEND_INK[feed], *STROKE_MATCH[feed]], step=0.5))
                 hand = np.ones(len(full), bool)
             if feed == "calabasas" and len(full) == len(base):
                 # The schematic connects branches by a longer loop than the

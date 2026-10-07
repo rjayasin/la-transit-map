@@ -725,7 +725,9 @@ off than that keeps the snap's answer and needs an override.
 A feed in `STROKE_MATCH` replaces that step with `match_stroke_network`, for a
 dense schematic of parallel streets a dozen px apart, where nearest-stroke
 snapping sews between them. It picks each point's stroke by Viterbi, walks
-between picks along the strokes, and draws a crossing between unjoined strokes
-straight. A walked crossing would be faster to read but makes the vehicle cover
-a street the sheet leaves out at several times its speed; `speed_check` shows
-that as a detour row.
+between picks along the strokes, however long the walk. A route on a street
+the sheet leaves out then takes the drawn way round at several times its speed,
+which `speed_check` shows as a detour row. A straight hop instead cuts across
+the drawing. Only a crossing between strokes that never join stays straight.
+The value in `STROKE_MATCH` adds the inks drawn over the feed's own stroke where
+the two share a street, so the network is unbroken there.
