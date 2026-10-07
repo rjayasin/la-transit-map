@@ -264,5 +264,13 @@
   {
     "name": "El Monte Blue on Hemlock and Maxson", "gate": 4, "tolerance": 1, "min_matches": 1, "system": "El Monte Transit", "route": "EM",
     "path": [[2641.5,1724.6],[2676.8,1744.9],[2678,1749.4],[2658.3,1783.4],[2659.6,1787.8],[2669.3,1793.2],[2670.5,1797.6],[2645,1841.6]]
+  },
+  {
+    "name": "DowneyLINK 1 Foster lollipop", "gate": 4, "tolerance": 1, "min_matches": 1, "system": "DowneyLINK", "route": "DL",
+    "path": [[2140,2603],[2133.54,2613.95],[2132.54,2614.66],[2131.34,2614.72],[2126.14,2611.83],[2125.29,2610.93],[2125.06,2609.75]]
+  },
+  {
+    "name": "DowneyLINK 4 steps by the 605", "gate": 4, "tolerance": 1, "min_matches": 1, "system": "DowneyLINK", "route": "DL",
+    "path": [[2261.3,2478.5],[2263.3,2478],[2270.8,2482.2],[2272.6,2482.3],[2273.8,2481.4],[2281.7,2467.9],[2283.7,2467.3],[2286.8,2468.9],[2288.6,2468.6],[2297.2,2454]]
   }
 ]
