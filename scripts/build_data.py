@@ -6576,6 +6576,39 @@ def align_to_ink(W, ink, iters=30, r0=60.0, r1=12.0):
     return lambda X: (np.asarray(X, float) - c) @ A.T + c + b
 
 
+STOP_HOP_STRETCH = 2.5   # a walk along the strokes up to this many times the
+                         # straight hop between two stops stands for it
+
+
+def stops_on_strokes(pts, ink):
+    """A shape drawn through its stops, each hop walked along the agency's
+    strokes where both stops sit near them and the walk is not much longer
+    than the hop. A feed without shapes otherwise gets straight chords that
+    cut every block, too far from the drawing for the snap to recover."""
+    P = np.asarray(pts, float)
+    if len(P) < 2 or not len(ink):
+        return pts
+    near = cKDTree(ink).query_ball_point(P, 80.0)
+    keep = np.unique(np.concatenate([np.asarray(v, int) for v in near if v] or [np.zeros(0, int)]))
+    if not len(keep):
+        return pts
+    nodes, ntree, G = stroke_graph(ink[keep])
+    d, nid = ntree.query(P)
+    out = [P[0]]
+    for a in range(len(P) - 1):
+        hop = math.dist(P[a], P[a + 1])
+        if d[a] <= MATCH_OWN and d[a + 1] <= MATCH_OWN and hop > 1:
+            D, pred = dijkstra(G, indices=[nid[a]], limit=STOP_HOP_STRETCH * hop + 20,
+                               return_predecessors=True)
+            if np.isfinite(D[0][nid[a + 1]]):
+                path = [nid[a + 1]]
+                while path[-1] != nid[a]:
+                    path.append(pred[0][path[-1]])
+                out += list(nodes[path[::-1]])
+        out.append(P[a + 1])
+    return [tuple(q) for q in out]
+
+
 def stroke_graph(P, cell=2.0, r=3.0, bridge=STROKE_BRIDGE):
     """Ink points on a `cell` grid, joined where they touch. A drawn line is
     split into strokes at corners and crossings and the pieces stop a few px
@@ -7892,6 +7925,9 @@ def build_schedule(feeds):
                 warped = {sid: [tuple(q) for q in move(w)] for sid, w in warped.items()}
                 for k in [k for k in stops_px if k[0] == feed]:
                     stops_px[k] = tuple(move([stops_px[k]])[0])
+        if feed in AGENCY_SYMBOLS:
+            for sid in [sid for sid in warped if sid in stop_shapes]:
+                warped[sid] = stops_on_strokes(warped[sid], pdf_ink([LEGEND_INK[feed]]))
 
         # the shapes each route runs, and their warps as trees, so a badge can
         # be handed to the variant that actually passes it (branch_anchors)
