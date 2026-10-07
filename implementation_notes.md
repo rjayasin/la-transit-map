@@ -716,3 +716,11 @@ each point onto the nearest stroke of the agency's ink (or, closer in, another
 bus line's ink) and walks the gaps along the strokes, so corners come out
 square. It only reaches `MATCH_OWN` px, so a stretch the warp leaves further
 off than that keeps the snap's answer and needs an override.
+
+A feed in `STROKE_MATCH` replaces that step with `match_stroke_network`, for a
+dense schematic of parallel streets a dozen px apart, where nearest-stroke
+snapping sews between them. It picks each point's stroke by Viterbi, walks
+between picks along the strokes, and draws a crossing between unjoined strokes
+straight. A walked crossing would be faster to read but makes the vehicle cover
+a street the sheet leaves out at several times its speed; `speed_check` shows
+that as a detour row.

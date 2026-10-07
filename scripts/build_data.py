@@ -8556,6 +8556,98 @@ def follow_stroke_network(prior, base, ink):
     return np.asarray(out), np.asarray(source)
 
 
+NET_REACH = 18.0    # px a shape point may stand from the stroke it is matched to
+NET_SIGMA = 6.0     # px of that distance the match treats as ordinary
+NET_BETA = 2.0      # px of walk-against-step mismatch costing one unit
+NET_JUMP = 200.0    # cost of crossing between strokes that do not join
+
+
+def match_stroke_network(prior, base, ink):
+    """`prior` matched onto a dense drawn network as a hidden Markov model, then
+    walked along the strokes with source positions carried as in
+    follow_stroke_network. Points with no stroke within NET_REACH are
+    dropped, and the walk between their neighbours spans them.
+
+    Nearest-stroke snapping fails where the sheet draws two streets a dozen px
+    apart: the shape sews between them. Here each point picks among nearby
+    stroke points, and a step costs the difference between the walk along the
+    strokes and the step the shape takes, so the match holds one stroke. Where
+    the shape crosses between strokes the sheet leaves unjoined, or the walk
+    between two matches is far longer than the step, the crossing is drawn
+    straight: the route runs a street the sheet does not draw there, and a
+    walk round the drawn network would have the vehicle cover it at several
+    times its speed."""
+    prior, base = np.asarray(prior, float), np.asarray(base, float)
+    lo, hi = prior.min(0) - 150, prior.max(0) + 150
+    ink = ink[np.all((ink >= lo) & (ink <= hi), axis=1)]
+    if not len(ink):
+        raise ValueError("missing drawn network")
+    nodes, tree, graph = stroke_graph(ink, cell=0.25, r=0.8)
+    cands = []
+    for p in prior:
+        dd, ii = tree.query(p, k=32, distance_upper_bound=NET_REACH)
+        pick = []
+        for d, i in zip(dd, ii):
+            if np.isfinite(d) and all(math.dist(nodes[i], nodes[j]) > 2.0 for j, _ in pick):
+                pick.append((int(i), d))
+            if len(pick) == 8:
+                break
+        cands.append(pick)
+    keep = [k for k, c in enumerate(cands) if c]
+    if not keep:
+        raise ValueError("missing drawn network")
+    em = lambda c: np.array([d * d for _, d in c]) / (2 * NET_SIGMA ** 2)
+    cost, back = em(cands[keep[0]]), []
+    for k0, k1 in zip(keep, keep[1:]):
+        a, b = cands[k0], cands[k1]
+        step = math.dist(prior[k0], prior[k1])
+        D = dijkstra(graph, indices=[i for i, _ in a], limit=3 * step + 4 * NET_REACH)
+        tr = np.empty((len(a), len(b)))
+        for x, (i, _) in enumerate(a):
+            for y, (j, _) in enumerate(b):
+                straight = math.dist(nodes[i], nodes[j])
+                r = D[x, j]
+                tr[x, y] = abs(r - straight) / NET_BETA if np.isfinite(r) else NET_JUMP + straight
+        tot = cost[:, None] + tr
+        back.append(np.argmin(tot, axis=0))
+        cost = tot[back[-1], np.arange(len(b))] + em(b)
+    s = int(np.argmin(cost))
+    pick = [s]
+    for bk in back[::-1]:
+        s = int(bk[s])
+        pick.append(s)
+    chosen = {k: cands[k][s][0] for k, s in zip(keep, pick[::-1])}
+    out, source = [], []
+    prev = None
+    for i in keep:
+        c = chosen[i]
+        if prev is None:
+            out.append(nodes[c]); source.append(base[i]); prev = (i, c)
+            continue
+        pi, pc = prev
+        path = np.array([nodes[pc], nodes[c]])
+        if pc != c:
+            D, pred = dijkstra(graph, indices=pc, return_predecessors=True)
+            straight = math.dist(nodes[pc], nodes[c])
+            if np.isfinite(D[c]) and D[c] <= 3 * straight + 12:
+                route = [c]
+                while route[-1] != pc:
+                    route.append(int(pred[route[-1]]))
+                path = nodes[route[::-1]]
+        arc = np.r_[0, np.cumsum(np.hypot(*np.diff(path, axis=0).T))]
+        fraction = arc / arc[-1] if arc[-1] else np.linspace(0, 1, len(path))
+        out.extend(path[1:])
+        source.extend(base[pi] + fraction[1:, None] * (base[i] - base[pi]))
+        prev = (i, c)
+    return np.asarray(out), np.asarray(source)
+
+
+# Feeds matched onto their drawn network by match_stroke_network: a dense
+# schematic of parallel streets close enough that nearest-stroke snapping
+# sews between them.
+STROKE_MATCH = {"pvpta"}
+
+
 def onto_strokes(prior, own, other):
     """`prior` moved onto the drawn strokes, index for index."""
     prior = np.asarray(prior, float)
@@ -10309,6 +10401,10 @@ def build_schedule(feeds):
                     full = cand
             override = OVERRIDE_PATHS.get((feed, (rid or "").split("-")[0]))
             hand = None
+            if feed in STROKE_MATCH and len(full) == len(base):
+                full, base = match_stroke_network(
+                    full, base, pdf_ink([LEGEND_INK[feed]], step=0.5))
+                hand = np.ones(len(full), bool)
             if feed == "calabasas" and len(full) == len(base):
                 # The schematic connects branches by a longer loop than the
                 # warp. Keep every drawn corner and its source correspondence.
