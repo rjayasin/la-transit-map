@@ -182,6 +182,8 @@ panelCss.textContent = `
   #filters .headrow .head { border: 0; padding: 0; }
   #filters .count { display: none; font-variant-numeric: tabular-nums; opacity: .7;
                     white-space: nowrap; }
+  /* Never wider than the screen, or the clamp below puts its left edge offscreen. */
+  #filters { box-sizing: border-box; max-width: calc(100vw - 16px); }
   /* Phones: the bar spans the screen, the play button narrows and the vehicle
      count moves into the popover, so the slider gets the freed width. */
   @media (max-width: 640px) {
@@ -190,6 +192,10 @@ panelCss.textContent = `
     #bar input[type=range] { flex: 1 1 0; width: auto; }
     #stats .cnt { display: none; }
     #filters .count { display: block; }
+    /* Two equal columns that wrap long names, instead of two max-content ones. */
+    #filters .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; }
+    #filters label { white-space: normal; align-items: flex-start; }
+    #filters label input { flex: none; margin-top: 1px; }
   }
 `;
 document.head.append(panelCss);
@@ -199,7 +205,7 @@ sysBtn.onclick = () => {
     // center over the button, clamped to the viewport; aim the caret at it
     const cx = sysBtn.getBoundingClientRect().left + sysBtn.offsetWidth / 2;
     const w = filtersEl.offsetWidth;
-    const left = Math.min(Math.max(cx - w / 2, 8), W - w - 8);
+    const left = Math.max(Math.min(cx - w / 2, W - w - 8), 8);
     filtersEl.style.left = left + "px";
     filtersEl.style.setProperty("--caret-x", (cx - left) + "px");
   }
