@@ -2150,20 +2150,6 @@ def trim_terminus(pts, pins, with_offset=False):
 # with `exact` keeps its path's corners to HAND_TOL rather than the 1.2 px the
 # stored shapes are simplified to, for a drawn jog shorter than that.
 OVERRIDE_PATHS = {
-    ("calabasas", "Line1"): {
-        "shape_ids": ("p_901744",),
-        "box": (150, 1585, 210, 1650),
-        "path": [(204.0, 1586.77), (161.32, 1586.77), (205.4, 1586.77)],
-    },
-    ("calabasas", "Line4"): [{
-        "shape_ids": ("p_901787",),
-        "box": (150, 1585, 210, 1650),
-        "path": [(209.8, 1586.77), (161.32, 1586.77), (202.7, 1586.77)],
-    }, {
-        "shape_ids": ("p_901784",),
-        "box": (150, 1585, 210, 1650),
-        "path": [(177.0, 1586.77), (161.32, 1586.77), (212.0, 1586.77)],
-    }],
     ("ladot", "4577"): {
         "box": (1495, 1520, 1548, 1600),
         "path": [
@@ -6817,6 +6803,43 @@ def stroke_graph(P, cell=2.0, r=3.0, bridge=STROKE_BRIDGE):
     return q, tree, (G + G.T).tocsr()     # dijkstra reads a graph as directed
 
 
+def follow_stroke_network(prior, base, ink):
+    """Walk the drawn network between samples and carry their source distances."""
+    prior, base = np.asarray(prior, float), np.asarray(base, float)
+    lo, hi = prior.min(0) - 150, prior.max(0) + 150
+    ink = ink[np.all((ink >= lo) & (ink <= hi), axis=1)]
+    if not len(ink):
+        raise ValueError("missing drawn network")
+    nodes, tree, graph = stroke_graph(ink, cell=0.1, r=0.8, bridge=2.0)
+    _, ids = tree.query(prior)
+    on = maskable(prior)
+    snapped = prior.copy()
+    snapped[on] = nodes[ids[on]]
+    # Continue the western exit outside the sheet without a diagonal at its edge.
+    west = prior[:, 0] < 0
+    snapped[west, 1] = nodes[ids[west], 1]
+    out, source = [snapped[0]], [base[0]]
+    walks = {}
+    for i in range(1, len(prior)):
+        path = np.array([snapped[i - 1], snapped[i]])
+        if on[i - 1] and on[i] and ids[i - 1] != ids[i]:
+            a, b = int(ids[i - 1]), int(ids[i])
+            if a not in walks:
+                walks[a] = dijkstra(graph, indices=a, return_predecessors=True)
+            distances, pred = walks[a]
+            if not np.isfinite(distances[b]):
+                raise ValueError("disconnected drawn network")
+            route = [b]
+            while route[-1] != a:
+                route.append(int(pred[route[-1]]))
+            path = nodes[route[::-1]]
+        arc = np.r_[0, np.cumsum(np.hypot(*np.diff(path, axis=0).T))]
+        fraction = arc / arc[-1] if arc[-1] else np.linspace(0, 1, len(path))
+        out.extend(path[1:])
+        source.extend(base[i - 1] + fraction[1:, None] * (base[i] - base[i - 1]))
+    return np.asarray(out), np.asarray(source)
+
+
 def onto_strokes(prior, own, other):
     """`prior` moved onto the drawn strokes, index for index."""
     prior = np.asarray(prior, float)
@@ -8569,6 +8592,12 @@ def build_schedule(feeds):
                     full = cand
             override = OVERRIDE_PATHS.get((feed, (rid or "").split("-")[0]))
             hand = None
+            if feed == "calabasas" and len(full) == len(base):
+                # The schematic connects branches by a longer loop than the
+                # warp. Keep every drawn corner and its source correspondence.
+                full, base = follow_stroke_network(
+                    full, base, pdf_ink([LEGEND_INK[feed]], step=0.5))
+                hand = np.ones(len(full), bool)
             if override is not None and len(full) == len(base):
                 hand = np.zeros(len(full), bool)
                 for spec in (override if isinstance(override, list) else [override]):

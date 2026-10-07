@@ -164,5 +164,38 @@ class GeometryTests(unittest.TestCase):
         self.assertEqual(e.exception.code, 2)
 
 
+class StrokeNetworkTests(unittest.TestCase):
+    def test_walk_keeps_loop_and_source_distance(self):
+        ink = np.asarray(B.densify([(100, 100), (100, 130),
+                                   (120, 130), (120, 100)], 0.5))
+        prior = np.array([[100., 100.], [120., 100.]])
+        base = np.array([[200., 200.], [220., 200.]])
+        with patch.object(B, "maskable", return_value=np.ones(2, bool)):
+            path, source = B.follow_stroke_network(prior, base, ink)
+        self.assertGreater(path[:, 1].max(), 129)
+        self.assertGreater(np.hypot(*np.diff(path, axis=0).T).sum(), 75)
+        np.testing.assert_allclose(source[[0, -1]], base)
+        self.assertAlmostEqual(np.hypot(*np.diff(source, axis=0).T).sum(), 20)
+        self.assertTrue(np.all(np.diff(source[:, 0]) >= 0))
+        self.assertEqual(len(path), len(source))
+
+    def test_disconnected_network_does_not_emit_a_chord(self):
+        ink = np.array([[100., 100.], [100.5, 100.],
+                        [120., 100.], [120.5, 100.]])
+        prior = ink[[0, 2]]
+        with patch.object(B, "maskable", return_value=np.ones(2, bool)):
+            with self.assertRaisesRegex(ValueError, "disconnected"):
+                B.follow_stroke_network(prior, prior, ink)
+
+    def test_western_exit_stays_on_ink_until_the_sheet_edge(self):
+        ink = np.asarray(B.densify([(0.4, 100), (10, 100)], 0.5))
+        prior = np.array([[-2., 98.], [2., 100.]])
+        with patch.object(B, "maskable", return_value=np.array([False, True])):
+            path, source = B.follow_stroke_network(prior, prior, ink)
+        np.testing.assert_allclose(path[:, 1], 100)
+        self.assertLess(path[0, 0], 0)
+        np.testing.assert_allclose(source[[0, -1]], prior)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -31,6 +31,11 @@ Readiness requires vehicles and complete coverage at the selected tile level.
 
 ## When a line leaves its drawing
 
+`follow_stroke_network` keeps an isolated schematic network on its PDF strokes,
+including loops longer than the warp. Added vertices carry interpolated source
+positions so stop distances remain tied to the original shape. Use it only
+where nearby lines of the same ink belong to the same network.
+
 A snap follows whatever is in the tree it was handed, so a shape on the wrong
 street is a fact about that tree, about the anchors, or about the sheet. Which
 one it is decides the fix, so diagnose before reaching for a table. Steps 1 and
