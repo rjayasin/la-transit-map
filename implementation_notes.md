@@ -298,7 +298,9 @@ check marks the commit red but still publishes.
 `schedule_timing.py` repairs fast estimated arrivals between fixed GTFS times.
 It weights the interval by displayed distance, including inset movement. Only
 explicit `timepoint=0` stops without a dwell can move; trip endpoints stay fixed.
-An interval whose fixed times require excessive speed is left unchanged.
+An interval whose fixed times require excessive speed takes time from the
+neighbouring fixed intervals, widening until the run can be played
+(`infeasible_windows`). A run no window can absorb is left unchanged.
 `timing_test.py` checks these constraints. `speed_check.py --schedule FILE`
 compares builds using the same de-tying as the client.
 
@@ -730,4 +732,7 @@ the sheet leaves out then takes the drawn way round at several times its speed,
 which `speed_check` shows as a detour row. A straight hop instead cuts across
 the drawing. Only a crossing between strokes that never join stays straight.
 The value in `STROKE_MATCH` adds the inks drawn over the feed's own stroke where
-the two share a street, so the network is unbroken there.
+the two share a street, so the network is unbroken there. `STROKE_JOINS` adds a
+straight join where the sheet stops a street short on both sides of a line
+drawn across it. A missing join shows up in `speed_check` as a detour of
+several times the direct distance along an otherwise clean shape.

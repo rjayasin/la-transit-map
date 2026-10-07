@@ -8805,6 +8805,21 @@ def match_stroke_network(prior, base, ink):
 # Without it the feed's network breaks there and the match hops straight across.
 STROKE_MATCH = {"pvpta": ORANGE_INK}
 
+# Straight joins added to a STROKE_MATCH network, in map px, where the sheet
+# stops a street short on both sides of a line drawn across it. Without one the
+# two halves connect only the long way round, and a route along the street
+# runs that way at several times its speed.
+STROKE_JOINS = {
+    "pvpta": [((1320.8, 3166.0), (1266.5, 3129.5))],   # PV Dr N across Hawthorne
+}
+
+
+def stroke_joins(feed, step=0.5):
+    """Points along a feed's STROKE_JOINS, to add to its ink."""
+    pts = [np.linspace(a, b, max(2, int(math.dist(a, b) / step) + 1))
+           for a, b in STROKE_JOINS.get(feed, ())]
+    return np.vstack(pts) if pts else np.zeros((0, 2))
+
 
 def onto_strokes(prior, own, other):
     """`prior` moved onto the drawn strokes, index for index."""
@@ -10561,7 +10576,8 @@ def build_schedule(feeds):
             hand = None
             if feed in STROKE_MATCH and len(full) == len(base):
                 full, base = match_stroke_network(
-                    full, base, pdf_ink([LEGEND_INK[feed], *STROKE_MATCH[feed]], step=0.5))
+                    full, base, np.vstack([pdf_ink([LEGEND_INK[feed], *STROKE_MATCH[feed]],
+                                                   step=0.5), stroke_joins(feed)]))
                 hand = np.ones(len(full), bool)
             if feed == "calabasas" and len(full) == len(base):
                 # The schematic connects branches by a longer loop than the

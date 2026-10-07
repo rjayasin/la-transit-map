@@ -26,12 +26,26 @@ class TimingTests(unittest.TestCase):
         self.assertEqual(out[-1], times[-1])
         self.assertEqual(out[4:6], [780, 800])
         self.assertEqual(repair_estimates(times, [True] * 7,
-                                         {"d": [0, 10, 40, 60, 300, 310, 360]}), times)
+                                         {"d": [0, 10, 40, 60, 120, 130, 180]}), times)
 
     def test_infeasible_fixed_interval_is_not_retimed(self):
         times = [0, 1, 60]
         self.assertEqual(repair_estimates(times, [True, False, True],
                                          {"d": [0, 200, 300]}), times)
+
+    def test_infeasible_fixed_interval_borrows_from_neighbour(self):
+        times = [0, 600, 660, 1260]
+        out = repair_estimates(times, [True] * 4, {"d": [0, 100, 500, 600]})
+        self.assertEqual(out[0], 0)
+        self.assertEqual(out[-1], 1260)
+        d = [0, 100, 500, 600]
+        for i in range(3):
+            self.assertLessEqual(d[i + 1] - d[i], 1.47 * (out[i + 1] - out[i]) + 1)
+
+    def test_fixed_interval_no_neighbour_can_absorb_is_kept(self):
+        times = [0, 60, 120, 180]
+        self.assertEqual(repair_estimates(times, [True] * 4,
+                                         {"d": [0, 100, 600, 700]}), times)
 
     def test_inset_movement_counts_when_main_map_is_flat(self):
         pat = {"d": [0, 0, 0, 0], "ir": [0, 0, 0, 0],
