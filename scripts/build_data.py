@@ -2154,8 +2154,46 @@ def trim_terminus(pts, pins, with_offset=False):
 # pass through the box (0 the first, -1 the last), for a circuit whose two ends
 # run the same stretch of warp, where a box around either end holds both. A spec
 # with `exact` keeps its path's corners to HAND_TOL rather than the 1.2 px the
-# stored shapes are simplified to, for a drawn jog shorter than that.
+# stored shapes are simplified to, for a drawn jog shorter than that. A spec
+# with `forward` is spliced in the order given. A circuit that ends where it
+# starts has no net heading for the orientation test to read, so its path is
+# traced in the feed's direction of travel instead.
 OVERRIDE_PATHS = {
+    ("bellgardens", "130"): {
+        "exact": True,
+        "forward": True,
+        "box": (1950, 2150, 2300, 2500),
+        "path": [
+            (2139.78, 2338.93), (2138.63, 2337.40), (2139.01, 2336.21),
+            (2152.84, 2312.08), (2153.79, 2311.04), (2155.04, 2310.51),
+            (2156.41, 2310.54), (2167.10, 2316.27), (2168.51, 2316.14),
+            (2170.44, 2314.79), (2172.03, 2312.20), (2172.94, 2308.74),
+            (2172.64, 2299.88), (2172.28, 2298.51), (2171.41, 2297.42),
+            (2169.23, 2296.63), (2132.40, 2296.77), (2128.36, 2296.03),
+            (2126.30, 2295.14), (2057.89, 2255.44), (2056.70, 2255.05),
+            (2055.33, 2255.84), (2055.06, 2257.06), (2055.06, 2292.68),
+            (2056.55, 2297.07), (2055.37, 2298.44), (2055.06, 2299.82),
+            (2055.06, 2307.68), (2055.52, 2309.72), (2055.09, 2311.25),
+            (2055.13, 2343.00), (2054.55, 2345.91), (2053.41, 2348.52),
+            (2043.73, 2363.94), (2043.47, 2365.28), (2044.02, 2366.97),
+            (2045.04, 2367.92), (2075.92, 2385.74), (2077.27, 2386.17),
+            (2078.62, 2386.00), (2080.12, 2384.95), (2084.51, 2377.41),
+            (2086.39, 2375.55), (2087.89, 2374.84), (2112.90, 2374.58),
+            (2115.44, 2373.88), (2117.81, 2371.75), (2124.83, 2359.52),
+            (2124.89, 2358.08), (2123.86, 2357.22), (2122.99, 2357.10),
+            (2072.61, 2356.98), (2071.51, 2355.82), (2071.90, 2354.30),
+            (2085.28, 2332.17), (2085.73, 2330.84), (2085.58, 2329.50),
+            (2084.14, 2327.74), (2058.16, 2312.74), (2056.36, 2311.17),
+            (2055.33, 2309.21), (2055.06, 2307.68), (2055.06, 2299.82),
+            (2055.37, 2298.44), (2056.96, 2296.85), (2058.33, 2296.55),
+            (2101.85, 2296.55), (2103.07, 2296.81), (2103.86, 2297.85),
+            (2103.52, 2299.40), (2088.44, 2326.44), (2088.04, 2327.80),
+            (2088.22, 2329.16), (2088.93, 2330.35), (2135.40, 2357.65),
+            (2136.73, 2358.07), (2138.85, 2357.47), (2139.76, 2356.41),
+            (2147.44, 2341.94), (2147.74, 2340.37), (2146.93, 2339.32),
+            (2145.70, 2339.05), (2140.19, 2339.02),
+        ],
+    },
     ("westhollywood", "CLEB"): {
         "exact": True,
         "box": (1150, 1630, 1400, 1800),
@@ -5966,7 +6004,7 @@ def apply_override(full, base, spec, sid=None):
     # partway along the corridor the entry point can stand all but equidistant
     # from the path's two ends. A distance that close to tied decides nothing,
     # while the direction of travel is not close at all.
-    seg = (path if np.dot(B[hi] - B[lo], path[-1] - path[0]) >= 0
+    seg = (path if spec.get("forward") or np.dot(B[hi] - B[lo], path[-1] - path[0]) >= 0
            else path[::-1])                # run the corridor the way the shape does
     d = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(seg, axis=0).T))])
     t = np.linspace(0, d[-1], hi - lo + 1)
