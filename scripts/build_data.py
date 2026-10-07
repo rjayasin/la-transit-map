@@ -3535,6 +3535,33 @@ OVERRIDE_PATHS = {
             (3252.4, 3376.5), (3310.0, 3409.7),
         ],
     },
+    ("avta", "786"): [{
+        "shape_ids": ("9653_shp", "9793_shp"),
+        "box": (1150, 1660, 1400, 1900),
+        "path": [
+            (1366.4, 1701.4), (1366.4, 1718.7), (1366.4, 1736.2), (1366.4, 1754.5),
+            (1366.4, 1774.2), (1366.4, 1793.3), (1366.4, 1812.2), (1366.4, 1836.4),
+            (1366.4, 1857.9), (1352.8, 1869.4), (1333.2, 1869.4), (1312.4, 1869.4),
+            (1292.1, 1869.4), (1273.1, 1869.4), (1253.8, 1866.1), (1236.5, 1857.4),
+            (1215.9, 1857.3), (1196.7, 1857.3), (1177.7, 1857.3), (1163.0, 1857.3),
+            (1150.0, 1857.3),
+        ],
+    }, {
+        "shape_ids": ("9657_shp", "9795_shp"),
+        "box": (1150, 1660, 1400, 1900),
+        "path": [
+            (1132.2, 1857.4), (1163.0, 1857.3), (1177.7, 1857.3), (1196.7, 1857.3),
+            (1215.9, 1857.3), (1236.5, 1857.4), (1253.8, 1866.1), (1273.1, 1869.4),
+            (1292.1, 1869.4), (1312.4, 1869.4), (1333.2, 1869.4), (1352.8, 1869.4),
+            (1366.4, 1857.9), (1366.4, 1836.4), (1366.4, 1812.2), (1366.4, 1793.3),
+            (1366.4, 1774.2), (1366.4, 1754.5), (1366.4, 1736.2), (1366.4, 1718.7),
+            (1366.4, 1736.2), (1366.4, 1754.5), (1366.4, 1774.2), (1366.4, 1793.3),
+            (1366.4, 1812.2), (1366.4, 1836.4), (1366.4, 1857.9), (1352.8, 1869.4),
+            (1333.2, 1869.4), (1312.4, 1869.4), (1292.1, 1869.4), (1273.1, 1869.4),
+            (1253.8, 1866.1), (1236.5, 1857.4), (1215.9, 1857.3), (1196.7, 1857.3),
+            (1177.7, 1857.3), (1163.0, 1857.3), (1175.5, 1857.3),
+        ],
+    }],
     ("avta", "787"): {
         "shape_ids": ("9661_shp", "9797_shp"),
         "box": (600, 800, 866, 930),
@@ -6439,6 +6466,8 @@ SEAT_PASSES = 2       # the correction is smoothed like the line it corrects,
 # a corner comes back as the drawn corner rather than a chord across it.
 MATCH_OWN = 20.0     # px a point may move onto its own agency's ink
 MATCH_OTHER = 8.0    # px it may move onto another bus line's ink
+MATCH_OTHER_RUN = 40.0  # px a stretch must run along another line's ink
+                        # before it is taken to ride it
 MATCH_JUMP = 3.0     # px between neighbours that counts as a gap to walk
 MATCH_DETOUR = 3.0   # a walk longer than this many times the gap is refused,
                      # since the two points are then on different lines
@@ -6531,6 +6560,20 @@ def onto_strokes(prior, own, other):
     if len(other):
         d, j = cKDTree(other).query(prior)
         use = ~on & (d <= MATCH_OTHER)
+        # A street the operator rides with another agency's line is a run of
+        # points along that ink. A single point near it is a crossing street,
+        # and snapping it there walks the shape round the block.
+        k = 0
+        while k < n:
+            if use[k]:
+                e = k
+                while e + 1 < n and use[e + 1]:
+                    e += 1
+                if math.dist(prior[k], prior[e]) < MATCH_OTHER_RUN:
+                    use[k:e + 1] = False
+                k = e + 1
+            else:
+                k += 1
         snap[use] = other[j[use]]
         on |= use
         allp = np.vstack([own, other])
