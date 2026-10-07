@@ -280,5 +280,9 @@
   {
     "name": "Huntington Park Miles loop", "gate": 4, "tolerance": 1, "min_matches": 1, "system": "Huntington Park COMBI", "route": "HP",
     "path": [[1873.2,2270],[1873.2,2302.6],[1872.7,2304.1],[1871.5,2304.7],[1863.8,2300.5],[1862.4,2298.9],[1861.7,2297.4],[1861.4,2280]]
+  },
+  {
+    "name": "Lynwood C round Wright and Carlin", "gate": 4, "tolerance": 1, "min_matches": 1, "system": "Lynwood Breeze", "route": "LY",
+    "path": [[2001.7,2595],[2001.7,2616.9],[1998.9,2618.6],[1960,2596.1],[1922.7,2574.6]]
   }
 ]
