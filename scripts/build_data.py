@@ -2159,6 +2159,11 @@ def trim_terminus(pts, pins, with_offset=False):
 # starts has no net heading for the orientation test to read, so its path is
 # traced in the feed's direction of travel instead.
 OVERRIDE_PATHS = {
+    ("lacounty", "13050"): [{   # Avocado Heights/Bassett/West Valinda
+        "shape_ids": ("p_531879",),
+        "box": (2660, 1900, 2745, 2000),
+        "path": [(2768.0, 1902.8), (2768.0, 1902.9)],
+    }],
     ("lacounty", "13057"): [{
         "shape_ids": ("p_531943",),
         "exact": True,
