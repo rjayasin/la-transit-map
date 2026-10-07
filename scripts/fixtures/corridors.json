@@ -232,5 +232,13 @@
   {
     "name": "Alhambra Palm and Main", "gate": 4, "tolerance": 1, "min_matches": 1, "system": "Alhambra Community Transit", "route": "AC",
     "path": [[2134.58,1721.53],[2135.47,1718.57],[2137.07,1716.96],[2140.03,1716.08],[2204.07,1716.08]]
+  },
+  {
+    "name": "Bellflower Artesia and Lakewood", "gate": 4, "tolerance": 1, "min_matches": 1, "system": "Bellflower Bus", "route": "BF",
+    "path": [[2247.06,2750.12],[2156.31,2750.12],[2154.94,2749.82],[2153.35,2748.23],[2153.04,2746.85],[2153.04,2695.85]]
+  },
+  {
+    "name": "Bellflower Foster loop", "gate": 4, "tolerance": 1, "min_matches": 1, "system": "Bellflower Bus", "route": "BF",
+    "path": [[2219.07,2596.81],[2219.88,2594.67],[2220.97,2593.85],[2222.35,2593.54],[2250.92,2593.54],[2253.06,2594.35],[2253.89,2595.44],[2254.19,2596.81]]
   }
 ]
