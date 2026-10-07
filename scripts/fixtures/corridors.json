@@ -256,5 +256,13 @@
   {
     "name": "Lawndale Express down Hawthorne", "gate": 4, "tolerance": 1, "min_matches": 1, "system": "Lawndale Beat", "route": "LW",
     "path": [[1321.4,2665],[1321.4,2745]]
+  },
+  {
+    "name": "El Monte Yellow round Fineview", "gate": 4, "tolerance": 1, "min_matches": 1, "system": "El Monte Transit", "route": "EM",
+    "path": [[2565.7,1912],[2565.8,1920.6],[2567.4,1926.8],[2580.7,1950.5],[2583.9,1950.5],[2591.7,1936.4]]
+  },
+  {
+    "name": "El Monte Blue on Hemlock and Maxson", "gate": 4, "tolerance": 1, "min_matches": 1, "system": "El Monte Transit", "route": "EM",
+    "path": [[2641.5,1724.6],[2676.8,1744.9],[2678,1749.4],[2658.3,1783.4],[2659.6,1787.8],[2669.3,1793.2],[2670.5,1797.6],[2645,1841.6]]
   }
 ]
