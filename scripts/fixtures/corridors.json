@@ -284,5 +284,9 @@
   {
     "name": "Lynwood C round Wright and Carlin", "gate": 4, "tolerance": 1, "min_matches": 1, "system": "Lynwood Breeze", "route": "LY",
     "path": [[2001.7,2595],[2001.7,2616.9],[1998.9,2618.6],[1960,2596.1],[1922.7,2574.6]]
+  },
+  {
+    "name": "El Sol Fraser and Fetterly loop", "gate": 4, "tolerance": 1, "min_matches": 1, "system": "LA County Shuttles", "route": "ES",
+    "path": [[2087.4,2050],[2087.4,2118],[2090.6,2121.3],[2101.8,2121.3],[2105.1,2118],[2105.5,2060]]
   }
 ]
