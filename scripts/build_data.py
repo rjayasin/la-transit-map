@@ -2215,6 +2215,11 @@ OVERRIDE_PATHS = {
             (936.30, 2284.85), (951.99, 2275.79),
         ],
     }],
+    ("lacounty", "13050"): [{   # Avocado Heights/Bassett/West Valinda
+        "shape_ids": ("p_531879",),
+        "box": (2660, 1900, 2745, 2000),
+        "path": [(2768.0, 1902.8), (2768.0, 1902.9)],
+    }],
     ("lacounty", "13057"): [{
         "shape_ids": ("p_531943",),
         "exact": True,
