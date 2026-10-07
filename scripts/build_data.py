@@ -3542,6 +3542,52 @@ OVERRIDE_PATHS = {
             (3252.4, 3376.5), (3310.0, 3409.7),
         ],
     },
+    ("santaclarita", "791"): [{
+        "shape_ids": ("35", "54"),
+        "box": (325, 950, 415, 1285),
+        "path": [
+            (481.5, 998.3), (473.1, 1002.2), (451.1, 1002.2), (441.2, 1003.6),
+            (437.2, 1013.9), (437.2, 1019.9), (431.2, 1028.6), (384.4, 1028.6),
+            (376.0, 1029.8), (375.2, 1040.1), (375.2, 1304.1), (376.3, 1315.6),
+            (378.0, 1316.3), (423.4, 1316.7), (424.5, 1317.5), (425.3, 1340.8),
+        ],
+    }, {
+        "shape_ids": ("55", "59"),
+        "box": (325, 950, 415, 1285),
+        "path": [
+            (481.5, 998.3), (473.1, 1002.2), (451.1, 1002.2), (441.2, 1003.6),
+            (437.2, 1013.9), (437.2, 1019.9), (431.2, 1028.6), (384.4, 1028.6),
+            (376.0, 1029.8), (375.2, 1040.1), (375.2, 1304.1), (376.3, 1315.6),
+            (378.0, 1316.3), (400.0, 1316.5),
+        ],
+    }, {
+        "shape_ids": ("35", "54", "55", "59", "186", "207"),
+        "box": (832, 795, 872, 870),
+        "path": [
+            (795.0, 960.5), (813.9, 972.2), (823.9, 976.7),
+            (829.9, 978.8), (840.7, 980.8), (884.6, 980.8), (895.0, 974.3),
+            (895.0, 910.1), (894.6, 900.1), (892.4, 889.2), (888.7, 880.2),
+            (879.0, 867.7), (861.0, 837.5),
+        ],
+    }],
+    ("santaclarita", "796"): [{
+        "shape_ids": ("186", "207"),
+        "box": (325, 950, 415, 1285),
+        "path": [
+            (481.5, 998.3), (473.1, 1002.2), (451.1, 1002.2), (441.2, 1003.6),
+            (437.2, 1013.9), (437.2, 1019.9), (431.2, 1028.6), (384.4, 1028.6),
+            (376.0, 1029.8), (375.2, 1037.1), (375.2, 1253.1),
+        ],
+    }, {
+        "shape_ids": ("35", "54", "55", "59", "186", "207"),
+        "box": (832, 795, 872, 870),
+        "path": [
+            (795.0, 960.5), (813.9, 972.2), (823.9, 976.7),
+            (829.9, 978.8), (840.7, 980.8), (884.6, 980.8), (895.0, 974.3),
+            (895.0, 910.1), (894.6, 900.1), (892.4, 889.2), (888.7, 880.2),
+            (879.0, 867.7), (861.0, 837.5),
+        ],
+    }],
     ("avta", "786"): [{
         "shape_ids": ("9653_shp", "9793_shp"),
         "box": (1150, 1660, 1400, 1900),
@@ -6479,6 +6525,8 @@ MATCH_JUMP = 3.0     # px between neighbours that counts as a gap to walk
 MATCH_DETOUR = 3.0   # a walk longer than this many times the gap is refused,
                      # since the two points are then on different lines
 STROKE_BRIDGE = 12.0  # px a stroke end is joined across to the next stroke
+MATCH_GRAPH_R = 80.0  # px of strokes round the shape a walk may use, enough
+                      # for a drawn course a block or two off the shape
 
 
 ALIGN_SPAN = 1200.0    # px across a feed's shapes beyond which one transform
@@ -6552,7 +6600,7 @@ def stroke_graph(P, cell=2.0, r=3.0, bridge=STROKE_BRIDGE):
         pairs = np.unique(np.vstack([pairs.reshape(-1, 2), np.array(extra)]), axis=0)
     w = np.hypot(*(q[pairs[:, 0]] - q[pairs[:, 1]]).T)
     G = sparse.coo_matrix((w, (pairs[:, 0], pairs[:, 1])), shape=(len(q), len(q))).tocsr()
-    return q, tree, G
+    return q, tree, (G + G.T).tocsr()     # dijkstra reads a graph as directed
 
 
 def onto_strokes(prior, own, other):
@@ -6586,7 +6634,7 @@ def onto_strokes(prior, own, other):
         allp = np.vstack([own, other])
     if not on.any():
         return prior
-    near = cKDTree(allp).query_ball_point(snap[on], 30.0)
+    near = cKDTree(allp).query_ball_point(snap[on], MATCH_GRAPH_R)
     keep = np.unique(np.concatenate([np.asarray(v, int) for v in near if v]))
     nodes, ntree, G = stroke_graph(allp[keep])
     nid = ntree.query(snap)[1]
@@ -6621,7 +6669,7 @@ def onto_strokes(prior, own, other):
 
 
 GAP_SPAN = 400.0     # px of shape a bridge over open map may replace
-GAP_STRETCH = 1.6    # a walk along the strokes up to this many times the gap's
+GAP_STRETCH = 1.9    # a walk along the strokes up to this many times the gap's
                      # own length stands for it
 
 
