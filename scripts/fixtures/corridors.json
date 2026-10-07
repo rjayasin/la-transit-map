@@ -240,5 +240,9 @@
   {
     "name": "Bellflower Foster loop", "gate": 4, "tolerance": 1, "min_matches": 1, "system": "Bellflower Bus", "route": "BF",
     "path": [[2219.07,2596.81],[2219.88,2594.67],[2220.97,2593.85],[2222.35,2593.54],[2250.92,2593.54],[2253.06,2594.35],[2253.89,2595.44],[2254.19,2596.81]]
+  },
+  {
+    "name": "Cudahy Otis to Elizabeth", "gate": 4, "tolerance": 1, "min_matches": 1, "system": "Cudahy Area Rapid Transit", "route": "CT",
+    "path": [[1944.4,2330.7],[1944.37,2336.6],[1945.36,2338.13],[1947.02,2338.9],[1975,2338.9]]
   }
 ]
