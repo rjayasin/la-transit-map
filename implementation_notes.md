@@ -141,6 +141,7 @@ fix. Try them in this order, least invasive first.
 | `SYMBOL_INK` | One symbol of a feed is drawn in a different ink from the rest of that feed |
 | `SHEET_ROUTES` | A feed runs routes the sheet does not draw. Only the listed routes are kept |
 | `TRIP_ROUTE_IDS` | A feed's trips name a route id its routes.txt spells differently |
+| `TRIP_SHAPE_IDS` | A trip names the opposite direction's shape, so its stop distances stop advancing |
 | `ALIGN_SKIP` | `align_to_ink` shifts a municipal feed onto a neighbour's line of the same ink |
 | `BADGE_FILLS` | An agency's badge chips are its saturated legend ink, far enough from its washed line color that the color gate rejects its own badges |
 | `LEGEND_SEEDS` | A refined line color has drifted somewhere the artwork isn't; name the stroke the legend actually uses |
