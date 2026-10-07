@@ -258,38 +258,52 @@ def parse_time(s):
 EXCURSION_RATIO = 4.0    # shape between two consecutive stops this many times
 EXCURSION_KM = 3.0       # their straight distance, and this long, is a detour
                          # the trip does not make
+EXCURSION_KMH = 80.0     # ... when its timetable leaves too little time to drive it
 
 
 def cut_excursions(pts, seq_list, stops_ll, feed):
     """A shape with every stretch cut out that runs far round between two
     consecutive stops of a trip using it. Some feeds draw a school working's
     whole loop into a shape whose stop list skips it, and a vehicle then has
-    a minute to cover several miles. The measures go with the cut, so stops
-    are placed by projection."""
+    a minute to cover several miles. A stretch is cut only where every trip
+    on the shape skips it and its timetable could not cover it. The measures go with the cut, so stops are placed
+    by projection."""
     if len(pts) < 3:
         return pts
     P = np.array([(q[1], q[2]) for q in pts])
     k = np.cos(np.radians(P[:, 1].mean()))
     xy = np.c_[P[:, 0] * k, P[:, 1]] * 111.0
     cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(xy, axis=0).T))])
-    drop = np.zeros(len(pts), bool)
-    for seq in seq_list:
+    drop, judged = np.ones(len(pts), bool), False
+    for seq, secs in seq_list:
         S = [stops_ll.get((feed, sid)) for sid in seq]
         if any(v is None for v in S):
             continue
         S = np.array(S)
         Sxy = np.c_[S[:, 0] * k, S[:, 1]] * 111.0
-        at, lo = [], 0
-        for q in Sxy:               # nearest point at or after the last stop's
-            j = lo + int(np.argmin(np.hypot(*(xy[lo:] - q).T)))
-            at.append(j)
-            lo = j
-        for (a, b), qa, qb in zip(zip(at, at[1:]), Sxy, Sxy[1:]):
+        # each stop to a shape point, in order, minimising the total distance:
+        # a stop at a loop's shared start and end is the start for the first
+        # stop and the end for the last, which a nearest-point search cannot say
+        D = np.hypot(xy[None, :, 0] - Sxy[:, None, 0], xy[None, :, 1] - Sxy[:, None, 1])
+        if (D.min(axis=1) > 0.3).any():
+            continue                # a stop off the shape; nothing to judge by
+        C = D.copy()
+        for i in range(1, len(C)):
+            C[i] += np.minimum.accumulate(C[i - 1])
+        at = [int(np.argmin(C[-1]))]
+        for i in range(len(C) - 2, -1, -1):
+            at.append(int(np.argmin(C[i][:at[-1] + 1])))
+        at = at[::-1]
+        mine = np.zeros(len(pts), bool)
+        for (a, b), qa, qb, t in zip(zip(at, at[1:]), Sxy, Sxy[1:], secs):
             straight = math.dist(qa, qb)
             arc = cum[b] - cum[a]
-            if arc > EXCURSION_KM and arc > EXCURSION_RATIO * max(straight, 0.1):
-                drop[a + 1:b] = True
-    if not drop.any():
+            if (arc > EXCURSION_KM and arc > EXCURSION_RATIO * max(straight, 0.1)
+                    and arc / (max(t, 60) / 3600) > EXCURSION_KMH):
+                mine[a + 1:b] = True
+        drop &= mine                # cut only what no trip on the shape serves
+        judged = True
+    if not judged or not drop.any():
         return pts
     return [(q[0], q[1], q[2], None) for q, d in zip(pts, drop) if not d]
 
@@ -7968,9 +7982,13 @@ def build_schedule(feeds):
             tmp[sid_] = [(i, *stops_ll[(feed, s)], None) for i, s in enumerate(seq)]
         if feed in AGENCY_SYMBOLS:
             seqs = defaultdict(list)
+            hops = {}               # pattern -> shortest scheduled time per hop
+            for _, pkey, times, _, _ in trips_out[n_before:]:
+                gap = np.diff(times)
+                hops[pkey] = np.minimum(hops[pkey], gap) if pkey in hops else gap
             for f_, s_, seq_ in pattern_idx:
-                if f_ == feed and s_ in tmp:
-                    seqs[s_].append(seq_)
+                if f_ == feed and s_ in tmp and (f_, s_, seq_) in hops:
+                    seqs[s_].append((seq_, hops[(f_, s_, seq_)]))
             for sid_, seq_list in seqs.items():
                 tmp[sid_] = cut_excursions(sorted(tmp[sid_]), seq_list, stops_ll, feed)
         route_by_shape = {row.get("shape_id", ""): row["route_id"] for row in trip_rows}
