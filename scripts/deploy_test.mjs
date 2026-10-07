@@ -56,7 +56,7 @@ for (const name of ["stamped", "dev"]) {
   // is the case the bootstrapper's fallback exists for.
   if (name === "stamped") {
     fs.writeFileSync(path.join(dir, "version.json"),
-                     JSON.stringify({ build: LIVE, sha: LIVE_SHA }));
+                     JSON.stringify({ build: BUILD, sha: LIVE_SHA }));
   }
 }
 const stamp = spawn(process.execPath,
@@ -115,7 +115,7 @@ await send("Network.enable"); await send("Page.enable"); await send("Runtime.ena
 async function load(dir) {
   net = [];
   await send("Page.navigate",
-    { url: `http://localhost:${PORT}/${dir}/index.html?debug&k=3&x=2000&y=1300` });
+    { url: `http://localhost:${PORT}/${dir}/index.html?debug&k=3&x=2000&y=1300&live` });
   await sleep(9000);
   return JSON.parse(await ev("JSON.stringify(transitDebug())"));
 }
@@ -147,11 +147,9 @@ check("stamped: tiles carry the tiles rev",
       net.some(u => /tiles\/\d+\/.*\.webp\?v=deadbee/.test(u)), true);
 check("stamped: version.json polled past the CDN cache",
       net.some(u => /version\.json\?ts=\d+/.test(u)), true);
-check("stamped: a newer live build is noticed", s.staleBuild, LIVE);
-check("stamped: the bar offers the update",
-      await ev("!document.getElementById('upd').hidden"), true);
-// the one thing it must never do: throw away a view somebody chose
-check("stamped: it did not reload itself", s.framesTotal > 100, true);
+check("stamped: current build needs no update", s.staleBuild, null);
+check("stamped: no update button",
+      await ev("!document.getElementById('upd').hidden"), false);
 check("stamped: no full-map image memory", s.mapMB, 0);
 const png = fs.readFileSync(path.join(ROOT, "map.png"));
 check("stamped: coordinates match the source artwork", await ev("[map.width, map.height]"),
@@ -184,6 +182,110 @@ const fallback = await ev(`(() => {
 check("stamped: eviction retains all six overview tiles", fallback.overview, 6);
 check("stamped: overview fills missing detail", fallback.painted, true);
 check("stamped: fractional zoom leaves no tile seam", fallback.seamSpread <= 6, true);
+
+// Publish a new client and reorder system indices while this tab stays open.
+const stateSnapshot = `(() => ({
+  center: [view.x + W / (2 * view.k), view.y + H / (2 * view.k)], zoom: view.k,
+  systems: Object.fromEntries(data.systems.map((name, i) => [name, sysOn[i]])),
+  live, playing, time: simT, speed: live ? speedWas : speedSel.value,
+  find: findShapes ? {name: findName, system: data.systems[findSy]} : null,
+  checkboxes: [...new Set(sysBoxes)].every(cb => {
+    const members = sysBoxes.flatMap((box, i) => box === cb ? [i] : []);
+    return cb.checked === members.some(i => sysOn[i])
+      && cb.indeterminate === (members.some(i => sysOn[i]) && members.some(i => !sysOn[i]));
+  }),
+}))()`;
+await ev(`(() => {
+  setLive(false); speedSel.value = "150"; simT = 9 * 3600 + 123; setPlaying(false);
+  const all = document.querySelector("#filters .head input");
+  all.checked = false; all.dispatchEvent(new Event("change"));
+  buildFindIndex(); chooseFind(findIndex.find(e => e.n === "161" && data.systems[e.sy] === "Metro Bus"));
+  flight = null; Object.assign(view, {x: 1250, y: 1300, k: 2.4});
+})()`);
+const beforeUpdate = await ev(stateSnapshot);
+const staged = path.join(tmp, "stamped");
+const reordered = JSON.parse(fs.readFileSync(path.join(ROOT, "schedule.json"), "utf8"));
+const lastSystem = reordered.systems.length - 1;
+reordered.systems.reverse();
+reordered.routes.forEach(r => { r.sy = lastSystem - r.sy; });
+reordered.groups.forEach(g => { g.sy = g.sy.map(i => lastSystem - i); });
+fs.unlinkSync(path.join(staged, "schedule.json"));
+fs.writeFileSync(path.join(staged, "schedule.json"), JSON.stringify(reordered));
+const nextHash = crypto.createHash("sha256").update(fs.readFileSync(path.join(staged, "schedule.json")))
+  .digest("hex").slice(0, 10);
+let currentBuild = BUILD;
+function publish(build, sha) {
+  const client = path.join(staged, "app.js");
+  fs.writeFileSync(client, fs.readFileSync(client, "utf8")
+    .replace(`const BUILD = "${currentBuild}"`, `const BUILD = "${build}"`)
+    .replace(h("schedule.json"), nextHash));
+  currentBuild = build;
+  fs.writeFileSync(path.join(staged, "version.json"), JSON.stringify({build, sha}));
+}
+async function waitForBuild(build) {
+  for (let i = 0; i < 100; i++) {
+    if (await ev(`typeof data !== "undefined" && !!data && BUILD === ${JSON.stringify(build)}`)) return;
+    await sleep(150);
+  }
+  throw new Error(`page did not refresh to ${build}`);
+}
+const sortedSystems = state => Object.entries(state.systems).sort(([a], [b]) => a.localeCompare(b));
+publish(LIVE, "feed1234567890abcdef");
+net = [];
+await ev("checkVersion()");
+await waitForBuild(LIVE);
+const afterUpdate = await ev(stateSnapshot);
+check("update: automatically loaded the new build", await ev("BUILD"), LIVE);
+check("update: same map center", afterUpdate.center, beforeUpdate.center);
+check("update: same zoom", afterUpdate.zoom, beforeUpdate.zoom);
+check("update: filters follow names across reordered indices", sortedSystems(afterUpdate), sortedSystems(beforeUpdate));
+check("update: checkbox controls match restored filters", afterUpdate.checkboxes, true);
+check("update: time and pause state restored", [afterUpdate.time, afterUpdate.playing], [beforeUpdate.time, false]);
+check("update: speed restored", afterUpdate.speed, "150");
+check("update: searched line restored", afterUpdate.find, beforeUpdate.find);
+check("update: URL parameters retained", await ev("location.search"), "?debug&k=3&x=2000&y=1300&live");
+check("update: saved mode overrides the opening URL", afterUpdate.live, false);
+check("update: restoration consumed once", await ev("!!history.state?.transitRefresh"), false);
+check("update: client URL changes with the build", net.some(u => u.endsWith("app.js?v=feed123")), true);
+
+await ev(`(() => {
+  setLive(true);
+  const all = document.querySelector("#filters .head input");
+  all.checked = false; all.dispatchEvent(new Event("change"));
+  findShapes = null;
+  fitView(map.width, map.height); view.k = 0.06;
+})()`);
+const liveView = await ev(stateSnapshot);
+const liveBuild = "ccc3333 2026-01-03 00:00";
+publish(liveBuild, "cafe1234567890abcdef");
+await ev("checkVersion()");
+await waitForBuild(liveBuild);
+check("update: live mode restored", await ev("live && playing && playBtn.disabled && scrub.disabled && speedSel.disabled"), true);
+check("update: live clock follows current time", await ev("Math.abs(simT - liveClock()) < 2"), true);
+check("update: live mode keeps its time-lapse speed", await ev("speedWas"), "150");
+check("update: live mode keeps the view", (await ev(stateSnapshot)).center, liveView.center);
+check("update: overview zoom is preserved", await ev("view.k"), liveView.zoom);
+check("update: all systems off stays off", await ev("sysOn.every(on => !on)"), true);
+check("update: all-systems checkbox restored", await ev(`(() => {
+  const all = document.querySelector("#filters .head input");
+  return !all.checked && !all.indeterminate;
+})()`), true);
+await ev("setLive(false)");
+check("update: switching back restores speed", await ev("speedSel.value"), "150");
+
+// An unchanged cached client must not enter a reload loop.
+fs.writeFileSync(path.join(staged, "version.json"), JSON.stringify({build: "missing build", sha: "missing123"}));
+net = [];
+await ev("checkVersion()");
+await sleep(2500);
+check("update: a stale client response reloads only once",
+  net.filter(u => u.includes("/stamped/index.html")).length, 1);
+check("update: stale client keeps the restored view", (await ev(stateSnapshot)).center, liveView.center);
+const recoveredBuild = "ddd4444 2026-01-04 00:00";
+publish(recoveredBuild, "deed1234567890abcdef");
+await ev("checkVersion()");
+await waitForBuild(recoveredBuild);
+check("update: polling recovers after a stale client response", await ev("BUILD"), recoveredBuild);
 
 // 2. an unstamped working copy must not poll, and must not nag
 const d = await load("dev");

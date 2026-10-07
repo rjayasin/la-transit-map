@@ -74,6 +74,8 @@ const stats = document.getElementById("stats");
 
 // URL params: ?t=HH:MM start time, ?speed=N, ?paused=1, ?live
 const qp = new URLSearchParams(location.search);
+const refreshState = history.state?.transitRefresh;
+const resume = refreshState?.version === 1 ? refreshState : null;
 if (qp.get("t")) { const [h, m] = qp.get("t").split(":").map(Number); simT = h * 3600 + (m || 0) * 60; }
 if (qp.get("speed")) speedSel.value = qp.get("speed");
 
@@ -263,9 +265,15 @@ function buildPanel(systems, groups) {
 // A group (the many small operators the sheet lists together) gets one box
 // standing for all its systems; every other system gets its own.
 function buildFilters(systems, groups) {
-  sysOn = systems.map(() => true);
+  sysOn = systems.map(name => resume?.systems?.[name] !== false);
   const allCb = document.createElement("input");
-  allCb.type = "checkbox"; allCb.checked = true;
+  allCb.type = "checkbox";
+  function syncAll() {
+    const on = sysOn.filter(Boolean).length;
+    allCb.checked = on === sysOn.length;
+    allCb.indeterminate = on > 0 && on < sysOn.length;
+  }
+  syncAll();
   const head = document.createElement("label");
   head.className = "head";
   head.append(allCb, "All systems");
@@ -281,13 +289,14 @@ function buildFilters(systems, groups) {
   });
   const boxes = entries.map(([name, members]) => {
     const cb = document.createElement("input");
-    cb.type = "checkbox"; cb.checked = true;
+    cb.type = "checkbox";
+    cb.checked = members.some(i => sysOn[i]);
+    cb.indeterminate = cb.checked && members.some(i => !sysOn[i]);
     for (const i of members) sysBoxes[i] = cb;
     cb.onchange = () => {
       for (const i of members) sysOn[i] = cb.checked;
-      const on = sysOn.filter(Boolean).length;
-      allCb.checked = on === sysOn.length;
-      allCb.indeterminate = on > 0 && on < sysOn.length;
+      cb.indeterminate = false;
+      syncAll();
     };
     const lab = document.createElement("label");
     lab.append(cb, name);
@@ -297,7 +306,7 @@ function buildFilters(systems, groups) {
   allCb.onchange = () => {
     allCb.indeterminate = false;
     sysOn.fill(allCb.checked);
-    boxes.forEach(b => { b.checked = allCb.checked; });
+    boxes.forEach(b => { b.checked = allCb.checked; b.indeterminate = false; });
   };
   const headRow = document.createElement("div");
   headRow.className = "headrow";
@@ -987,6 +996,12 @@ fitView(map.width, map.height);
 if (qp.get("k")) view.k = +qp.get("k");
 if (qp.get("x")) view.x = +qp.get("x");
 if (qp.get("y")) view.y = +qp.get("y");
+if (Array.isArray(resume?.center) && resume.center.every(Number.isFinite) && resume.center.length === 2
+    && Number.isFinite(resume.zoom) && resume.zoom > 0) {
+  view.k = Math.min(8 / DPR, resume.zoom);
+  view.x = resume.center[0] - W / (2 * view.k);
+  view.y = resume.center[1] - H / (2 * view.k);
+}
 // Load the overview and visible detail alongside the schedule.
 const overviewLevel = TILE_LEVELS[0], overviewSpan = TILE / overviewLevel;
 for (let r = 0; r < Math.ceil(map.height / overviewSpan); r++)
@@ -1015,7 +1030,9 @@ fetch(`schedule.json?v=${V_SCHEDULE}`).then(r => {
   insetRuns = (d.insets || []).map(runs => runs && runs.map(toShape));
   insetRanges = d.insetRanges || [];
   showDay(laDay());
+  restoreRefreshState();
   armFrame();
+  checkVersion();
 }, error => {   // download failures only; a fault in the handler above still throws
   stats.textContent = "Could not load schedules. Reload to retry.";
   stats.title = error.message;
@@ -1190,6 +1207,7 @@ function handleTap(cx, cy) {
 // has nothing to search on a canvas, so the shortcut is taken over.
 let findShapes = null;   // shape indices of the found line, or null
 let findLabel = "";      // "720 · Metro Bus", for the stats line
+let findName = "";
 let findSy = -1;         // the found line's system
 let flight = null;       // {from, to, t0} view animation, or null
 const FLY_MS = 700;
@@ -1335,6 +1353,7 @@ function chooseFind(e) {
   findShapes = [...e.shapes];
   findSy = e.sy;
   findLabel = `${e.n} · ${data.systems[e.sy]}`;
+  findName = e.n;
   pathTrip = -1;
   flyToShapes(findShapes);
 }
@@ -1626,24 +1645,74 @@ setInterval(() => {
 // page asks: version.json carries the published build, the query string gets
 // past the CDN's ten-minute cache, and no-store keeps it out of the browser's.
 //
-// It never reloads by itself, this being a simulation someone watches at a
-// zoom and a clock they chose. It offers, in the bar, and says so on the console.
+// A reload carries the view and controls in this tab's history entry. System
+// names and line labels survive changes to the schedule's array indices.
 const VERSION_POLL_MS = 300000;   // 5 min; a deploy is not an urgent event
+let refreshing = false;
 const updEl = document.getElementById("upd");
-updEl.addEventListener("click", () => location.reload());
+updEl.addEventListener("click", () => refreshForUpdate(staleBuild || BUILD));
+
+function restoreRefreshState() {
+  if (!resume) return;
+  setLive(false);
+  if ([...speedSel.options].some(o => o.value === resume.speed)) speedSel.value = resume.speed;
+  setLive(resume.live === true);
+  if (!live) {
+    if (Number.isFinite(resume.time)) simT = Math.max(0, Math.min(86399, resume.time));
+    setPlaying(resume.playing !== false);
+  } else simT = liveClock();
+  scrub.value = simT | 0;
+  if (resume.find) {
+    buildFindIndex();
+    const hit = findIndex.find(e => e.n === resume.find.name
+      && data.systems[e.sy] === resume.find.system && sysOn[e.sy]);
+    if (hit) {
+      findShapes = [...hit.shapes];
+      findSy = hit.sy;
+      findName = hit.n;
+      findLabel = `${hit.n} · ${data.systems[hit.sy]}`;
+    }
+  }
+  const state = { ...history.state };
+  delete state.transitRefresh;
+  history.replaceState(state, "");
+}
+
+function refreshForUpdate(target) {
+  if (!data || refreshing) return;
+  try {
+    history.replaceState({ ...history.state, transitRefresh: {
+      version: 1, build: BUILD, target, at: Date.now(),
+      center: [view.x + W / (2 * view.k), view.y + H / (2 * view.k)],
+      zoom: view.k,
+      systems: Object.fromEntries(data.systems.map((name, i) => [name, sysOn[i]])),
+      live, time: simT, playing, speed: live ? speedWas : speedSel.value,
+      find: findShapes ? { name: findName, system: data.systems[findSy] } : null,
+    } }, "");
+    refreshing = true;
+    location.reload();
+  } catch (e) {
+    refreshing = false;
+    updEl.hidden = false;
+    console.warn("[transit] could not preserve the view for an update:", e);
+  }
+}
 
 async function checkVersion() {
-  if (!DEPLOYED || staleBuild || document.hidden) return;
+  if (!DEPLOYED || !data || refreshing || document.hidden) return;
   try {
     const res = await fetch(`version.json?ts=${Date.now()}`, { cache: "no-store" });
     if (!res.ok) return;
     const v = await res.json();
-    if (!v.build || v.build === BUILD) return;
+    if (!v.build || v.build === BUILD || refreshing) return;
     staleBuild = v.build;
-    updEl.hidden = false;
-    console.warn(`[transit] this tab is running build ${BUILD}; ${v.build} is live. `
-               + "Nothing is wrong with it, but a freeze reported from this tab is a "
-               + "freeze in the older code. The update button in the bar reloads.");
+    // A stale client response must not cause repeated reloads of the same build.
+    if (resume?.build === BUILD && resume.target === v.build
+        && Date.now() - resume.at < VERSION_POLL_MS) {
+      updEl.hidden = false;
+      return;
+    }
+    refreshForUpdate(v.build);
   } catch (e) { /* offline, or the deploy is mid-flight; ask again next time */ }
 }
 setInterval(checkVersion, VERSION_POLL_MS);

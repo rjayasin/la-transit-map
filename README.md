@@ -28,6 +28,8 @@ python3 -m http.server 8741
   press Enter to zoom to that line and highlight it. The arrow keys pick
   between systems that share a designation. Escape closes the box, and a second
   Escape clears the highlight.
+- **Updates.** A new build refreshes the page automatically, keeping the map
+  center, zoom, system filters, playback settings and searched line.
 - **URL params.** `?t=8:30&speed=150&paused=1`, or `?live` to open live.
 
 ## How it works
@@ -117,7 +119,7 @@ on :8741.
 | File | Checks |
 |---|---|
 | `stall_test.mjs` | Under a fake clock: a backgrounded tab never reads as a stall, a stalled page always does |
-| `deploy_test.mjs` | A stamped copy reports its build, asks for data by content hash, notices a newer build, and offers a reload instead of taking one |
+| `deploy_test.mjs` | Build stamps and content hashes, automatic updates with restored view and controls, and protection against repeated reloads |
 | `live_stall_test.mjs` | The watchdog in a real browser: kills `rAF`, checks the stall is caught, the verdict names the page, the tab strip warns, and the re-arm restores the loop |
 | `inset_tap_test.mjs` | A tap on a vehicle in the Downtown panel selects the one drawn there; a tap on blank panel clears the selection |
 | `live_mode_test.mjs` | Live mode runs on Los Angeles' clock at 1×, survives a gap in frames, and hands the clock back on the way out; both modes open on today's timetable, at the current time |
