@@ -2150,6 +2150,20 @@ def trim_terminus(pts, pins, with_offset=False):
 # with `exact` keeps its path's corners to HAND_TOL rather than the 1.2 px the
 # stored shapes are simplified to, for a drawn jog shorter than that.
 OVERRIDE_PATHS = {
+    ("calabasas", "Line1"): {
+        "shape_ids": ("p_901744",),
+        "box": (150, 1585, 210, 1650),
+        "path": [(204.0, 1586.77), (161.32, 1586.77), (205.4, 1586.77)],
+    },
+    ("calabasas", "Line4"): [{
+        "shape_ids": ("p_901787",),
+        "box": (150, 1585, 210, 1650),
+        "path": [(209.8, 1586.77), (161.32, 1586.77), (202.7, 1586.77)],
+    }, {
+        "shape_ids": ("p_901784",),
+        "box": (150, 1585, 210, 1650),
+        "path": [(177.0, 1586.77), (161.32, 1586.77), (212.0, 1586.77)],
+    }],
     ("ladot", "4577"): {
         "box": (1495, 1520, 1548, 1600),
         "path": [
