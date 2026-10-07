@@ -252,5 +252,9 @@
   {
     "name": "Compton 4 loop past the 710", "gate": 4, "tolerance": 1, "min_matches": 1, "system": "Compton Renaissance", "route": "CR",
     "path": [[2014.99,2687.67],[2017,2686.79],[2018.53,2685.36],[2024.51,2674.25],[2025.39,2669.73],[2025.39,2661.39],[2024.86,2659.61],[2023.5,2658.42],[2022.08,2658.12]]
+  },
+  {
+    "name": "Lawndale Express down Hawthorne", "gate": 4, "tolerance": 1, "min_matches": 1, "system": "Lawndale Beat", "route": "LW",
+    "path": [[1321.4,2665],[1321.4,2745]]
   }
 ]
