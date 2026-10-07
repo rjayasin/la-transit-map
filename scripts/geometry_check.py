@@ -60,14 +60,21 @@ def check(data, fixtures):
                   if r["n"] == case["route"] and data["systems"][r["sy"]] == case["system"]}
         patterns = {t[1] for t in data["trips"] if t[0] in routes}
         shapes = {data["patterns"][pi]["s"] for pi in patterns}
-        if "platform" in case:
+        if "terminus" in case:
+            hits = sum(min(math.dist(data["shapes"][si][:2], case["terminus"]),
+                           math.dist(data["shapes"][si][-2:], case["terminus"]))
+                       <= case["tolerance"] for si in shapes)
+            if hits < case["min_matches"]:
+                raise ValueError(f"{case['name']}: terminus reached by only {hits} shapes")
+        elif "platform" in case or "stop" in case:
+            stop = case.get("platform", case.get("stop"))
             hits = 0
             for pi in patterns:
                 p = data["patterns"][pi]
                 pts, cum = curve(data["shapes"][p["s"]])
-                hits += any(math.dist(at(pts,cum,d),case["platform"]) <= case["tolerance"] for d in p["d"])
+                hits += any(math.dist(at(pts,cum,d),stop) <= case["tolerance"] for d in p["d"])
             if hits < case["min_matches"]:
-                raise ValueError(f"{case['name']}: platform reached by only {hits} patterns")
+                raise ValueError(f"{case['name']}: stop reached by only {hits} patterns")
         else:
             hits = 0
             for si in shapes:

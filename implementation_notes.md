@@ -381,6 +381,11 @@ the trim is what you want. Where a leg is short enough that no other position
 on it is trim-free, that pin plus one further up the corridor is usually the
 whole fix.
 
+**Override stop correspondence.** `waypoints` pairs warp coordinates with drawn
+coordinates in travel order. It interpolates source arc length between those
+pairs so a stop at a street junction stays at that junction when a schematic
+loop has different proportions. Both projections must advance strictly.
+
 **Placing an override.** `box` is matched against the warp, and the replaced
 run goes from the first to the last warp point inside it. An excursion that
 leaves the box in between is harmless, but a second pass through the box later
