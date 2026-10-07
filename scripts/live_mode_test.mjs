@@ -130,8 +130,10 @@ check("it offers both modes",
       await evaluate(`[...filtersEl.querySelectorAll(".modes button")].map(b => b.textContent)`),
       ["Time-lapse", "Live"]);
 check("time-lapse reads as the current one", await evaluate(pressed), ["true", "false"]);
+// one box per system, but one for a whole group
 check("the system list is intact",
-      await evaluate("filtersEl.querySelectorAll('.grid label').length === data.systems.length"), true);
+      await evaluate(`filtersEl.querySelectorAll('.grid label').length ===
+        data.systems.length - (data.groups || []).reduce((n, g) => n + g.sy.length - 1, 0)`), true);
 
 // ---- switch to live ------------------------------------------------------
 await evaluate(mode("Live"));

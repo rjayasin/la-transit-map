@@ -371,6 +371,13 @@ AGENCY_SYMBOLS = {
     "simivalley": "SV", "westcovina": "GW", "glendale": "GB", "westhollywood": "CL",
 }
 
+# Systems the filter shows under one checkbox: the operators the sheet lists
+# in its "Municipal & Neighboring Bus Lines" legend.
+FILTER_GROUPS = {
+    "Municipal & Neighboring Bus Lines":
+        sorted(set(AGENCY_SYMBOLS) | {"lacounty", "beachcities", "burbank", "pasadena"}),
+}
+
 
 # Feed routes whose paired short name is two drawn lines, not one line renamed
 # along its length; those ship as two routes, split by badge. A pair left out
@@ -8545,6 +8552,9 @@ def merge_schedules(parts):
                                for p in part["patterns"])
         out["trips"].extend([t[0] + ri, t[1] + pi, *t[2:]] for t in part["trips"])
         out["tripDays"].extend(part["tripDays"])
+    out["groups"] = [{"n": name, "sy": [i for i, sy in enumerate(out["systems"])
+                                        if sy in {FEED_NAMES[f] for f in feeds}]}
+                     for name, feeds in FILTER_GROUPS.items()]
     return out
 
 

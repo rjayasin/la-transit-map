@@ -243,7 +243,7 @@ function refreshHint() {
     : `The whole of today's service (${day}), sped up.`;
 }
 
-function buildPanel(systems) {
+function buildPanel(systems, groups) {
   const modes = document.createElement("div");
   modes.className = "modes";
   modeBtns = [["Time-lapse", false], ["Live", true]].map(([label, isLive]) => {
@@ -256,11 +256,13 @@ function buildPanel(systems) {
   hintEl = document.createElement("div");
   hintEl.className = "hint";
   filtersEl.append(modes, hintEl);
-  buildFilters(systems);
+  buildFilters(systems, groups || []);
   setLive(live);
 }
 
-function buildFilters(systems) {
+// A group (the many small operators the sheet lists together) gets one box
+// standing for all its systems; every other system gets its own.
+function buildFilters(systems, groups) {
   sysOn = systems.map(() => true);
   const allCb = document.createElement("input");
   allCb.type = "checkbox"; allCb.checked = true;
@@ -269,12 +271,20 @@ function buildFilters(systems) {
   head.append(allCb, "All systems");
   const grid = document.createElement("div");
   grid.className = "grid";
-  const boxes = systems.map((name, i) => {
+  const grouped = new Map();
+  for (const g of groups) for (const i of g.sy) grouped.set(i, g);
+  const entries = [];
+  systems.forEach((name, i) => {
+    const g = grouped.get(i);
+    if (!g) entries.push([name, [i]]);
+    else if (g.sy[0] === i) entries.push([g.n, g.sy]);
+  });
+  const boxes = entries.map(([name, members]) => {
     const cb = document.createElement("input");
     cb.type = "checkbox"; cb.checked = true;
-    sysBoxes[i] = cb;
+    for (const i of members) sysBoxes[i] = cb;
     cb.onchange = () => {
-      sysOn[i] = cb.checked;
+      for (const i of members) sysOn[i] = cb.checked;
       const on = sysOn.filter(Boolean).length;
       allCb.checked = on === sysOn.length;
       allCb.indeterminate = on > 0 && on < sysOn.length;
@@ -1000,7 +1010,7 @@ fetch(`schedule.json?v=${V_SCHEDULE}`).then(r => {
   }
   shapes = d.shapes.map(toShape);
   sprites = d.routes.map(makeSprite);
-  buildPanel(d.systems || []);
+  buildPanel(d.systems || [], d.groups);
   insetRect = d.insetRect;
   insetRuns = (d.insets || []).map(runs => runs && runs.map(toShape));
   insetRanges = d.insetRanges || [];
