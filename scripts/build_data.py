@@ -255,6 +255,64 @@ def parse_time(s):
     return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2] if len(parts) > 2 else 0)
 
 
+EXCURSION_RATIO = 4.0    # shape between two consecutive stops this many times
+EXCURSION_KM = 3.0       # their straight distance, and this long, is a detour
+                         # the trip does not make
+
+
+def cut_excursions(pts, seq_list, stops_ll, feed):
+    """A shape with every stretch cut out that runs far round between two
+    consecutive stops of a trip using it. Some feeds draw a school working's
+    whole loop into a shape whose stop list skips it, and a vehicle then has
+    a minute to cover several miles. The measures go with the cut, so stops
+    are placed by projection."""
+    if len(pts) < 3:
+        return pts
+    P = np.array([(q[1], q[2]) for q in pts])
+    k = np.cos(np.radians(P[:, 1].mean()))
+    xy = np.c_[P[:, 0] * k, P[:, 1]] * 111.0
+    cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(xy, axis=0).T))])
+    drop = np.zeros(len(pts), bool)
+    for seq in seq_list:
+        S = [stops_ll.get((feed, sid)) for sid in seq]
+        if any(v is None for v in S):
+            continue
+        S = np.array(S)
+        Sxy = np.c_[S[:, 0] * k, S[:, 1]] * 111.0
+        at, lo = [], 0
+        for q in Sxy:               # nearest point at or after the last stop's
+            j = lo + int(np.argmin(np.hypot(*(xy[lo:] - q).T)))
+            at.append(j)
+            lo = j
+        for (a, b), qa, qb in zip(zip(at, at[1:]), Sxy, Sxy[1:]):
+            straight = math.dist(qa, qb)
+            arc = cum[b] - cum[a]
+            if arc > EXCURSION_KM and arc > EXCURSION_RATIO * max(straight, 0.1):
+                drop[a + 1:b] = True
+    if not drop.any():
+        return pts
+    return [(q[0], q[1], q[2], None) for q, d in zip(pts, drop) if not d]
+
+
+IMPOSSIBLE_KMH = 400.0   # straight-line speed between two timed stops that no
+                         # bus or train makes. A feed that wraps its times at
+                         # midnight produces trips claiming 30 km in a minute,
+                         # and those are dropped rather than drawn teleporting.
+
+
+def impossible_hop(sts, feed, stops_ll):
+    """Whether a trip's own timetable asks for an impossible speed between two
+    consecutive timed stops more than 2 km apart."""
+    for a, b in zip(sts, sts[1:]):
+        pa, pb = stops_ll.get((feed, a[3])), stops_ll.get((feed, b[3]))
+        if pa is None or pb is None:
+            continue
+        km = math.hypot((pb[1] - pa[1]) * 111.0, (pb[0] - pa[0]) * 92.0)
+        if km > 2 and km / (max(b[1] - a[2], 60) / 3600) > IMPOSSIBLE_KMH:
+            return True
+    return False
+
+
 def chain_block_trips(stop_times, trip_info, trip_block):
     """Keep a vehicle continuous across adjacent trips on the same shape."""
     blocks = defaultdict(list)
@@ -7862,6 +7920,9 @@ def build_schedule(feeds):
                 continue
             rid, sid = trip_info[ti]
             sts.sort()
+            if impossible_hop(sts, feed, stops_ll):
+                stats["impossible_dropped"] += 1
+                continue
             if not sid and feed != "metrolink":
                 seq = tuple(s for _, _, _, s, _, _ in sts)
                 sid = "stops-" + hashlib.sha1("|".join(seq).encode()).hexdigest()[:12]
@@ -7905,6 +7966,13 @@ def build_schedule(feeds):
                 tmp[sid_].append((int(seq), float(lon), float(lat), parse_distance(measure)))
         for sid_, (_, seq) in stop_shapes.items():
             tmp[sid_] = [(i, *stops_ll[(feed, s)], None) for i, s in enumerate(seq)]
+        if feed in AGENCY_SYMBOLS:
+            seqs = defaultdict(list)
+            for f_, s_, seq_ in pattern_idx:
+                if f_ == feed and s_ in tmp:
+                    seqs[s_].append(seq_)
+            for sid_, seq_list in seqs.items():
+                tmp[sid_] = cut_excursions(sorted(tmp[sid_]), seq_list, stops_ll, feed)
         route_by_shape = {row.get("shape_id", ""): row["route_id"] for row in trip_rows}
         route_by_shape.update({s: r for s, (r, _) in stop_shapes.items()})
         if feed == "metrolink":
