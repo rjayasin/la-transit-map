@@ -6681,6 +6681,101 @@ def stops_on_strokes(pts, ink):
     return [tuple(q) for q in out]
 
 
+HMM_GAIN = 0.03      # share of length a match must bring onto the ink to be kept
+HMM_STRETCH = 1.3    # ... without lengthening the shape by more than this
+
+
+def on_ink_share(P, tree, tol=3.0):
+    Q = np.array(densify([tuple(q) for q in P], 2.0))
+    return float(np.mean(tree.query(Q)[0] <= tol))
+
+
+def hmm_strokes(prior, ink, R=35.0, sigma=10.0, beta=3.0, every=2, K=24, null=8.0):
+    """`prior` matched onto the stroke graph as a hidden Markov model: each
+    sample picks a stroke point within `R`, scored by distance, and moving
+    between samples costs the difference between the walk along the strokes
+    and the step the shape takes. A null state lets a stretch with nothing
+    drawn under it keep the prior. Consecutive matched samples are joined by
+    their walk, so the result follows the drawing rather than chords."""
+    prior = np.asarray(prior, float)
+    n = len(prior)
+    idx = list(range(0, n, every))
+    if idx[-1] != n - 1:
+        idx.append(n - 1)
+    S = prior[idx]
+    near = cKDTree(ink).query_ball_point(S, R + 40)
+    keep = np.unique(np.concatenate([np.asarray(v, int) for v in near if v] or [np.zeros(0, int)]))
+    if not len(keep):
+        return prior
+    nodes, ntree, G = stroke_graph(ink[keep])
+    cands = []
+    for s in S:
+        ii = ntree.query_ball_point(s, R)
+        if len(ii) > K:
+            dd = np.hypot(*(nodes[ii] - s).T)
+            bins = {}
+            for j, dj in zip(ii, dd):
+                key = tuple(np.round(nodes[j] / 5).astype(int))
+                if key not in bins or dj < bins[key][1]:
+                    bins[key] = (j, dj)
+            ii = [j for j, _ in sorted(bins.values(), key=lambda t: t[1])[:K]]
+        cands.append(np.asarray(ii, int))
+    T = len(S)
+    cost, back = [None] * T, [None] * T
+    em = lambda k: np.hypot(*(nodes[cands[k]] - S[k]).T) ** 2 / (2 * sigma ** 2)
+    cost[0] = np.concatenate([em(0), [null]])
+    for k in range(1, T):
+        a, bb = cands[k - 1], cands[k]
+        step = np.hypot(*(S[k] - S[k - 1]))
+        na, nb = len(a), len(bb)
+        tr = np.full((na + 1, nb + 1), np.inf)
+        if na and nb:
+            D = dijkstra(G, indices=a, limit=3 * step + 15)[:, bb]
+            tr[:na, :nb] = np.abs(D - step) / beta
+        tr[na, :nb] = 2.0
+        tr[:na, nb] = 2.0
+        tr[na, nb] = 0.0
+        tot = cost[k - 1][:, None] + tr
+        back[k] = np.argmin(tot, axis=0)
+        cost[k] = tot[back[k], np.arange(nb + 1)] + np.concatenate([em(k), [null]])
+    st = [int(np.argmin(cost[-1]))]
+    for k in range(T - 1, 0, -1):
+        st.append(int(back[k][st[-1]]))
+    st = st[::-1]
+    ch = [cands[k][s] if s < len(cands[k]) else -1 for k, s in enumerate(st)]
+    out = prior.copy()
+    k = 0
+    while k < T:
+        if ch[k] < 0:
+            k += 1
+            continue
+        e = k
+        poly = [nodes[ch[k]][None]]
+        while e + 1 < T and ch[e + 1] >= 0:
+            a, c = ch[e], ch[e + 1]
+            if a != c:
+                D, pr = dijkstra(G, indices=[a], limit=4 * np.hypot(*(S[e + 1] - S[e])) + 20,
+                                 return_predecessors=True)
+                if not np.isfinite(D[0][c]):
+                    break
+                path = [c]
+                while path[-1] != a:
+                    path.append(pr[0][path[-1]])
+                poly.append(nodes[path[::-1]][1:])
+            e += 1
+        i0, i1 = idx[k], idx[e]
+        pl = np.vstack(poly)
+        if i1 > i0 and len(pl) > 1:
+            cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(pl, axis=0).T))])
+            pa = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(prior[i0:i1 + 1], axis=0).T))])
+            t = pa / pa[-1] * cum[-1] if pa[-1] > 0 else np.linspace(0, cum[-1], i1 - i0 + 1)
+            out[i0:i1 + 1] = np.c_[np.interp(t, cum, pl[:, 0]), np.interp(t, cum, pl[:, 1])]
+        else:
+            out[i0] = pl[0]
+        k = e + 1
+    return out
+
+
 def stroke_graph(P, cell=2.0, r=3.0, bridge=STROKE_BRIDGE):
     """Ink points on a `cell` grid, joined where they touch. A drawn line is
     split into strokes at corners and crossings and the pieces stop a few px
@@ -8451,6 +8546,13 @@ def build_schedule(feeds):
             if (feed in AGENCY_SYMBOLS or feed == "lacounty") and len(full) == len(base):
                 ink = symbol_ink(feed, rmeta[rid][0] if rid in rmeta else None)
                 full = onto_strokes(full, pdf_ink([ink]), bus_ink_except(ink))
+                own = pdf_ink([ink])
+                cand = hmm_strokes(full, own)
+                t_own = cKDTree(own)
+                arc = lambda P: np.hypot(*np.diff(P, axis=0).T).sum()
+                if (on_ink_share(cand, t_own) >= on_ink_share(full, t_own) + HMM_GAIN
+                        and arc(cand) <= HMM_STRETCH * arc(full)):
+                    full = cand
             override = OVERRIDE_PATHS.get((feed, (rid or "").split("-")[0]))
             hand = None
             if override is not None and len(full) == len(base):
