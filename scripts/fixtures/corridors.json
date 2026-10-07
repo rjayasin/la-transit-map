@@ -134,6 +134,27 @@
     "system": "Metro Rail", "route": "C", "platform": [1319,2474], "tolerance": 5, "min_matches": 2
   },
   {
+    "name": "Metro 108 Via Marina and Pacific loop",
+    "system": "Metro Bus", "route": "108", "gate": 3, "tolerance": 2, "min_matches": 4,
+    "path": [[840.65,2284.58],[840.65,2308.55],[842.66,2316.07],[849.81,2328.45],[848.93,2331.74],[839.89,2336.96],[836.6,2336.08],[811.31,2292.27]]
+  },
+  {
+    "name": "Metro 108 Washington/Palawan terminal",
+    "system": "Metro Bus", "route": "108", "terminus": [853.23,2266.82], "tolerance": 1, "min_matches": 7
+  },
+  {
+    "name": "Metro 108 Via Marina/Admiralty stop",
+    "system": "Metro Bus", "route": "108", "stop": [840.65,2284.58], "tolerance": 2, "min_matches": 4
+  },
+  {
+    "name": "Metro 108 Via Marina/Pacific stop",
+    "system": "Metro Bus", "route": "108", "stop": [839.89,2336.96], "tolerance": 2, "min_matches": 4
+  },
+  {
+    "name": "Metro 108 Washington/Pacific stop",
+    "system": "Metro Bus", "route": "108", "stop": [811.31,2292.27], "tolerance": 2, "min_matches": 4
+  },
+  {
     "name": "Metro 108 Slauson Av through the Eastern Av corner",
     "system": "Metro Bus", "route": "108", "gate": 4, "tolerance": 3, "min_matches": 2,
     "path": [[2000,2224.2],[2059.3,2224.2],[2194,2302]]

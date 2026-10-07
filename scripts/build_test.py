@@ -91,6 +91,17 @@ class ScheduleTests(unittest.TestCase):
 
 
 class GeometryTests(unittest.TestCase):
+    def test_override_waypoints_keep_junction_stops_on_their_street(self):
+        prior = [(0, 0), (2, 0), (3, 0), (10, 0)]
+        spec = {"box": (0, -1, 10, 1), "forward": True,
+                "path": [(0, 0), (0, 10), (10, 10)],
+                "waypoints": [((2, 0), (0, 10))]}
+        result = B.apply_override(prior, prior, spec)
+        np.testing.assert_allclose(result, [(0, 0), (0, 10), (1.25, 10), (10, 10)])
+        spec["waypoints"] = [((8, 0), (0, 5)), ((2, 0), (5, 10))]
+        with self.assertRaisesRegex(ValueError, "waypoints must follow"):
+            B.apply_override(prior, prior, spec)
+
     def test_override_can_target_shape_variants(self):
         full = [(0, 0), (5, 0), (10, 0)]
         spec = {"shape_ids": ("a",), "box": (0, -1, 10, 1),
