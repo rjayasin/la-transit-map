@@ -387,7 +387,10 @@ leaves the box in between is harmless, but a second pass through the box later
 in the route swallows everything between the two. `pass` replaces one of them
 instead (0 the first, -1 the last). A circuit needs it at its ends, where the
 first and last legs run the same stretch of warp and no box holds one without
-the other. The stored shapes are simplified to 1.2 px, which flattens a drawn
+the other. A box round a whole circuit has the opposite problem: the shape
+starts and ends at one point, so the orientation test reads a zero heading and
+can splice the path backwards. Trace it in the feed's direction of travel and
+set `forward`. The stored shapes are simplified to 1.2 px, which flattens a drawn
 jog smaller than that into a diagonal; `exact` keeps the path's corners. One
 `path` serves both directions, since the orientation comes from the direction
 of travel rather than from which end the shape enters by. Use `shape_ids` when
