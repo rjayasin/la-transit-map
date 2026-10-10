@@ -8803,7 +8803,7 @@ def match_stroke_network(prior, base, ink):
 # sews between them. The value lists other inks the network includes, for a
 # line drawn on top of the feed's own stroke where the two share a street.
 # Without it the feed's network breaks there and the match hops straight across.
-STROKE_MATCH = {"pvpta": ORANGE_INK}
+STROKE_MATCH = {"pvpta": ORANGE_INK, "commerce": ()}
 
 # Straight joins added to a STROKE_MATCH network, in map px, where the sheet
 # stops a street short on both sides of a line drawn across it. Without one the
