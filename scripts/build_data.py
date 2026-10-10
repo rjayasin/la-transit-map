@@ -2160,6 +2160,20 @@ def trim_terminus(pts, pins, with_offset=False):
 # traced in the feed's direction of travel instead. `waypoints` pairs warp
 # positions with drawn positions to keep stops on their street through a loop.
 OVERRIDE_PATHS = {
+    ("foothill", "10699"): {
+        "exact": True,
+        "box": (3090, 1780, 3215, 1860),
+        "path": [(3085.00, 1839.80), (3220.00, 1839.80)],
+    },
+    ("foothill", "20190"): {
+        "exact": True,
+        "box": (3232, 1920, 3378, 1992),
+        "path": [
+            (3238.30, 1925.00), (3269.10, 1978.20), (3270.60, 1980.80),
+            (3274.00, 1981.80), (3276.30, 1982.10), (3281.50, 1979.10),
+            (3378.00, 1923.40),
+        ],
+    },
     ("gtfs_bus", "108"): [{
         "shape_ids": ("1080405_JUNE26", "1080428_JUNE26", "1080448_JUNE26", "1080451_JUNE26"),
         "exact": True,
@@ -5204,7 +5218,7 @@ OVERRIDE_PATHS = {
             (1001, 1830), (1001, 1845), (1001, 1858),
         ],
     },
-    ("gtfs_bus", "125"): {
+    ("gtfs_bus", "125"): [{
         "box": (1150, 2615, 1214.5, 2660),
         "path": [
             (1157.5, 2603.0), (1148.6, 2603.0), (1147.2, 2604.3), (1147.2, 2618.8),
@@ -5214,7 +5228,17 @@ OVERRIDE_PATHS = {
             (1201.0, 2610.6), (1201.0, 2618.9), (1201.4, 2620.4), (1202.9, 2621.9),
             (1204.3, 2622.2), (1215.0, 2622.2),
         ],
-    },
+    }, {
+        "exact": True,
+        "box": (1790, 2540, 2290, 2680),
+        "path": [
+            (1805.60, 2622.20), (1855.60, 2622.20), (1858.80, 2625.50),
+            (1858.80, 2652.70), (1862.10, 2656.00), (1872.70, 2656.00),
+            (1876.00, 2652.70), (1876.30, 2625.40), (1879.60, 2622.10),
+            (2248.50, 2622.10), (2251.80, 2618.90), (2251.40, 2559.70),
+            (2254.70, 2556.50), (2283.20, 2556.50),
+        ],
+    }],
     ("gtfs_bus", "662"): [{
         "shape_ids": ("6620014_JUNE26",),
         "pass": -1,
@@ -8803,7 +8827,7 @@ def match_stroke_network(prior, base, ink):
 # sews between them. The value lists other inks the network includes, for a
 # line drawn on top of the feed's own stroke where the two share a street.
 # Without it the feed's network breaks there and the match hops straight across.
-STROKE_MATCH = {"pvpta": ORANGE_INK}
+STROKE_MATCH = {"pvpta": ORANGE_INK, "commerce": ()}
 
 # Straight joins added to a STROKE_MATCH network, in map px, where the sheet
 # stops a street short on both sides of a line drawn across it. Without one the
