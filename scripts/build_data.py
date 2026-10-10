@@ -2160,6 +2160,15 @@ def trim_terminus(pts, pins, with_offset=False):
 # traced in the feed's direction of travel instead. `waypoints` pairs warp
 # positions with drawn positions to keep stops on their street through a loop.
 OVERRIDE_PATHS = {
+    ("foothill", "20190"): {
+        "exact": True,
+        "box": (3232, 1920, 3378, 1992),
+        "path": [
+            (3238.30, 1925.00), (3269.10, 1978.20), (3270.60, 1980.80),
+            (3274.00, 1981.80), (3276.30, 1982.10), (3281.50, 1979.10),
+            (3378.00, 1923.40),
+        ],
+    },
     ("gtfs_bus", "108"): [{
         "shape_ids": ("1080405_JUNE26", "1080428_JUNE26", "1080448_JUNE26", "1080451_JUNE26"),
         "exact": True,
