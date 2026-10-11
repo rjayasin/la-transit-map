@@ -8724,6 +8724,10 @@ MATCH_OTHER_RUN = 40.0  # px a stretch must run along another line's ink
 MATCH_JUMP = 3.0     # px between neighbours that counts as a gap to walk
 MATCH_DETOUR = 3.0   # a walk longer than this many times the gap is refused,
                      # since the two points are then on different lines
+MATCH_CHORD = 0.75   # px a gap's chord may stray from its own stroke and still
+                     # be kept rather than walked. The walk's graph joins
+                     # every line within a few px, so walking a straight gap
+                     # where another line runs alongside hops between the two.
 STROKE_BRIDGE = 12.0  # px a stroke end is joined across to the next stroke
 MATCH_GRAPH_R = 80.0  # px of strokes round the shape a walk may use, enough
                       # for a drawn course a block or two off the shape
@@ -9061,11 +9065,19 @@ def hmm_strokes(prior, ink, R=35.0, sigma=10.0, beta=3.0, every=2, K=24, null=8.
 
 
 def stroke_graph(P, cell=2.0, r=3.0, bridge=STROKE_BRIDGE):
-    """Ink points on a `cell` grid, joined where they touch. A drawn line is
-    split into strokes at corners and crossings and the pieces stop a few px
-    short of each other, so a stroke end, a node with neighbours on one side
-    only, is joined to everything within `bridge` as well."""
-    q = np.unique(np.round(np.asarray(P) / cell).astype(np.int64), axis=0) * cell
+    """Ink points merged per `cell` grid square, joined where they touch. A
+    drawn line is split into strokes at corners and crossings and the pieces
+    stop a few px short of each other, so a stroke end, a node with neighbours
+    on one side only, is joined to everything within `bridge` as well.
+
+    A node sits at the mean of its square's points rather than the square's
+    corner, so it stays on the stroke. Grid corners put a diagonal stroke's
+    nodes up to half a cell either side of it, and a walk along them steps."""
+    P = np.asarray(P, float)
+    _, inv, cnt = np.unique(np.round(P / cell).astype(np.int64), axis=0,
+                            return_inverse=True, return_counts=True)
+    inv = inv.ravel()
+    q = np.c_[np.bincount(inv, P[:, 0]), np.bincount(inv, P[:, 1])] / cnt[:, None]
     tree = cKDTree(q)
     pairs = tree.query_pairs(r, output_type="ndarray")
     nb = [[] for _ in range(len(q))]
@@ -9280,10 +9292,24 @@ def onto_strokes(prior, own, other):
     """`prior` moved onto the drawn strokes, index for index."""
     prior = np.asarray(prior, float)
     n = len(prior)
-    d, j = cKDTree(own).query(prior)
+    t_own = cKDTree(own)
+    d, j = t_own.query(prior)
     on = d <= MATCH_OWN
     snap = prior.copy()
     snap[on] = own[j[on]]
+    mine = on.copy()
+
+    def on_own_chord(a, b):
+        """Whether the straight line a-b lies along one of the own strokes."""
+        q = a + np.linspace(0, 1, 5)[1:-1, None] * (b - a)
+        dist, k = t_own.query(q, 2)
+        p0, p1 = own[k[:, 0]], own[k[:, 1]]
+        v, w = p1 - p0, q - p0
+        across = np.abs(v[:, 0] * w[:, 1] - v[:, 1] * w[:, 0]) / np.maximum(np.hypot(*v.T), 1e-9)
+        return bool((dist[:, 0] <= INK_STEP / 2 + MATCH_CHORD).all()
+                    and (np.hypot(*v.T) <= INK_STEP + 0.5).all()
+                    and (across <= MATCH_CHORD).all())
+
     allp = own
     if len(other):
         d, j = cKDTree(other).query(prior)
@@ -9320,7 +9346,8 @@ def onto_strokes(prior, own, other):
         j, poly = i, [snap[i][None]]
         while j + 1 < n and on[j + 1]:
             gap = math.hypot(*(snap[j + 1] - snap[j]))
-            if gap > MATCH_JUMP:
+            if gap > MATCH_JUMP and not (mine[j] and mine[j + 1]
+                                         and on_own_chord(snap[j], snap[j + 1])):
                 D, pred = dijkstra(G, indices=[nid[j]], limit=MATCH_DETOUR * gap + 10,
                                    return_predecessors=True)
                 if np.isfinite(D[0][nid[j + 1]]):
