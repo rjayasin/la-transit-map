@@ -22,11 +22,11 @@ jobs:
   # Reports on its own, and nothing depends on it. A failing check marks the
   # commit red without holding back the deploy.
   check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.14.7'
           cache: pip
@@ -42,9 +42,9 @@ jobs:
           node scripts/stall_test.mjs
 
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -70,23 +70,23 @@ jobs:
             "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > version.json
           cat version.json
 
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
 
       # Keep git metadata and the build's own inputs out of the published
       # artifact — data/ alone is a few hundred MB of GTFS zips.
       - name: Trim the artifact
         run: rm -rf .git .github data scripts .venv scratch
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: .
 
   deploy:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
