@@ -8995,7 +8995,9 @@ def hmm_strokes(prior, ink, R=35.0, sigma=10.0, beta=3.0, every=2, K=24, null=8.
     keep = np.unique(np.concatenate([np.asarray(v, int) for v in near if v] or [np.zeros(0, int)]))
     if not len(keep):
         return prior
-    nodes, ntree, G = stroke_graph(ink[keep])
+    # A 1 px grid: on the default 2 px one a walk along a diagonal stroke
+    # steps up to 1 px either side of it.
+    nodes, ntree, G = stroke_graph(ink[keep], cell=1.0)
     cands = []
     for s in S:
         ii = ntree.query_ball_point(s, R)
@@ -9065,19 +9067,11 @@ def hmm_strokes(prior, ink, R=35.0, sigma=10.0, beta=3.0, every=2, K=24, null=8.
 
 
 def stroke_graph(P, cell=2.0, r=3.0, bridge=STROKE_BRIDGE):
-    """Ink points merged per `cell` grid square, joined where they touch. A
-    drawn line is split into strokes at corners and crossings and the pieces
-    stop a few px short of each other, so a stroke end, a node with neighbours
-    on one side only, is joined to everything within `bridge` as well.
-
-    A node sits at the mean of its square's points rather than the square's
-    corner, so it stays on the stroke. Grid corners put a diagonal stroke's
-    nodes up to half a cell either side of it, and a walk along them steps."""
-    P = np.asarray(P, float)
-    _, inv, cnt = np.unique(np.round(P / cell).astype(np.int64), axis=0,
-                            return_inverse=True, return_counts=True)
-    inv = inv.ravel()
-    q = np.c_[np.bincount(inv, P[:, 0]), np.bincount(inv, P[:, 1])] / cnt[:, None]
+    """Ink points on a `cell` grid, joined where they touch. A drawn line is
+    split into strokes at corners and crossings and the pieces stop a few px
+    short of each other, so a stroke end, a node with neighbours on one side
+    only, is joined to everything within `bridge` as well."""
+    q = np.unique(np.round(np.asarray(P) / cell).astype(np.int64), axis=0) * cell
     tree = cKDTree(q)
     pairs = tree.query_pairs(r, output_type="ndarray")
     nb = [[] for _ in range(len(q))]
