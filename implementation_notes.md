@@ -581,13 +581,15 @@ everything, without either leg moving a street.
   part of the cache identity.
 - **Module docstrings are user-facing.** Several scripts pass `__doc__` as their
   argparse `description`. Trimming one changes `--help`.
-- **`index.html` must stay byte-stable across deploys.** It is the one URL that
-  can't carry a version, so a cached copy has to be identical to a fresh one.
-  Put changes in `app.js`, which is fetched content-addressed as `?v=<sha>`.
-  `scripts/stamp_build.mjs` rewrites the `__BUILD__` / `__V_*__` placeholders at
-  deploy time; don't hand-edit them. New UI markup and its CSS therefore ship
-  from `app.js`, with the popover injecting its own stylesheet. Otherwise a
-  client on a cached page gets the markup without the rules.
+- **Nothing in `index.html` may depend on a particular `app.js`.** `index.html`
+  is the one URL that can't carry a version, and Pages caches it for 10 minutes,
+  so after a deploy a client can run a stale `index.html` with the new `app.js`
+  (fetched content-addressed as `?v=<sha>`). New UI markup and its CSS therefore
+  ship from `app.js`, with the popover injecting its own stylesheet. Otherwise a
+  client on a cached page gets the markup without the rules. A self-contained
+  change such as the favicon `<link>` can go in `index.html`: a stale copy just
+  lacks it for 10 minutes. `scripts/stamp_build.mjs` rewrites the `__BUILD__` /
+  `__V_*__` placeholders in `app.js` at deploy time; don't hand-edit them.
 - **Live mode owns the clock.** It sets `simT` from the wall clock each frame
   rather than integrating `dt`, so the frame-gap clamp can't leave it behind,
   and the transport controls are disabled rather than left to fight it. The zone

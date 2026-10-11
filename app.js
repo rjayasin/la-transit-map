@@ -163,14 +163,6 @@ let simDay = laDay();
 if (!qp.get("t")) simT = liveClock();
 scrub.value = simT | 0;
 
-// Favicon. Added from here because index.html stays byte-identical across deploys.
-const favicon = document.createElement("link");
-favicon.rel = "icon";
-favicon.href = "data:image/svg+xml," + encodeURIComponent(
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
-  + '<text y=".9em" font-size="90">🚌</text></svg>');
-document.head.append(favicon);
-
 // ---- popover: view mode, then which systems are shown ----
 const bar = document.getElementById("bar");
 const filtersEl = document.getElementById("filters");
