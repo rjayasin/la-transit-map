@@ -144,6 +144,13 @@ function liveClock() {
   const t = (ms / 1000 + laOffset) % 86400;
   return t < 0 ? t + 86400 : t;
 }
+// Seconds since midnight as "h:mm AM".
+function clock12(t) {
+  const h = Math.floor(t / 3600) % 24;
+  const mm = String(Math.floor(t % 3600 / 60)).padStart(2, "0");
+  return `${h % 12 || 12}:${mm} ${h < 12 ? "AM" : "PM"}`;
+}
+
 // The weekday it is in Los Angeles, 0 = Sunday: the timetable both modes play.
 function laDay() { laResample(); return laDow; }
 
@@ -2362,13 +2369,12 @@ function drawFrame(now) {
   frameComposeMs = tBlit - tCompose;
   frameBlitMs = performance.now() - tBlit;
 
-  // clock above the Metro logo (map px: logo x 240-460, y 3640-3900)
+  // clock centered above the Metro logo (map px: logo x 240-460, y 3640-3900)
   ctx.fillStyle = "#1a1a1a";
   ctx.font = "700 110px -apple-system, 'Helvetica Neue', Arial";
-  ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
-  const hh = String(Math.floor(simT / 3600)).padStart(2, "0");
-  const mm = String(Math.floor(simT % 3600 / 60)).padStart(2, "0");
-  ctx.fillText(`${hh}:${mm}`, 240, 3590);
+  ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+  const clock = clock12(simT);
+  ctx.fillText(clock, 350, 3590);
 
   // path inspector: stroke the whole line the selected vehicle runs (and its
   // downtown mirror), so its variant reads against the artwork. A found line
@@ -2490,8 +2496,7 @@ function drawFrame(now) {
   // `active` in the thousands. The pair is the cull working, and the number to
   // read `costSprites` against.
   spriteDraws = drawn;
-  const hhmm = `${hh}:${mm}`;
-  statsTime.textContent = (live ? "live · " : "") + hhmm;
+  statsTime.textContent = (live ? "live · " : "") + clock;
   statsCount.textContent = ` · ${active} vehicles`;
   countEl.textContent = `${active} vehicles`;
   statsExtra.textContent =
