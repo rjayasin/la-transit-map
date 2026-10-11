@@ -97,7 +97,7 @@ addEventListener("keydown", e => {
 });
 
 // ---- Los Angeles' day ----
-// Both modes play today's timetable, the build carrying one per weekday, and
+// Both modes open on today's timetable, the build carrying one per weekday, and
 // live additionally holds the clock to Los Angeles' at 1×. No realtime feed
 // behind either, so what they show is where each vehicle is *due*.
 let live = qp.has("live");
@@ -151,8 +151,11 @@ function clock12(t) {
   return `${h % 12 || 12}:${mm} ${h < 12 ? "AM" : "PM"}`;
 }
 
-// The weekday it is in Los Angeles, 0 = Sunday: the timetable both modes play.
+// The weekday it is in Los Angeles, 0 = Sunday.
 function laDay() { laResample(); return laDow; }
+// The weekday whose timetable is on screen. It opens on Los Angeles' today, the
+// popover's picker changes it, and the clock passing midnight advances it.
+let simDay = laDay();
 
 // Open on the clock rather than at midnight, so the first thing on screen is
 // the network as it is now; ?t= still says otherwise. The scrubber is set from
@@ -188,8 +191,11 @@ panelCss.textContent = `
   #filters .modes button:hover { background: rgba(255,255,255,.22); }
   #filters .modes button[aria-pressed=true] { background: #e8a33d; color: #201800;
                                               font-weight: 600; }
-  #filters .hint { opacity: .7; margin: 8px 0 10px; padding-bottom: 10px;
-                   border-bottom: 1px solid rgba(255,255,255,.25); }
+  #filters .modes { margin-bottom: 10px; padding-bottom: 10px;
+                    border-bottom: 1px solid rgba(255,255,255,.25); }
+  #filters .day { display: block; margin-bottom: 9px; background: #333; color: #fff;
+                  border: 0; border-radius: 6px; padding: 4px 6px; font: inherit;
+                  font-weight: 600; cursor: pointer; }
   #bar :disabled { opacity: .35; }
   /* Stops iOS Safari double-tap zoom on the controls; taps, drags and pinch still work. */
   #bar, #filters, #bar *, #filters * { touch-action: manipulation; }
@@ -218,7 +224,6 @@ panelCss.textContent = `
 document.head.append(panelCss);
 sysBtn.onclick = () => {
   if (filtersEl.classList.toggle("open")) {
-    refreshHint();   // before measuring: the line can be what sets the width
     // center over the button, clamped to the viewport; aim the caret at it
     const cx = sysBtn.getBoundingClientRect().left + sysBtn.offsetWidth / 2;
     const w = filtersEl.offsetWidth;
@@ -233,7 +238,12 @@ sysBtn.onclick = () => {
 // would read as wrong rather than inert at 60×, so live lends it a 1× of its own.
 const liveSpeed = new Option("1×", "1");
 let speedWas = "";
-let hintEl = null, modeBtns = [];
+let modeBtns = [];
+const daySel = document.createElement("select");
+daySel.className = "day";
+daySel.title = "which day's timetable to play";
+for (const [i, name] of DAY_NAMES.entries()) daySel.append(new Option(`${name}'s service`, i));
+daySel.onchange = () => { simDay = +daySel.value; };
 // The bar's readout in three parts so the count can be hidden on its own. The
 // popover repeats the count for when it is.
 const statsTime = document.createElement("span");
@@ -244,8 +254,13 @@ stats.append(statsTime, statsCount, statsExtra);
 const countEl = document.createElement("div");
 countEl.className = "count";
 function setLive(on) {
+  const was = live;
   live = on;
   if (live) {
+    // Entering live returns to today. The clock is taken over here rather than
+    // on the next frame, which would read the jump as midnight passing.
+    if (!was) simDay = laDay();
+    simT = liveClock();
     setPlaying(true);   // a disabled ▶ over a moving map reads as stuck
     if (!liveSpeed.parentNode) { speedWas = speedSel.value; speedSel.append(liveSpeed); }
     speedSel.value = liveSpeed.value;
@@ -255,17 +270,7 @@ function setLive(on) {
   }
   playBtn.disabled = scrub.disabled = speedSel.disabled = live;
   for (const [btn, isLive] of modeBtns) btn.setAttribute("aria-pressed", String(isLive === live));
-  refreshHint();
-}
-
-// Both modes run today's timetable, so the day is named either way and what
-// separates them is the clock: one is the whole of it, the other is now.
-function refreshHint() {
-  if (!hintEl) return;
-  const day = DAY_NAMES[laDay()];
-  hintEl.textContent = live
-    ? `Today's service (${day}), on Los Angeles' clock at 1×.`
-    : `The whole of today's service (${day}), sped up.`;
+  daySel.value = simDay;
 }
 
 function buildPanel(systems, groups) {
@@ -278,9 +283,7 @@ function buildPanel(systems, groups) {
     modes.append(btn);
     return [btn, isLive];
   });
-  hintEl = document.createElement("div");
-  hintEl.className = "hint";
-  filtersEl.append(modes, hintEl);
+  filtersEl.append(daySel, modes);
   buildFilters(systems, groups || []);
   setLive(live);
 }
@@ -1007,7 +1010,7 @@ function showDay(day) {
   trips.forEach(decodeTrip);
   tripBuckets = indexTrips(trips);
   fadingTrips.clear();
-  refreshHint();
+  daySel.value = day;
   vAlpha = new Float32Array(trips.length);   // all hidden; they fade in on the next frame
   pathTrip = -1;                             // trip indices are this day's own
 }
@@ -1052,7 +1055,7 @@ fetch(`schedule.json?v=${V_SCHEDULE}`).then(r => {
   insetRect = d.insetRect;
   insetRuns = (d.insets || []).map(runs => runs && runs.map(toShape));
   insetRanges = d.insetRanges || [];
-  showDay(laDay());
+  showDay(simDay);
   restoreRefreshState();
   armFrame();
   checkVersion();
@@ -1683,7 +1686,8 @@ function restoreRefreshState() {
   if (!live) {
     if (Number.isFinite(resume.time)) simT = Math.max(0, Math.min(86399, resume.time));
     setPlaying(resume.playing !== false);
-  } else simT = liveClock();
+  }
+  if (Number.isInteger(resume.day) && resume.day >= 0 && resume.day < 7) simDay = resume.day;
   scrub.value = simT | 0;
   if (resume.find) {
     buildFindIndex();
@@ -1709,7 +1713,7 @@ function refreshForUpdate(target) {
       center: [view.x + W / (2 * view.k), view.y + H / (2 * view.k)],
       zoom: view.k,
       systems: Object.fromEntries(data.systems.map((name, i) => [name, sysOn[i]])),
-      live, time: simT, playing, speed: live ? speedWas : speedSel.value,
+      live, time: simT, day: simDay, playing, speed: live ? speedWas : speedSel.value,
       find: findShapes ? { name: findName, system: data.systems[findSy] } : null,
     } }, "");
     refreshing = true;
@@ -2341,20 +2345,17 @@ function drawFrame(now) {
   // leaving live behind: a backgrounded tab comes back in step.
   if (live) {
     const t = liveClock();
-    // Past midnight in Los Angeles: a new day, and a timetable of its own. The
-    // cached weekday is expired here rather than left to age out, so the swap
-    // happens on the stroke rather than up to a resample later. The time-lapse
-    // crosses its own midnight every few minutes and means nothing by it, so it
-    // waits for the resample instead.
-    if (t < simT - 3600) laOffsetAt = -Infinity;
+    // Past midnight in Los Angeles: the next day's timetable. The cached
+    // weekday is expired too, so laDay() agrees from this frame on.
+    if (t < simT - 3600) { laOffsetAt = -Infinity; simDay = (simDay + 1) % 7; }
     simT = t;
     scrub.value = simT | 0;
   } else if (playing) {
     simT += dt * +speedSel.value;
-    if (simT >= 86400) simT -= 86400;
+    if (simT >= 86400) { simT -= 86400; simDay = (simDay + 1) % 7; }
     scrub.value = simT | 0;
   }
-  showDay(laDay());   // both modes play today, whichever day today has become
+  showDay(simDay);
   stepFlight(now);
   stepFling(now);
   // Whether tiles may be fetched this frame; see getTile. Decided once, here,

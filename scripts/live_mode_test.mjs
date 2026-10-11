@@ -153,8 +153,10 @@ check("and only the vehicles that run today are on it",
       await evaluate("trips.length === data.tripDays.filter(m => m >> dayShown & 1).length"
                      + " && trips.every(t => t.days >> dayShown & 1)"), true);
 check("unused weekdays are not decoded at startup", await evaluate("allTrips.some(t => t.times === null)"), true);
-const liveHint = await evaluate(`filtersEl.querySelector(".hint").textContent`);
-check("and the panel names that day", liveHint.includes(DAYS[laDay()]), true);
+check("and the panel names that day",
+      await evaluate("daySel.options[daySel.selectedIndex].textContent"), `${DAYS[laDay()]}'s service`);
+check("the day picker sits above the mode buttons",
+      await evaluate("daySel.nextElementSibling === filtersEl.querySelector('.modes')"), true);
 
 await sleep(400);   // a frame or two to take the clock over
 const here = laNow(), there = await evaluate("simT");
@@ -196,6 +198,27 @@ check("running again", gap(await evaluate("simT"), handover) > 10, true);
 check("and the readout drops the mark",
       await evaluate("stats.textContent.startsWith('live · ')"), false);
 check("the time-lapse plays today as well", await evaluate("dayShown"), laDay());
+
+// ---- picking a day, and the time-lapse passing midnight ------------------
+const other = (laDay() + 3) % 7;
+await evaluate(`daySel.value = ${other}; daySel.dispatchEvent(new Event("change")); 0`);
+await sleep(300);
+check("picking a day plays its timetable", await evaluate("dayShown"), other);
+check("at the time it was already showing",
+      Math.abs(gap(await evaluate("simT"), handover)) < 300, true);
+await evaluate("simT = 86399.5; 0");
+await sleep(300);
+check("passing midnight plays the next day", await evaluate("dayShown"), (other + 1) % 7);
+check("and the picker follows",
+      await evaluate("+daySel.value"), (other + 1) % 7);
+await evaluate(mode("Live"));
+await sleep(300);
+check("going live returns to today", await evaluate("dayShown"), laDay());
+await evaluate(`daySel.value = ${other}; daySel.dispatchEvent(new Event("change")); 0`);
+await sleep(300);
+check("live can play another day", await evaluate("dayShown"), other);
+check("on Los Angeles' clock still", Math.abs(gap(await evaluate("simT"), laNow())) < 2, true);
+await evaluate(mode("Time-lapse"));
 
 // ---- ?live opens straight into it ----------------------------------------
 await send("Page.navigate", { url: URL + "?live" });

@@ -595,16 +595,19 @@ everything, without either leg moving a street.
   own. The time-lapse borrows that clock once, for the time it opens at.
 - **Los Angeles' weekday is read on the same sample as its clock**, cached with
   the offset and re-measured a minute at a time. Live expires the sample when
-  `simT` jumps backwards, since that is midnight passing and the day's trip list
-  should turn over then. The time-lapse wraps past midnight every few minutes at
-  speed and means nothing by it, so it waits for the resample.
+  `simT` jumps backwards, since that is midnight passing.
+- **`simDay` is the weekday on screen**, separate from Los Angeles' own. It
+  opens on today, the popover's picker sets it, and either mode passing
+  midnight advances it by one. Entering live resets it to today and takes the
+  clock over in `setLive`, so the first live frame does not read the jump from
+  the time-lapse's time as midnight.
 - **The timetable is a week, not a day.** `trips` holds every working of the
   week once, and `tripDays[i]` is a bitmask of the weekdays trip *i* runs on
   (bit 0 = Sunday). A day on screen is a filter over that one list, which is why
   the arrival times are built once at load. Rows identical in route, pattern and
   every time are merged, so a working that keeps to one timetable all week
-  carries several day bits instead of costing several rows. Both modes play
-  today's weekday, so `date` is provenance, the day the artwork was fitted to,
+  carries several day bits instead of costing several rows. The client picks
+  the weekday itself, so `date` is provenance, the day the artwork was fitted to,
   and not something the client reads. A trip crossing midnight is emitted again
   on the next day at −24 h, because the vehicles on screen at 01:00 are the
   previous day's last workings.
