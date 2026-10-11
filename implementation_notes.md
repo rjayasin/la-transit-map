@@ -737,11 +737,7 @@ straight join where the sheet stops a street short on both sides of a line
 drawn across it. A missing join shows up in `speed_check` as a detour of
 several times the direct distance along an otherwise clean shape.
 
-A feed with no `LEGEND_INK` names its whole network in `STROKE_MATCH`. Pasadena
-is matched onto the grey street strokes and Metro orange this way, after its
-unanchored street snap. Where two lines are drawn a stroke apart along one
-street, a stray match can go out on one and back on the other. `SPUR_FITS`
-turns on `drop_spurs` for a feed, which holds such a spur at its root. It keeps
-a spur the source also drives, and leaves alone any loop wider than the
-feed's tolerance. Set the tolerance below the feed's smallest drawn loop. A
-wider one turns that loop into a chord.
+`SPUR_FITS` runs `drop_spurs` on a feed's matched shapes. Keep its tolerance
+below the feed's smallest drawn loop. `GRID_PINS` moves a feed's warp onto a
+street grid the sheet draws at its own scale. Use it when the warp sits nearer
+a neighbouring drawn street than its own.

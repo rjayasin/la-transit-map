@@ -2160,6 +2160,13 @@ def trim_terminus(pts, pins, with_offset=False):
 # traced in the feed's direction of travel instead. `waypoints` pairs warp
 # positions with drawn positions to keep stops on their street through a loop.
 OVERRIDE_PATHS = {
+    ("pasadena", "40"): {
+        "shape_ids": ("115",),
+        "exact": True,
+        "forward": True,
+        "box": (2138, 1415, 2168, 1448),
+        "path": [(2146.0, 1442.0), (2131.5, 1442.0), (2131.5, 1423.0), (2168.0, 1423.0)],
+    },
     ("foothill", "10699"): [{
         "exact": True,
         "box": (3090, 1780, 3215, 1860),
@@ -8691,6 +8698,56 @@ ALIGN_GAIN = 0.8       # kept only if it cuts the median distance to the ink
 ALIGN_SKIP = {"westcovina", "huntingtonpark"}
 
 
+# Street positions, warp and drawn, where the sheet redraws a grid at its own
+# scale. Each crossing is a pin the warp is moved onto before snapping.
+GRID_PINS = {
+    "pasadena": {
+        "x": [   # warp x, drawn x, warp y range
+            (2112.6, 2111.0, (1370, 1450)),    # Fair Oaks
+            (2112.8, 2117.5, (1455, 1530)),    # Fair Oaks, south of Del Mar
+            (2118.6, 2131.5, (1415, 1530)),    # Raymond
+            (2129.7, 2156.0, (1370, 1450)),    # Marengo
+            (2124.5, 2154.0, (1480, 1530)),    # Arroyo Pkwy
+            (2147.3, 2180.5, (1390, 1490)),    # Los Robles
+            (2182.1, 2199.5, (1370, 1490)),    # Lake
+            (2199.4, 2223.5, (1390, 1465)),    # Wilson
+        ],
+        "y": [   # warp y, drawn y
+            (1378.4, 1381.0),    # Orange Grove
+            (1395.3, 1393.0),    # Villa
+            (1418.5, 1423.0),    # Walnut
+            (1437.2, 1433.5),    # Colorado
+            (1444.0, 1442.0),    # Green
+            (1461.8, 1474.5),    # Del Mar
+            (1486.5, 1508.5),    # California
+            (1525.9, 1546.0),    # Glenarm
+        ],
+    },
+}
+GRID_MARGIN = 50.0
+
+
+def grid_move(feed):
+    """The move GRID_PINS gives a feed, as a function of points, or None."""
+    spec = GRID_PINS.get(feed)
+    if not spec:
+        return None
+    from scipy.interpolate import LinearNDInterpolator
+    src, dst = [], []
+    for wx, dx, (y0, y1) in spec["x"]:
+        for wy, dy in spec["y"]:
+            if y0 <= wy <= y1:
+                src.append((wx, wy))
+                dst.append((dx, dy))
+    src, dst = np.array(src), np.array(dst)
+    lo, hi = src.min(0) - GRID_MARGIN, src.max(0) + GRID_MARGIN
+    ring = np.array([(x, y) for x in np.linspace(lo[0], hi[0], 9) for y in (lo[1], hi[1])]
+                    + [(x, y) for y in np.linspace(lo[1], hi[1], 9)[1:-1] for x in (lo[0], hi[0])])
+    f = LinearNDInterpolator(np.vstack([src, ring]),
+                             np.vstack([dst - src, np.zeros_like(ring)]), fill_value=0.0)
+    return lambda P: np.asarray(P, float) + f(np.asarray(P, float))
+
+
 def align_to_ink(W, ink, iters=30, r0=60.0, r1=12.0):
     """The similarity transform taking a feed's warped points `W` onto its ink,
     as a function of points, or None. The warp's error is smooth over a few
@@ -8920,15 +8977,11 @@ def follow_stroke_network(prior, base, ink):
     return np.asarray(out), np.asarray(source)
 
 
-SPUR_LEN = 30.0     # px a spur may run out before it is taken to be drawn
-# Feeds whose matched shapes have their stray spurs dropped (drop_spurs), with
-# the px the way back may stand from the way out. Their network carries another
-# line drawn a stroke apart from their own along shared streets, so a stray
-# match can go out on one and come back on the other. A tolerance wider than a
-# feed's smallest drawn loop collapses that loop to a chord.
+SPUR_LEN = 30.0     # px
+# Feeds run through drop_spurs, and px the return may stand from the way out.
+# Keep it below the feed's smallest drawn loop.
 SPUR_FITS = {"pasadena": 9.0}
-SPUR_DRIVEN = 0.5   # share of a spur's length the source must cover for the
-                    # spur to be one the route drives
+SPUR_DRIVEN = 0.5   # source share of a spur's length that marks it as driven
 
 NET_REACH = 18.0    # px a shape point may stand from the stroke it is matched to
 NET_SIGMA = 6.0     # px of that distance the match treats as ordinary
@@ -8950,7 +9003,7 @@ def match_stroke_network(prior, base, ink, spur_fit=None):
     longer than the step, so the path stays on the drawing. Where the route
     runs a street the sheet leaves out, the vehicle covers the way round in the
     step's time. Only a crossing between strokes the sheet leaves unjoined is
-    drawn straight. With `spur_fit`, stray spurs are dropped (drop_spurs)."""
+    drawn straight."""
     prior, base = np.asarray(prior, float), np.asarray(base, float)
     lo, hi = prior.min(0) - 150, prior.max(0) + 150
     ink = ink[np.all((ink >= lo) & (ink <= hi), axis=1)]
@@ -9018,15 +9071,7 @@ def match_stroke_network(prior, base, ink, spur_fit=None):
 
 
 def drop_spurs(P, source, fit):
-    """`P` with every short out-and-back held at its root, index for index.
-
-    A match that picks a cross street's stroke for one point walks out along it
-    and back, which leaves a spike a few px to a block long. A drawn loop
-    comes back by another way, so only a return that retraces the way out is
-    dropped. The tip must stand clear of where the return lands, which keeps a
-    straight run from reading as a spur. A spur the route drives, such as a run
-    up a stub to a stop and back, is kept: there `source` travels out and back
-    too, where for a stray match it covers a fraction of the spur's length."""
+    """`P` with short out-and-backs the source doesn't drive held at their root."""
     P = np.array(P, dtype=float)
     cum = np.r_[0, np.cumsum(np.hypot(*np.diff(P, axis=0).T))]
     scum = np.r_[0, np.cumsum(np.hypot(*np.diff(source, axis=0).T))]
@@ -9056,7 +9101,6 @@ def drop_spurs(P, source, fit):
 # sews between them. The value lists other inks the network includes, for a
 # line drawn on top of the feed's own stroke where the two share a street.
 # Without it the feed's network breaks there and the match hops straight across.
-# A feed with no LEGEND_INK names its whole network here.
 STROKE_MATCH = {"pvpta": ORANGE_INK, "commerce": (),
                 "pasadena": STREET_STROKES + ORANGE_INK}
 
@@ -10373,6 +10417,11 @@ def build_schedule(feeds):
             p.sort()
             x, y = to_px(np.array([q[1] for q in p]), np.array([q[2] for q in p]))
             warped[sid] = list(zip(x, y))
+        move = grid_move(feed)
+        if move is not None:
+            warped = {sid: [tuple(q) for q in move(densify(w, 4.0))] for sid, w in warped.items()}
+            for k in [k for k in stops_px if k[0] == feed]:
+                stops_px[k] = tuple(move([stops_px[k]])[0])
         if feed in AGENCY_SYMBOLS and feed not in ALIGN_SKIP and warped:
             move = align_to_ink(np.vstack([densify(w, 4.0) for w in warped.values()]),
                                 pdf_ink([LEGEND_INK[feed]]))
