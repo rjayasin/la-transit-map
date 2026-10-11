@@ -741,3 +741,5 @@ several times the direct distance along an otherwise clean shape.
 below the feed's smallest drawn loop. `GRID_PINS` moves a feed's warp onto a
 street grid the sheet draws at its own scale. Use it when the warp sits nearer
 a neighbouring drawn street than its own.
+A pinned symbol feed takes no badge anchors, since one symbol for every route
+anchors each on whatever line its badges sit by.

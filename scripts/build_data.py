@@ -2160,6 +2160,36 @@ def trim_terminus(pts, pins, with_offset=False):
 # traced in the feed's direction of travel instead. `waypoints` pairs warp
 # positions with drawn positions to keep stops on their street through a loop.
 OVERRIDE_PATHS = {
+    ("glendale", "1"): {
+        "exact": True,
+        "forward": True,
+        "box": (1660, 1418, 1692, 1445),
+        "path": [(1667.0, 1446.0), (1667.0, 1436.0), (1670.0, 1434.0), (1684.0, 1434.0), (1685.0, 1431.0), (1685.0, 1429.0), (1682.0, 1427.0), (1670.0, 1427.0), (1667.0, 1430.0), (1667.0, 1446.0)],
+    },
+    ("glendale", "5"): {
+        "exact": True,
+        "forward": True,
+        "box": (1610, 1414, 1640, 1465),
+        "path": [(1632.0, 1468.0), (1632.0, 1423.0), (1629.0, 1420.0), (1621.0, 1420.0), (1617.0, 1423.0), (1621.0, 1427.0), (1629.0, 1427.0), (1632.0, 1430.0), (1632.0, 1468.0)],
+    },
+    ("glendale", "7"): {
+        "exact": True,
+        "forward": True,
+        "box": (1608, 1338, 1725, 1438),
+        "path": [
+            (1613.0, 1427.6), (1615.0, 1431.0), (1620.0, 1434.0), (1629.0, 1434.0),
+            (1632.0, 1431.0), (1632.0, 1423.0), (1629.0, 1420.0), (1621.0, 1420.0),
+            (1617.0, 1423.0), (1621.0, 1427.0), (1682.0, 1427.0), (1685.0, 1430.0),
+            (1685.0, 1432.0), (1687.0, 1434.0), (1691.0, 1436.0), (1709.0, 1436.0),
+            (1712.0, 1434.0), (1714.0, 1431.0), (1717.0, 1426.0), (1720.0, 1415.0),
+            (1720.0, 1344.0), (1720.0, 1415.0), (1717.0, 1426.0), (1714.0, 1431.0),
+            (1712.0, 1434.0), (1709.0, 1436.0), (1691.0, 1436.0), (1687.0, 1434.0),
+            (1685.0, 1432.0), (1685.0, 1430.0), (1682.0, 1427.0), (1621.0, 1427.0),
+            (1617.0, 1423.0), (1621.0, 1420.0), (1629.0, 1420.0), (1632.0, 1423.0),
+            (1632.0, 1431.0), (1629.0, 1434.0), (1620.0, 1434.0), (1615.0, 1431.0),
+            (1613.0, 1427.6),
+        ],
+    },
     ("pasadena", "40"): {
         "shape_ids": ("115",),
         "exact": True,
@@ -8700,6 +8730,8 @@ ALIGN_SKIP = {"westcovina", "huntingtonpark"}
 
 # Street positions, warp and drawn, where the sheet redraws a grid at its own
 # scale. Each crossing is a pin the warp is moved onto before snapping.
+# "points" lists pins directly, as (warp, drawn) pairs; a drawn None holds the
+# feed's move without pins.
 GRID_PINS = {
     "pasadena": {
         "x": [   # warp x, drawn x, warp y range
@@ -8723,29 +8755,133 @@ GRID_PINS = {
             (1525.9, 1546.0),    # Glenarm
         ],
     },
+    "glendale": {
+        "margin": 60.0,
+        "points": [
+            ((1699.6, 1354.0), (1667.0, 1427.0)),    # Central / Stocker
+            ((1696.7, 1371.3), (1667.0, 1434.0)),    # Central / Glenoaks
+            ((1696.8, 1433.5), (1667.0, 1479.0)),    # Central / Broadway
+            ((1697.0, 1454.0), (1667.0, 1491.0)),    # Central / Colorado
+            ((1697.3, 1499.2), (1667.0, 1520.0)),    # Central / Chevy Chase
+            ((1697.6, 1528.1), (1667.0, 1563.0)),    # Central / Laurel
+            ((1689.0, 1543.9), (1660.0, 1576.0)),    # Transportation Center
+            ((1706.0, 1351.6), (1685.0, 1427.0)),    # Brand / Stocker
+            ((1706.4, 1375.6), (1685.0, 1435.0)),    # Brand / Glenoaks
+            ((1707.5, 1437.0), (1685.0, 1479.0)),    # Brand / Broadway
+            ((1708.2, 1444.8), (1685.0, 1487.0)),    # Brand / Harvard
+            ((1707.0, 1457.7), (1685.0, 1491.0)),    # Brand / Colorado
+            ((1708.0, 1500.0), (1685.0, 1520.0)),    # Brand / Chevy Chase
+            ((1709.7, 1549.3), (1685.0, 1584.0)),    # Brand / San Fernando
+            ((1667.8, 1354.3), (1632.0, 1427.0)),    # Pacific / Stocker
+            ((1670.4, 1371.4), (1632.0, 1434.0)),    # Pacific / Glenoaks
+            ((1671.9, 1454.9), (1632.0, 1491.0)),    # Pacific / Colorado
+            ((1670.8, 1474.0), (1631.0, 1500.0)),    # Pacific / Riverdale
+            ((1669.6, 1483.0), (1629.0, 1503.0)),    # Pacific / San Fernando
+            ((1650.2, 1344.2), (1624.0, 1423.0)),    # Hoover High
+            ((1659.7, 1372.4), (1620.0, 1434.0)),    # Glenoaks / Kenilworth
+            ((1739.0, 1435.0), (1700.0, 1479.0)),    # Glendale / Broadway
+            ((1730.1, 1455.6), (1700.0, 1491.0)),    # Glendale / Colorado
+            ((1718.9, 1500.6), (1700.0, 1520.0)),    # Glendale / Chevy Chase
+            ((1717.0, 1525.3), (1700.0, 1550.0)),    # Glendale / Los Feliz
+            ((1713.0, 1551.5), (1699.0, 1607.0)),    # Glendale / San Fernando
+            ((1756.8, 1388.9), (1706.0, 1445.0)),    # Glendale / Monterey
+            ((1767.2, 1373.9), (1714.0, 1431.0)),    # Glendale / Glenoaks
+            ((1778.3, 1364.0), (1720.0, 1415.0)),    # Glendale / Verdugo
+            ((1727.4, 1377.9), (1695.0, 1436.0)),    # Glenoaks / Jackson
+            ((1766.8, 1440.0), (1720.0, 1479.0)),    # Chevy Chase / Broadway
+            ((1767.8, 1455.6), (1720.0, 1491.0)),    # Chevy Chase / Colorado
+            ((1785.8, 1438.1), (1740.0, 1479.0)),    # Verdugo / Broadway
+            ((1788.6, 1451.0), (1740.0, 1491.0)),    # Verdugo / Colorado
+            ((1805.5, 1437.3), (1755.0, 1479.0)),    # Carr / Broadway
+            ((1807.3, 1453.2), (1755.0, 1491.0)),    # Carr / Colorado
+            ((1679.6, 1500.7), (1643.0, 1528.0)),    # San Fernando / Chevy Chase
+            ((1690.6, 1523.9), (1658.0, 1556.0)),    # San Fernando / Los Feliz
+            ((1658.6, 1474.0), (1627.0, 1501.0)),    # San Fernando / Riverdale
+            ((1653.6, 1461.8), (1625.0, 1496.0)),    # San Fernando / Elk
+            ((1650.3, 1456.1), (1622.0, 1490.0)),    # San Fernando / Colorado
+            ((1643.5, 1437.0), (1601.0, 1456.0)),    # San Fernando / Broadway
+            ((1620.5, 1386.2), (1595.0, 1446.0)),    # San Fernando / Highland
+            ((1612.3, 1374.8), (1591.0, 1439.0)),    # San Fernando / Pelanconi
+            ((1597.4, 1366.4), (1586.0, 1436.0)),    # Grandview / Air Way
+            ((1589.3, 1376.3), (1567.0, 1446.0)),    # Grandview / Flower
+            ((1585.0, 1373.7), (1562.7, 1444.5)),    # Flower / Circle Seven
+            ((1572.7, 1362.5), (1554.8, 1431.2)),    # Flower / Davis
+            ((1564.9, 1356.5), (1550.2, 1423.3)),    # Flower / Sonora
+            ((1549.3, 1341.2), (1539.9, 1405.8)),    # Flower / Western
+            ((1535.1, 1328.2), (1530.8, 1390.5)),    # Flower / Allen
+            ((1519.6, 1314.3), (1520.3, 1374.3)),    # Flower / Alameda
+            ((1496.2, 1295.0), (1496.0, 1360.0)),    # Flower / Verdugo
+            ((1484.9, 1283.2), (1492.0, 1357.0)),    # Downtown Burbank
+            ((1556.2, 1367.4), (1530.0, 1427.0)),    # Sonora / Lake
+            ((1541.0, 1355.2), (1515.9, 1412.6)),    # Western / Lake
+            ((1533.3, 1366.8), (1501.0, 1424.0)),    # Victory / Western
+            ((1561.8, 1326.3), (1559.0, 1388.0)),    # San Fernando / Western
+            ((1554.5, 1320.8), (1559.9, 1382.8)),    # San Fernando / Thompson
+            ((1548.7, 1314.3), (1557.5, 1378.4)),    # San Fernando / Allen
+            ((1534.2, 1300.9), (1555.0, 1368.0)),    # San Fernando / Alameda
+            ((1541.0, 1290.8), (1571.0, 1359.5)),    # Alameda / Glenoaks
+            ((1557.8, 1304.0), (1580.0, 1371.3)),    # Glenoaks / Allen
+            ((1563.6, 1309.3), (1582.8, 1376.1)),    # Glenoaks / Thompson
+            ((1572.8, 1317.7), (1587.3, 1383.7)),    # Glenoaks / Western
+            ((1580.1, 1324.4), (1590.9, 1389.8)),    # Glenoaks / Justin
+            ((1588.2, 1331.6), (1594.8, 1396.5)),    # Glenoaks / Sonora
+            ((1603.3, 1345.4), (1602.2, 1409.1)),    # Glenoaks / Grandview
+            ((1617.3, 1358.1), (1609.0, 1420.7)),    # Glenoaks / Graynold
+            ((1631.1, 1367.5), (1615.0, 1431.0)),    # Glenoaks / Highland
+            ((1775.2, 1060.8), (1729.0, 1088.0)),    # Foothill / Raymond
+            ((1814.0, 1087.2), (1771.1, 1112.4)),    # Foothill / Ocean View
+            ((1906.5, 1141.4), (1867.2, 1168.2)),    # Foothill / Cornishon
+            ((1936.7, 1159.1), (1898.5, 1186.4)),    # Foothill / Commonwealth
+            ((1962.2, 1173.6), (1924.9, 1201.7)),    # Foothill / Gould
+            ((1982.6, 1185.4), (1946.0, 1214.0)),    # Foothill / Crown
+            ((2006.3, 1195.2), (1975.0, 1229.0)),    # Oak Grove / Foothill
+            ((2015.6, 1179.7), (1977.0, 1213.0)),    # JPL
+            ((2003.7, 1202.2), (1966.0, 1241.0)),    # La Canada High School
+            ((1766.0, 1116.2), None),    # Honolulu / La Crescenta
+            ((1820.3, 1147.3), None),    # Verdugo / Honolulu
+            ((1824.2, 1136.7), None),    # Montrose / Waltonia
+            ((1810.6, 1123.2), None),    # Ocean View / Montrose
+            ((1816.0, 1158.3), None),    # Verdugo / Sunview
+            ((1820.1, 1256.0), None),    # Verdugo / Fern
+            ((1816.6, 1311.7), None),    # Verdugo / Kirkby
+        ],
+    },
 }
 GRID_MARGIN = 50.0
 
 
-def grid_move(feed):
-    """The move GRID_PINS gives a feed, as a function of points, or None."""
+def grid_move(feed, base=None):
+    """The move GRID_PINS gives a feed, as a function of points, or None. Away
+    from the pins it eases to `base`, the feed's move without them."""
     spec = GRID_PINS.get(feed)
     if not spec:
         return None
     from scipy.interpolate import LinearNDInterpolator
     src, dst = [], []
-    for wx, dx, (y0, y1) in spec["x"]:
+    for wx, dx, (y0, y1) in spec.get("x", ()):
         for wy, dy in spec["y"]:
             if y0 <= wy <= y1:
                 src.append((wx, wy))
                 dst.append((dx, dy))
-    src, dst = np.array(src), np.array(dst)
-    lo, hi = src.min(0) - GRID_MARGIN, src.max(0) + GRID_MARGIN
+    far = (lambda P: np.asarray(base(P), float) - P) if base else np.zeros_like
+    for w, d in spec.get("points", ()):
+        src.append(w)
+        dst.append(d if d is not None else tuple(w + far(np.array([w], float))[0]))
+    src, dst = np.array(src, float), np.array(dst, float)
+    margin = spec.get("margin", GRID_MARGIN)
+    lo, hi = src.min(0) - margin, src.max(0) + margin
     ring = np.array([(x, y) for x in np.linspace(lo[0], hi[0], 9) for y in (lo[1], hi[1])]
                     + [(x, y) for y in np.linspace(lo[1], hi[1], 9)[1:-1] for x in (lo[0], hi[0])])
-    f = LinearNDInterpolator(np.vstack([src, ring]),
-                             np.vstack([dst - src, np.zeros_like(ring)]), fill_value=0.0)
-    return lambda P: np.asarray(P, float) + f(np.asarray(P, float))
+    f = LinearNDInterpolator(np.vstack([src, ring]), np.vstack([dst - src, far(ring)]))
+
+    def move(P):
+        P = np.asarray(P, float)
+        d = f(P)
+        out = np.isnan(d[:, 0])
+        if out.any():
+            d[out] = far(P[out])
+        return P + d
+    return move
 
 
 def align_to_ink(W, ink, iters=30, r0=60.0, r1=12.0):
@@ -8980,8 +9116,9 @@ def follow_stroke_network(prior, base, ink):
 SPUR_LEN = 30.0     # px
 # Feeds run through drop_spurs, and px the return may stand from the way out.
 # Keep it below the feed's smallest drawn loop.
-SPUR_FITS = {"pasadena": 9.0}
+SPUR_FITS = {"pasadena": 9.0, "glendale": 5.0}
 SPUR_DRIVEN = 0.5   # source share of a spur's length that marks it as driven
+SPUR_TINY = 10.0    # px; a spur this short is dropped even if driven
 
 NET_REACH = 18.0    # px a shape point may stand from the stroke it is matched to
 NET_SIGMA = 6.0     # px of that distance the match treats as ordinary
@@ -9075,6 +9212,9 @@ def drop_spurs(P, source, fit):
     P = np.array(P, dtype=float)
     cum = np.r_[0, np.cumsum(np.hypot(*np.diff(P, axis=0).T))]
     scum = np.r_[0, np.cumsum(np.hypot(*np.diff(source, axis=0).T))]
+
+    def at(c):
+        return np.array([np.interp(c, cum, P[:, 0]), np.interp(c, cum, P[:, 1])])
     i = 0
     while i < len(P) - 2:
         end = int(np.searchsorted(cum, cum[i] + 2 * SPUR_LEN, side="right"))
@@ -9086,7 +9226,12 @@ def drop_spurs(P, source, fit):
             tip = int(np.argmax(r[:j + 1]))
             back = cKDTree(densify([tuple(q) for q in run[tip:]], 0.5))
             if (back.query(densify([tuple(q) for q in run[:tip + 1]], 0.5))[0].max() <= fit
-                    and scum[i + j] - scum[i] < SPUR_DRIVEN * (cum[i + j] - cum[i])):
+                    and not (   # a turnaround retraces the route past it
+                        SPUR_LEN <= cum[i] and cum[i + j] <= cum[-1] - SPUR_LEN / 2
+                        and np.hypot(*(P[(cum >= cum[i] - SPUR_LEN) & (cum <= cum[i])]
+                                       - at(cum[i + j] + SPUR_LEN / 2)).T).min() <= fit)
+                    and (r[tip] <= SPUR_TINY
+                         or scum[i + j] - scum[i] < SPUR_DRIVEN * (cum[i + j] - cum[i]))):
                 P[i + 1:i + j + 1] = P[i]
                 i += j
                 break
@@ -9102,7 +9247,7 @@ def drop_spurs(P, source, fit):
 # line drawn on top of the feed's own stroke where the two share a street.
 # Without it the feed's network breaks there and the match hops straight across.
 STROKE_MATCH = {"pvpta": ORANGE_INK, "commerce": (),
-                "pasadena": STREET_STROKES + ORANGE_INK}
+                "pasadena": STREET_STROKES + ORANGE_INK, "glendale": ORANGE_INK}
 
 # Straight joins added to a STROKE_MATCH network, in map px, where the sheet
 # stops a street short on both sides of a line drawn across it. Without one the
@@ -10417,18 +10562,17 @@ def build_schedule(feeds):
             p.sort()
             x, y = to_px(np.array([q[1] for q in p]), np.array([q[2] for q in p]))
             warped[sid] = list(zip(x, y))
-        move = grid_move(feed)
-        if move is not None:
-            warped = {sid: [tuple(q) for q in move(densify(w, 4.0))] for sid, w in warped.items()}
-            for k in [k for k in stops_px if k[0] == feed]:
-                stops_px[k] = tuple(move([stops_px[k]])[0])
+        move = None
         if feed in AGENCY_SYMBOLS and feed not in ALIGN_SKIP and warped:
             move = align_to_ink(np.vstack([densify(w, 4.0) for w in warped.values()]),
                                 pdf_ink([LEGEND_INK[feed]]))
-            if move is not None:
-                warped = {sid: [tuple(q) for q in move(w)] for sid, w in warped.items()}
-                for k in [k for k in stops_px if k[0] == feed]:
-                    stops_px[k] = tuple(move([stops_px[k]])[0])
+        if feed in GRID_PINS:
+            move = grid_move(feed, move)
+            warped = {sid: densify(w, 4.0) for sid, w in warped.items()}
+        if move is not None:
+            warped = {sid: [tuple(q) for q in move(w)] for sid, w in warped.items()}
+            for k in [k for k in stops_px if k[0] == feed]:
+                stops_px[k] = tuple(move([stops_px[k]])[0])
         if feed in AGENCY_SYMBOLS:
             for sid in [sid for sid in warped if sid in stop_shapes]:
                 warped[sid] = stops_on_strokes(warped[sid], pdf_ink([LEGEND_INK[feed]]))
@@ -10704,7 +10848,9 @@ def build_schedule(feeds):
                 # than any cap here can reach.
                 sym_ink = symbol_ink(feed, rmeta[rid][0] if rid in rmeta else None)
                 tree = line_ink = ink_tree([sym_ink])
-                anc = route_anchors(toks, tree, near=BADGE_NEAR_INK)
+                # A pinned warp is already on the grid. One symbol for every
+                # route anchors each on whichever line its badges sit by.
+                anc = [] if feed in GRID_PINS else route_anchors(toks, tree, near=BADGE_NEAR_INK)
                 owned = SYMBOL_OWNERS.get((feed, rid))
                 if owned is None:
                     anc = branch_anchors(
