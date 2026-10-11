@@ -8920,13 +8920,23 @@ def follow_stroke_network(prior, base, ink):
     return np.asarray(out), np.asarray(source)
 
 
+SPUR_LEN = 30.0     # px a spur may run out before it is taken to be drawn
+# Feeds whose matched shapes have their stray spurs dropped (drop_spurs), with
+# the px the way back may stand from the way out. Their network carries another
+# line drawn a stroke apart from their own along shared streets, so a stray
+# match can go out on one and come back on the other. A tolerance wider than a
+# feed's smallest drawn loop collapses that loop to a chord.
+SPUR_FITS = {"pasadena": 9.0}
+SPUR_DRIVEN = 0.5   # share of a spur's length the source must cover for the
+                    # spur to be one the route drives
+
 NET_REACH = 18.0    # px a shape point may stand from the stroke it is matched to
 NET_SIGMA = 6.0     # px of that distance the match treats as ordinary
 NET_BETA = 2.0      # px of walk-against-step mismatch costing one unit
 NET_JUMP = 200.0    # cost of crossing between strokes that do not join
 
 
-def match_stroke_network(prior, base, ink):
+def match_stroke_network(prior, base, ink, spur_fit=None):
     """`prior` matched onto a dense drawn network as a hidden Markov model, then
     walked along the strokes with source positions carried as in
     follow_stroke_network. Points with no stroke within NET_REACH are
@@ -8940,7 +8950,7 @@ def match_stroke_network(prior, base, ink):
     longer than the step, so the path stays on the drawing. Where the route
     runs a street the sheet leaves out, the vehicle covers the way round in the
     step's time. Only a crossing between strokes the sheet leaves unjoined is
-    drawn straight."""
+    drawn straight. With `spur_fit`, stray spurs are dropped (drop_spurs)."""
     prior, base = np.asarray(prior, float), np.asarray(base, float)
     lo, hi = prior.min(0) - 150, prior.max(0) + 150
     ink = ink[np.all((ink >= lo) & (ink <= hi), axis=1)]
@@ -9002,7 +9012,43 @@ def match_stroke_network(prior, base, ink):
         out.extend(path[1:])
         source.extend(base[pi] + fraction[1:, None] * (base[i] - base[pi]))
         prev = (i, c)
-    return np.asarray(out), np.asarray(source)
+    source = np.asarray(source)
+    out = np.asarray(out)
+    return (drop_spurs(out, source, spur_fit) if spur_fit else out), source
+
+
+def drop_spurs(P, source, fit):
+    """`P` with every short out-and-back held at its root, index for index.
+
+    A match that picks a cross street's stroke for one point walks out along it
+    and back, which leaves a spike a few px to a block long. A drawn loop
+    comes back by another way, so only a return that retraces the way out is
+    dropped. The tip must stand clear of where the return lands, which keeps a
+    straight run from reading as a spur. A spur the route drives, such as a run
+    up a stub to a stop and back, is kept: there `source` travels out and back
+    too, where for a stray match it covers a fraction of the spur's length."""
+    P = np.array(P, dtype=float)
+    cum = np.r_[0, np.cumsum(np.hypot(*np.diff(P, axis=0).T))]
+    scum = np.r_[0, np.cumsum(np.hypot(*np.diff(source, axis=0).T))]
+    i = 0
+    while i < len(P) - 2:
+        end = int(np.searchsorted(cum, cum[i] + 2 * SPUR_LEN, side="right"))
+        r = np.hypot(*(P[i:end] - P[i]).T)
+        reach = np.maximum.accumulate(r)
+        cand = np.where((r <= fit) & (reach > r + 3.0))[0]
+        for j in cand[::-1]:
+            run = P[i:i + j + 1]
+            tip = int(np.argmax(r[:j + 1]))
+            back = cKDTree(densify([tuple(q) for q in run[tip:]], 0.5))
+            if (back.query(densify([tuple(q) for q in run[:tip + 1]], 0.5))[0].max() <= fit
+                    and scum[i + j] - scum[i] < SPUR_DRIVEN * (cum[i + j] - cum[i])):
+                P[i + 1:i + j + 1] = P[i]
+                i += j
+                break
+        else:
+            i += 1
+            continue
+    return P
 
 
 # Feeds matched onto their drawn network by match_stroke_network: a dense
@@ -9010,7 +9056,9 @@ def match_stroke_network(prior, base, ink):
 # sews between them. The value lists other inks the network includes, for a
 # line drawn on top of the feed's own stroke where the two share a street.
 # Without it the feed's network breaks there and the match hops straight across.
-STROKE_MATCH = {"pvpta": ORANGE_INK, "commerce": ()}
+# A feed with no LEGEND_INK names its whole network here.
+STROKE_MATCH = {"pvpta": ORANGE_INK, "commerce": (),
+                "pasadena": STREET_STROKES + ORANGE_INK}
 
 # Straight joins added to a STROKE_MATCH network, in map px, where the sheet
 # stops a street short on both sides of a line drawn across it. Without one the
@@ -10783,8 +10831,10 @@ def build_schedule(feeds):
             hand = None
             if feed in STROKE_MATCH and len(full) == len(base):
                 full, base = match_stroke_network(
-                    full, base, np.vstack([pdf_ink([LEGEND_INK[feed], *STROKE_MATCH[feed]],
-                                                   step=0.5), stroke_joins(feed)]))
+                    full, base, np.vstack([pdf_ink([*([LEGEND_INK[feed]] if feed in LEGEND_INK
+                                                      else []), *STROKE_MATCH[feed]],
+                                                   step=0.5), stroke_joins(feed)]),
+                    SPUR_FITS.get(feed))
                 hand = np.ones(len(full), bool)
             if feed == "calabasas" and len(full) == len(base):
                 # The schematic connects branches by a longer loop than the
