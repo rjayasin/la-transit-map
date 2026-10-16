@@ -198,9 +198,9 @@ panelCss.textContent = `
   #filters .day { display: block; background: #333; color: #fff;
                   border: 0; border-radius: 6px; padding: 4px 6px; font: inherit;
                   font-weight: 600; cursor: pointer; }
-  #filters .findbtn { display: flex; align-items: center; gap: 6px;
+  #filters .findbtn { display: flex; align-items: center; justify-content: center;
                       background: rgba(255,255,255,.12); color: #fff; border: 0;
-                      border-radius: 6px; padding: 4px 10px; font: inherit; cursor: pointer; }
+                      border-radius: 6px; padding: 6px; cursor: pointer; }
   #filters .findbtn:hover { background: rgba(255,255,255,.22); }
   #bar :disabled { opacity: .35; }
   /* Stops iOS Safari double-tap zoom on the controls; taps, drags and pinch still work. */
@@ -294,9 +294,10 @@ function buildPanel(systems, groups) {
   const findBtn = document.createElement("button");
   findBtn.className = "findbtn";
   findBtn.title = "find a line (⌘F / Ctrl+F)";
+  findBtn.setAttribute("aria-label", "find a line");
   findBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
     stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="7"/>
-    <path d="M20 20l-4-4"/></svg>Find a line`;
+    <path d="M20 20l-4-4"/></svg>`;
   findBtn.onclick = () => {
     filtersEl.classList.remove("open");
     openFind();
