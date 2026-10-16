@@ -248,7 +248,7 @@ let modeBtns = [];
 const daySel = document.createElement("select");
 daySel.className = "day";
 daySel.title = "which day's timetable to play";
-for (const [i, name] of DAY_NAMES.entries()) daySel.append(new Option(`${name}'s service`, i));
+for (const [i, name] of DAY_NAMES.entries()) daySel.append(new Option(name, i));
 daySel.onchange = () => { simDay = +daySel.value; };
 // The bar's readout in three parts so the count can be hidden on its own. The
 // popover repeats the count for when it is.
