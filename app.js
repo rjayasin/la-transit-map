@@ -908,45 +908,70 @@ function drawSprite(g, route, px) {
 // element frees the old buffer synchronously and caps live canvases at one per
 // route.
 //
-// The bitmap is a grid of spritePhases(px)² copies, each shifted right and down
-// by a fraction of a device pixel, in cells one pixel wider than the sprite.
-// drawVehicle copies the cell matching a vehicle's fractional position to a
-// whole-pixel spot, so no draw depends on the browser resampling. Safari snaps
-// an unscaled draw at a fractional position to whole pixels, so without the
-// phases a vehicle moving under a pixel a frame (zoomed out, or in live mode)
-// holds still and then jumps a pixel. Large sprites get half-pixel steps, which
-// keeps their bitmap at 4 copies instead of 16.
+// Phases. Safari snaps an unscaled draw at a fractional position to whole
+// pixels, so a vehicle moving under a pixel a frame (zoomed out, or in live
+// mode) holds still and then jumps a pixel. So the bitmap can grow into a grid
+// of spritePhases(px)² copies, each shifted right and down by a fraction of a
+// device pixel, in cells one pixel wider than the sprite. A vehicle is copied
+// from the cell matching its fractional position to a whole-pixel spot under
+// the identity transform, which every browser does as a plain pixel copy.
+//
+// A size change rasters only the base cell, as a single sprite would, so a
+// zoom costs what it did before the grid. The other cells are rastered when a
+// vehicle first needs one, at most SPRITE_CELLS_PER_FRAME a frame and none on
+// a frame whose zoom changed, since a zoom changes the size before they're
+// used. A vehicle whose cell isn't ready is drawn from the base cell at its
+// exact position.
+// Small sprites move in third-pixel steps and large ones in half-pixel steps.
+// A 4×4 grid tripled desktop frame cost in Chrome with every route on screen.
 const spriteBmp = [];
-function spritePhases(px) { return px <= 32 ? 4 : 2; }
+const SPRITE_CELLS_PER_FRAME = 64;   // ~25 µs each, so ~1.5 ms a frame at most
+let spriteCellBudget = 0;            // cells this frame may still raster
+let spriteCellK = 0;                 // the zoom the last frame was drawn at
+function spritePhases(px) { return px <= 32 ? 3 : 2; }
+
+function rasterCell(s, i, a, b, n) {
+  const g = s.cv.getContext("2d"), cell = s.px + 1;
+  g.save();
+  g.translate(a * cell + a / n, b * cell + b / n);
+  drawSprite(g, data.routes[i], s.px);
+  g.restore();
+  s.built |= 1 << (b * n + a);
+}
 
 function spriteAt(i, px) {
   let s = spriteBmp[i];
-  if (!s) s = spriteBmp[i] = { cv: document.createElement("canvas"), px: -1 };
+  if (!s) s = spriteBmp[i] = { cv: document.createElement("canvas"), px: -1, built: 0 };
   if (s.px !== px) {
-    const n = spritePhases(px), cell = px + 1;
-    s.cv.width = s.cv.height = n * cell;    // resize in place; frees the old buffer
-    const g = s.cv.getContext("2d");
-    for (let a = 0; a < n; a++) for (let b = 0; b < n; b++) {
-      g.save();
-      g.translate(a * cell + a / n, b * cell + b / n);
-      drawSprite(g, data.routes[i], px);
-      g.restore();
-    }
+    s.cv.width = s.cv.height = px + 1;      // resize in place; frees the old buffer
     s.px = px;
+    s.built = 0;
+    rasterCell(s, i, 0, 0, 1);
   }
-  return s.cv;
+  return s;
 }
 
-// Draw route ri's sprite centered on map point (x, y), under the map transform.
+// Draw route ri's sprite centered on map point (x, y). Leaves the map transform set.
 function drawVehicle(ri, x, y, s) {
   const px = spriteSize(sprites[ri].half, s);
-  const img = spriteAt(ri, px), n = spritePhases(px), cell = px + 1, f = DPR * view.k;
-  // the sprite's top-left corner in device px, rounded to 1/n of a pixel
-  const qx = Math.round(((x - view.x) * f - px / 2) * n);
-  const qy = Math.round(((y - view.y) * f - px / 2) * n);
+  const sp = spriteAt(ri, px), n = spritePhases(px), cell = px + 1, f = DPR * view.k;
+  const dx = (x - view.x) * f - px / 2, dy = (y - view.y) * f - px / 2;   // top-left, device px
+  const qx = Math.round(dx * n), qy = Math.round(dy * n);
   const ix = Math.floor(qx / n), iy = Math.floor(qy / n);
-  ctx.drawImage(img, (qx - ix * n) * cell, (qy - iy * n) * cell, cell, cell,
-                view.x + ix / f, view.y + iy / f, cell / f, cell / f);
+  const a = qx - ix * n, b = qy - iy * n, bit = 1 << (b * n + a);
+  if (!(sp.built & bit) && spriteCellBudget > 0) {
+    if (sp.cv.width === cell) {             // first phase: grow into the grid
+      sp.cv.width = sp.cv.height = n * cell;
+      sp.built = 0;
+      rasterCell(sp, ri, 0, 0, n);
+    }
+    if (!(sp.built & bit)) rasterCell(sp, ri, a, b, n);
+    spriteCellBudget--;
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (sp.built & bit) ctx.drawImage(sp.cv, a * cell, b * cell, cell, cell, ix, iy, cell, cell);
+  else ctx.drawImage(sp.cv, 0, 0, cell, cell, dx, dy, cell, cell);
+  ctx.setTransform(f, 0, 0, f, -view.x * f, -view.y * f);
 }
 
 // geometry only; the bitmap is made on demand at the size the frame needs
@@ -2499,6 +2524,8 @@ function drawFrame(now) {
   const t = simT;
   const s = spriteScale();
   const insetDraws = [];
+  spriteCellBudget = view.k === spriteCellK ? SPRITE_CELLS_PER_FRAME : 0;
+  spriteCellK = view.k;
   const step = dt / FADE_SEC;   // opacity change this frame (real time, not sim time)
   // What the window can actually show, in map px. Culling against the drawn map
   // instead leaves nearly every sprite off-canvas at any real zoom (at k=4 a
