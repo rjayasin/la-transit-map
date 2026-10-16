@@ -154,9 +154,9 @@ check("and only the vehicles that run today are on it",
                      + " && trips.every(t => t.days >> dayShown & 1)"), true);
 check("unused weekdays are not decoded at startup", await evaluate("allTrips.some(t => t.times === null)"), true);
 check("and the panel names that day",
-      await evaluate("daySel.options[daySel.selectedIndex].textContent"), `${DAYS[laDay()]}'s service`);
+      await evaluate("daySel.options[daySel.selectedIndex].textContent"), DAYS[laDay()]);
 check("the day picker sits above the mode buttons",
-      await evaluate("daySel.nextElementSibling === filtersEl.querySelector('.modes')"), true);
+      await evaluate("daySel.parentElement.nextElementSibling === filtersEl.querySelector('.modes')"), true);
 
 await sleep(400);   // a frame or two to take the clock over
 const here = laNow(), there = await evaluate("simT");
