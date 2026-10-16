@@ -193,9 +193,15 @@ panelCss.textContent = `
                                               font-weight: 600; }
   #filters .modes { margin-bottom: 10px; padding-bottom: 10px;
                     border-bottom: 1px solid rgba(255,255,255,.25); }
-  #filters .day { display: block; margin-bottom: 9px; background: #333; color: #fff;
+  #filters .toprow { display: flex; align-items: center; justify-content: space-between;
+                     gap: 8px; margin-bottom: 9px; }
+  #filters .day { display: block; background: #333; color: #fff;
                   border: 0; border-radius: 6px; padding: 4px 6px; font: inherit;
                   font-weight: 600; cursor: pointer; }
+  #filters .findbtn { display: flex; align-items: center; gap: 6px;
+                      background: rgba(255,255,255,.12); color: #fff; border: 0;
+                      border-radius: 6px; padding: 4px 10px; font: inherit; cursor: pointer; }
+  #filters .findbtn:hover { background: rgba(255,255,255,.22); }
   #bar :disabled { opacity: .35; }
   /* Stops iOS Safari double-tap zoom on the controls; taps, drags and pinch still work. */
   #bar, #filters, #bar *, #filters * { touch-action: manipulation; }
@@ -283,7 +289,22 @@ function buildPanel(systems, groups) {
     modes.append(btn);
     return [btn, isLive];
   });
-  filtersEl.append(daySel, modes);
+  // The same box as ⌘F / Ctrl+F, for touch screens and anyone who doesn't know
+  // the shortcut.
+  const findBtn = document.createElement("button");
+  findBtn.className = "findbtn";
+  findBtn.title = "find a line (⌘F / Ctrl+F)";
+  findBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="7"/>
+    <path d="M20 20l-4-4"/></svg>Find a line`;
+  findBtn.onclick = () => {
+    filtersEl.classList.remove("open");
+    openFind();
+  };
+  const topRow = document.createElement("div");
+  topRow.className = "toprow";
+  topRow.append(daySel, findBtn);
+  filtersEl.append(topRow, modes);
   buildFilters(systems, groups || []);
   setLive(live);
 }
