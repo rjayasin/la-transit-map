@@ -24,6 +24,9 @@ python3 -m http.server 8741
   release and slows to a stop. A touch during the glide stops it.
 - **Tap a vehicle** to trace the line it runs, on the map or inside the
   Downtown call-out. Tap another to switch, empty space to clear.
+- **Follow a vehicle.** Double-click or double-tap one to glide the map onto it
+  and keep it centered as it moves. Zooming keeps following. A pan, or a tap
+  elsewhere, stops it.
 - **Find a line.** ⌘F (Ctrl+F) opens a search box. Type a designation and
   press Enter to zoom to that line and highlight it. The arrow keys pick
   between systems that share a designation. Escape closes the box, and a second

@@ -707,6 +707,7 @@ addEventListener("mouseup", e => {
 });
 addEventListener("mousemove", e => {
   if (!dragging) return;
+  if (Math.hypot(e.clientX - downX, e.clientY - downY) >= 5) follow = null;
   view.x -= (e.clientX - lx) / view.k; view.y -= (e.clientY - ly) / view.k;
   lx = e.clientX; ly = e.clientY;
 
@@ -752,7 +753,7 @@ cv.addEventListener("wheel", e => {
   }
   if (wheelMode === null) wheelMode = isMouseWheel(e) ? "zoom" : "pan";
   if (wheelMode === "zoom") zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.0015));
-  else { view.x += e.deltaX / view.k; view.y += e.deltaY / view.k; }
+  else { view.x += e.deltaX / view.k; view.y += e.deltaY / view.k; follow = null; }
 }, { passive: false });
 
 // Safari: trackpad pinch as WebKit gesture events, scale being cumulative
@@ -840,6 +841,7 @@ cv.addEventListener("touchmove", e => {
     const [px, py] = prev.get(ids[0]), [cx, cy] = touches.get(ids[0]);
     view.x -= (cx - px) / view.k; view.y -= (cy - py) / view.k;
     gestPan[0] += cx - px; gestPan[1] += cy - py; gestFocus = [cx, cy];
+    if (Math.hypot(gestPan[0], gestPan[1]) > 8) follow = null;
     noteGesture();
   } else if (ids.length >= 2 && prev.has(ids[0]) && prev.has(ids[1])) {
     const [ax0, ay0] = prev.get(ids[0]), [bx0, by0] = prev.get(ids[1]);
@@ -1244,9 +1246,18 @@ function pickVehicle(cx, cy) {
 // pause in both directions: pressing play keeps the path up, which is what
 // makes it useful for watching a vehicle run its variant rather than only for
 // reading a frozen one. Only another tap (or filtering the system out) clears it.
+// A second tap on the same vehicle within DOUBLE_TAP_MS follows it.
+const DOUBLE_TAP_MS = 350, DOUBLE_TAP_PX = 24;
+let lastTap = null;   // {t, x, y, trip} of the previous tap, or null
 function handleTap(cx, cy) {
+  const now = performance.now();
   pathTrip = pickVehicle(cx, cy);
   findShapes = null;
+  const dbl = pathTrip >= 0 && lastTap && lastTap.trip === pathTrip
+              && now - lastTap.t < DOUBLE_TAP_MS
+              && Math.hypot(cx - lastTap.x, cy - lastTap.y) < DOUBLE_TAP_PX;
+  lastTap = dbl ? null : { t: now, x: cx, y: cy, trip: pathTrip };
+  if (dbl) startFollow(pathTrip);
 }
 
 // ---- find a line ----
@@ -1433,7 +1444,7 @@ function stepFlight(now) {
   if (!flight) return;
   const { from, to, t0 } = flight;
   const u = Math.min(1, (now - t0) / FLY_MS);
-  const e = u < 0.5 ? 4 * u * u * u : 1 - (-2 * u + 2) ** 3 / 2;
+  const e = easeInOut(u);
   const k = from.k * (to.k / from.k) ** e;
   const fcx = from.x + W / 2 / from.k, fcy = from.y + H / 2 / from.k;
   const tcx = to.x + W / 2 / to.k, tcy = to.y + H / 2 / to.k;
@@ -1442,6 +1453,37 @@ function stepFlight(now) {
   view.y = fcy + (tcy - fcy) * e - H / 2 / k;
   if (u >= 1) flight = null;
 }
+function easeInOut(u) { return u < 0.5 ? 4 * u * u * u : 1 - (-2 * u + 2) ** 3 / 2; }
+
+// ---- follow a vehicle ----
+// Double-clicking or double-tapping a vehicle glides the view's center onto it
+// over FOLLOW_MS, then holds it there every frame. The glide aims at where the
+// vehicle is on each frame, so it lands on a moving target. Zooming keeps the
+// follow. A pan ends it, and so does anything that clears or changes pathTrip:
+// a tap elsewhere, a find, a day change or the trip's system being filtered out.
+const FOLLOW_MS = 600;
+let follow = null;   // {trip, fx, fy, t0}: the trip, and the center the glide left from
+function startFollow(i) {
+  follow = { trip: i, fx: view.x + W / 2 / view.k, fy: view.y + H / 2 / view.k,
+             t0: performance.now() };
+  flight = null;
+  fling = null;
+}
+function followHolding(now) { return !!follow && now - follow.t0 >= FOLLOW_MS; }
+function stepFollow(now) {
+  if (!follow) return;
+  const tr = trips[follow.trip];
+  if (follow.trip !== pathTrip || !tr) { follow = null; return; }
+  // clamped to the trip window like the drawn sprite, which lingers at the
+  // terminal while it fades out
+  const p = vehiclePos(tr, Math.min(tr.t1, Math.max(tr.t0, simT)));
+  if (!p) return;
+  const e = easeInOut(Math.min(1, Math.max(0, (now - follow.t0) / FOLLOW_MS)));
+  const cx = follow.fx + (p[0] - follow.fx) * e, cy = follow.fy + (p[1] - follow.fy) * e;
+  view.x = cx - W / 2 / view.k;
+  view.y = cy - H / 2 / view.k;
+}
+
 // Any hand on the map takes the view back.
 for (const ev of ["mousedown", "wheel", "touchstart", "gesturestart"])
   cv.addEventListener(ev, () => { flight = null; fling = null; }, { passive: true });
@@ -2380,12 +2422,16 @@ function drawFrame(now) {
   showDay(simDay);
   stepFlight(now);
   stepFling(now);
+  stepFollow(now);
   // Whether tiles may be fetched this frame; see getTile. Decided once, here,
   // so every lookup in the frame agrees, and so the moment the view lands can be
   // seen: nothing has changed at that instant, so composeBackground would skip,
   // and the frame that would have asked for the tiles never runs. One forced
   // recompose is what turns "stopped moving" into "fetch what is on screen".
-  const vkey = `${view.x}|${view.y}|${view.k}`;
+  // A follow that has finished its glide pans every frame at a fixed zoom, so
+  // it counts as still while the zoom holds. Without this, detail tiles never
+  // load for as long as a vehicle is followed.
+  const vkey = followHolding(now) ? `follow|${view.k}` : `${view.x}|${view.y}|${view.k}`;
   if (vkey !== viewSeen) { viewSeen = vkey; viewMovedAt = performance.now(); }
   const still = performance.now() - viewMovedAt >= TILE_SETTLE_MS;
   if (still && !tilesMayLoad) bgDirty = true;
@@ -2533,7 +2579,8 @@ function drawFrame(now) {
   statsCount.textContent = ` · ${active} vehicles`;
   countEl.textContent = `${active} vehicles`;
   statsExtra.textContent =
-    (pathTrip >= 0 && trips[pathTrip] ? ` · path: ${data.routes[trips[pathTrip].r].n}`
+    (pathTrip >= 0 && trips[pathTrip]
+      ? ` · ${follow ? "following" : "path"}: ${data.routes[trips[pathTrip].r].n}`
       : findShapes ? ` · ${findLabel}` : "") +
     (DEBUG ? ` · tiles:${tilesDrawn}/${tileCache.size}` : "");
 }
