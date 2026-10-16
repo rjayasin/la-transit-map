@@ -907,17 +907,71 @@ function drawSprite(g, route, px) {
 // large, so the buffers outran GC until an allocation failed. Reusing the
 // element frees the old buffer synchronously and caps live canvases at one per
 // route.
+//
+// Phases. Safari snaps an unscaled draw at a fractional position to whole
+// pixels, so a vehicle moving under a pixel a frame (zoomed out, or in live
+// mode) holds still and then jumps a pixel. So the bitmap can grow into a grid
+// of spritePhases(px)² copies, each shifted right and down by a fraction of a
+// device pixel, in cells one pixel wider than the sprite. A vehicle is copied
+// from the cell matching its fractional position to a whole-pixel spot under
+// the identity transform, which every browser does as a plain pixel copy.
+//
+// A size change rasters only the base cell, as a single sprite would, so a
+// zoom costs what it did before the grid. The other cells are rastered when a
+// vehicle first needs one, at most SPRITE_CELLS_PER_FRAME a frame and none on
+// a frame whose zoom changed, since a zoom changes the size before they're
+// used. A vehicle whose cell isn't ready is drawn from the base cell at its
+// exact position.
+// Small sprites move in third-pixel steps and large ones in half-pixel steps.
+// A 4×4 grid tripled desktop frame cost in Chrome with every route on screen.
 const spriteBmp = [];
+const SPRITE_CELLS_PER_FRAME = 64;   // ~25 µs each, so ~1.5 ms a frame at most
+let spriteCellBudget = 0;            // cells this frame may still raster
+let spriteCellK = 0;                 // the zoom the last frame was drawn at
+function spritePhases(px) { return px <= 32 ? 3 : 2; }
+
+function rasterCell(s, i, a, b, n) {
+  const g = s.cv.getContext("2d"), cell = s.px + 1;
+  g.save();
+  g.translate(a * cell + a / n, b * cell + b / n);
+  drawSprite(g, data.routes[i], s.px);
+  g.restore();
+  s.built |= 1 << (b * n + a);
+}
 
 function spriteAt(i, px) {
   let s = spriteBmp[i];
-  if (!s) s = spriteBmp[i] = { cv: document.createElement("canvas"), px: -1 };
+  if (!s) s = spriteBmp[i] = { cv: document.createElement("canvas"), px: -1, built: 0 };
   if (s.px !== px) {
-    s.cv.width = s.cv.height = px;          // resize in place; frees the old buffer
-    drawSprite(s.cv.getContext("2d"), data.routes[i], px);
+    s.cv.width = s.cv.height = px + 1;      // resize in place; frees the old buffer
     s.px = px;
+    s.built = 0;
+    rasterCell(s, i, 0, 0, 1);
   }
-  return s.cv;
+  return s;
+}
+
+// Draw route ri's sprite centered on map point (x, y). Leaves the map transform set.
+function drawVehicle(ri, x, y, s) {
+  const px = spriteSize(sprites[ri].half, s);
+  const sp = spriteAt(ri, px), n = spritePhases(px), cell = px + 1, f = DPR * view.k;
+  const dx = (x - view.x) * f - px / 2, dy = (y - view.y) * f - px / 2;   // top-left, device px
+  const qx = Math.round(dx * n), qy = Math.round(dy * n);
+  const ix = Math.floor(qx / n), iy = Math.floor(qy / n);
+  const a = qx - ix * n, b = qy - iy * n, bit = 1 << (b * n + a);
+  if (!(sp.built & bit) && spriteCellBudget > 0) {
+    if (sp.cv.width === cell) {             // first phase: grow into the grid
+      sp.cv.width = sp.cv.height = n * cell;
+      sp.built = 0;
+      rasterCell(sp, ri, 0, 0, n);
+    }
+    if (!(sp.built & bit)) rasterCell(sp, ri, a, b, n);
+    spriteCellBudget--;
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (sp.built & bit) ctx.drawImage(sp.cv, a * cell, b * cell, cell, cell, ix, iy, cell, cell);
+  else ctx.drawImage(sp.cv, 0, 0, cell, cell, dx, dy, cell, cell);
+  ctx.setTransform(f, 0, 0, f, -view.x * f, -view.y * f);
 }
 
 // geometry only; the bitmap is made on demand at the size the frame needs
@@ -926,11 +980,9 @@ function makeSprite(route) {
   return { half: R + 2 };
 }
 
-// The device-pixel size a sprite occupies this frame, and the map-unit size
-// that lands on exactly that many device pixels.
+// The device-pixel size a sprite occupies this frame.
 function spriteSize(half, s) {
-  const px = Math.max(6, Math.round(half * 2 * s * DPR * view.k));
-  return [px, px / (DPR * view.k)];
+  return Math.max(6, Math.round(half * 2 * s * DPR * view.k));
 }
 
 // ---- the day on screen ----
@@ -1575,7 +1627,7 @@ let frameComposeMs = 0, frameBlitMs = 0, spriteDraws = 0;
 
 function resourceStats() {
   let spriteCanvases = 0, spritePx = 0;
-  for (const s of spriteBmp) if (s && s.px > 0) { spriteCanvases++; spritePx += s.px * s.px; }
+  for (const s of spriteBmp) if (s && s.px > 0) { spriteCanvases++; spritePx += s.cv.width * s.cv.height; }
   const mb = px => +(px * 4 / 1048576).toFixed(1);
   const now = performance.now();
   const secs = statsAt ? (now - statsAt) / 1000 : 0;
@@ -2472,6 +2524,8 @@ function drawFrame(now) {
   const t = simT;
   const s = spriteScale();
   const insetDraws = [];
+  spriteCellBudget = view.k === spriteCellK ? SPRITE_CELLS_PER_FRAME : 0;
+  spriteCellK = view.k;
   const step = dt / FADE_SEC;   // opacity change this frame (real time, not sim time)
   // What the window can actually show, in map px. Culling against the drawn map
   // instead leaves nearly every sprite off-canvas at any real zoom (at k=4 a
@@ -2525,7 +2579,6 @@ function drawFrame(now) {
     const hidden = under && x - r >= insetRect[0] && x + r <= insetRect[2]
                          && y - r >= insetRect[1] && y + r <= insetRect[3];
     if (!hidden && x >= vx0 && x <= vx1 && y >= vy0 && y <= vy1) {
-      const [spx, sw] = spriteSize(sp.half, s);
       if (under) {
         ctx.save();
         ctx.beginPath();
@@ -2534,7 +2587,7 @@ function drawFrame(now) {
         ctx.clip("evenodd");
       }
       if (a < 1) ctx.globalAlpha = a;
-      ctx.drawImage(spriteAt(tr.r, spx), x - sw / 2, y - sw / 2, sw, sw);
+      drawVehicle(tr.r, x, y, s);
       drawn++;
       if (i === pathTrip) {   // ring the vehicle whose path is shown
         ctx.beginPath(); ctx.arc(x, y, (sp.half + 4) * s, 0, 7);
@@ -2558,8 +2611,7 @@ function drawFrame(now) {
     for (let k = 0; k < insetDraws.length; k += 5) {
       const ri = insetDraws[k], x = insetDraws[k+1], y = insetDraws[k+2], a = insetDraws[k+3];
       if (a < 1) ctx.globalAlpha = a;
-      const [spx, sw] = spriteSize(sprites[ri].half, s);
-      ctx.drawImage(spriteAt(ri, spx), x - sw / 2, y - sw / 2, sw, sw);
+      drawVehicle(ri, x, y, s);
       drawn++;
       if (insetDraws[k+4] === pathTrip) {   // ring the mirror too, so the tap
         ctx.beginPath();                    // that made the selection is marked
