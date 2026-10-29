@@ -726,16 +726,21 @@ function zoomAt(cx, cy, f) {
 // Telling a real mouse wheel from a two-finger swipe takes a different tell in
 // each browser: Firefox delivers a physical wheel in line units and a trackpad
 // in pixels, while Chrome and Safari use pixels for both and only the legacy
-// wheelDeltaY stays coarse (multiples of 120) for a physical notch.
+// wheelDeltaY stays coarse (multiples of 120) for a physical notch. Safari on
+// macOS accelerates the wheel into fractional notches, so neither of those
+// holds there; its deltaY is a whole multiple of WHEEL_QUANTUM instead, as is
+// Chrome's on macOS, and a trackpad's never is.
 //
 // The test is applied to the first event of a gesture and held for the rest,
 // since a hard flick mid-swipe can throw a delta as coarse as a mouse notch, and
 // a gesture that changes its mind halfway is worse than one misread throughout.
 const WHEEL_NOTCH = 40;      // px of deltaY below which it can't be a mouse notch
 const WHEEL_GAP = 150;       // ms of quiet that ends a gesture
+const WHEEL_QUANTUM = 4.000244140625;  // px; macOS WebKit/Blink mouse-wheel step
 let wheelMode = null, wheelAt = 0;
 function isMouseWheel(e) {
   if (e.deltaMode !== 0) return true;            // Firefox sends a wheel in lines
+  if (e.deltaY !== 0 && e.deltaY % WHEEL_QUANTUM === 0) return true;
   const wd = e.wheelDeltaY;                      // Blink/WebKit legacy delta: a
   if (wd) return Math.abs(wd) % 120 === 0;       // notch steps by 120, a trackpad
                                                  // reports arbitrary pixels
