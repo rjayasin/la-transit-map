@@ -915,6 +915,10 @@ function drawSprite(g, route, px) {
 // device pixel, in cells one pixel wider than the sprite. A vehicle is copied
 // from the cell matching its fractional position to a whole-pixel spot under
 // the identity transform, which every browser does as a plain pixel copy.
+// Only WebKit (Safari, and every browser on iOS) gets the grid. Chrome and
+// Firefox resample a fractional draw smoothly, so they draw the single sprite
+// under the map transform; the grid's rounded positions and per-vehicle
+// transform changes made them pan and zoom less smoothly.
 //
 // A size change rasters only the base cell, as a single sprite would, so a
 // zoom costs what it did before the grid. A route's whole grid is rastered at
@@ -922,8 +926,7 @@ function drawSprite(g, route, px) {
 // for SPRITE_SETTLE_MS, and for at most SPRITE_GRIDS_PER_FRAME routes a frame.
 // Until then its vehicles are drawn from the base cell at their exact
 // position. Building cells one at a time, or between the steps of a wheel or
-// pinch zoom whose next size change discards them, adds several ms a frame in
-// Chrome and Firefox.
+// pinch zoom whose next size change discards them, adds several ms a frame.
 // Small sprites move in third-pixel steps and large ones in half-pixel steps.
 // A 4×4 grid tripled desktop frame cost in Chrome with every route on screen.
 const spriteBmp = [];
@@ -931,6 +934,7 @@ const SPRITE_GRIDS_PER_FRAME = 8;
 const SPRITE_SETTLE_MS = 250;        // zoom must hold this long before grids are built
 let spriteGridBudget = 0;            // grids this frame may still raster
 let spriteK = 0, spriteKAt = 0;      // the zoom last drawn, and when it changed
+const SPRITE_GRID = /AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chromium/.test(navigator.userAgent);
 function spritePhases(px) { return px <= 32 ? 3 : 2; }
 
 function rasterCell(s, i, a, b, n) {
@@ -945,7 +949,7 @@ function spriteAt(i, px) {
   let s = spriteBmp[i];
   if (!s) s = spriteBmp[i] = { cv: document.createElement("canvas"), px: -1, grid: false };
   if (s.px !== px) {
-    s.cv.width = s.cv.height = px + 1;      // resize in place; frees the old buffer
+    s.cv.width = s.cv.height = SPRITE_GRID ? px + 1 : px;   // resize in place; frees the old buffer
     s.px = px;
     s.grid = false;
     rasterCell(s, i, 0, 0, 1);
@@ -956,7 +960,13 @@ function spriteAt(i, px) {
 // Draw route ri's sprite centered on map point (x, y). Leaves the map transform set.
 function drawVehicle(ri, x, y, s) {
   const px = spriteSize(sprites[ri].half, s);
-  const sp = spriteAt(ri, px), n = spritePhases(px), cell = px + 1, f = DPR * view.k;
+  const sp = spriteAt(ri, px), f = DPR * view.k;
+  if (!SPRITE_GRID) {
+    const sw = px / f;                      // map units that land on exactly px device px
+    ctx.drawImage(sp.cv, x - sw / 2, y - sw / 2, sw, sw);
+    return;
+  }
+  const n = spritePhases(px), cell = px + 1;
   const dx = (x - view.x) * f - px / 2, dy = (y - view.y) * f - px / 2;   // top-left, device px
   const qx = Math.round(dx * n), qy = Math.round(dy * n);
   const ix = Math.floor(qx / n), iy = Math.floor(qy / n);
