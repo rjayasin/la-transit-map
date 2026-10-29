@@ -917,17 +917,20 @@ function drawSprite(g, route, px) {
 // the identity transform, which every browser does as a plain pixel copy.
 //
 // A size change rasters only the base cell, as a single sprite would, so a
-// zoom costs what it did before the grid. The other cells are rastered when a
-// vehicle first needs one, at most SPRITE_CELLS_PER_FRAME a frame and none on
-// a frame whose zoom changed, since a zoom changes the size before they're
-// used. A vehicle whose cell isn't ready is drawn from the base cell at its
-// exact position.
+// zoom costs what it did before the grid. A route's whole grid is rastered at
+// once, the first time one of its vehicles is drawn after the zoom has held
+// for SPRITE_SETTLE_MS, and for at most SPRITE_GRIDS_PER_FRAME routes a frame.
+// Until then its vehicles are drawn from the base cell at their exact
+// position. Building cells one at a time, or between the steps of a wheel or
+// pinch zoom whose next size change discards them, adds several ms a frame in
+// Chrome and Firefox.
 // Small sprites move in third-pixel steps and large ones in half-pixel steps.
 // A 4×4 grid tripled desktop frame cost in Chrome with every route on screen.
 const spriteBmp = [];
-const SPRITE_CELLS_PER_FRAME = 64;   // ~25 µs each, so ~1.5 ms a frame at most
-let spriteCellBudget = 0;            // cells this frame may still raster
-let spriteCellK = 0;                 // the zoom the last frame was drawn at
+const SPRITE_GRIDS_PER_FRAME = 8;
+const SPRITE_SETTLE_MS = 250;        // zoom must hold this long before grids are built
+let spriteGridBudget = 0;            // grids this frame may still raster
+let spriteK = 0, spriteKAt = 0;      // the zoom last drawn, and when it changed
 function spritePhases(px) { return px <= 32 ? 3 : 2; }
 
 function rasterCell(s, i, a, b, n) {
@@ -936,16 +939,15 @@ function rasterCell(s, i, a, b, n) {
   g.translate(a * cell + a / n, b * cell + b / n);
   drawSprite(g, data.routes[i], s.px);
   g.restore();
-  s.built |= 1 << (b * n + a);
 }
 
 function spriteAt(i, px) {
   let s = spriteBmp[i];
-  if (!s) s = spriteBmp[i] = { cv: document.createElement("canvas"), px: -1, built: 0 };
+  if (!s) s = spriteBmp[i] = { cv: document.createElement("canvas"), px: -1, grid: false };
   if (s.px !== px) {
     s.cv.width = s.cv.height = px + 1;      // resize in place; frees the old buffer
     s.px = px;
-    s.built = 0;
+    s.grid = false;
     rasterCell(s, i, 0, 0, 1);
   }
   return s;
@@ -958,18 +960,15 @@ function drawVehicle(ri, x, y, s) {
   const dx = (x - view.x) * f - px / 2, dy = (y - view.y) * f - px / 2;   // top-left, device px
   const qx = Math.round(dx * n), qy = Math.round(dy * n);
   const ix = Math.floor(qx / n), iy = Math.floor(qy / n);
-  const a = qx - ix * n, b = qy - iy * n, bit = 1 << (b * n + a);
-  if (!(sp.built & bit) && spriteCellBudget > 0) {
-    if (sp.cv.width === cell) {             // first phase: grow into the grid
-      sp.cv.width = sp.cv.height = n * cell;
-      sp.built = 0;
-      rasterCell(sp, ri, 0, 0, n);
-    }
-    if (!(sp.built & bit)) rasterCell(sp, ri, a, b, n);
-    spriteCellBudget--;
+  const a = qx - ix * n, b = qy - iy * n;
+  if (!sp.grid && spriteGridBudget > 0) {
+    sp.cv.width = sp.cv.height = n * cell;
+    for (let bb = 0; bb < n; bb++) for (let aa = 0; aa < n; aa++) rasterCell(sp, ri, aa, bb, n);
+    sp.grid = true;
+    spriteGridBudget--;
   }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  if (sp.built & bit) ctx.drawImage(sp.cv, a * cell, b * cell, cell, cell, ix, iy, cell, cell);
+  if (sp.grid) ctx.drawImage(sp.cv, a * cell, b * cell, cell, cell, ix, iy, cell, cell);
   else ctx.drawImage(sp.cv, 0, 0, cell, cell, dx, dy, cell, cell);
   ctx.setTransform(f, 0, 0, f, -view.x * f, -view.y * f);
 }
@@ -2524,8 +2523,8 @@ function drawFrame(now) {
   const t = simT;
   const s = spriteScale();
   const insetDraws = [];
-  spriteCellBudget = view.k === spriteCellK ? SPRITE_CELLS_PER_FRAME : 0;
-  spriteCellK = view.k;
+  if (view.k !== spriteK) { spriteK = view.k; spriteKAt = now; }
+  spriteGridBudget = now - spriteKAt >= SPRITE_SETTLE_MS ? SPRITE_GRIDS_PER_FRAME : 0;
   const step = dt / FADE_SEC;   // opacity change this frame (real time, not sim time)
   // What the window can actually show, in map px. Culling against the drawn map
   // instead leaves nearly every sprite off-canvas at any real zoom (at k=4 a
