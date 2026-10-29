@@ -487,8 +487,12 @@ working copy, so nothing has to be copied aside before a rebuild. Routes match
 by (system, route id), so `--after scratch/refit_<feed>.json` compares a refit
 against the full build. Select with labels, `--system`, `--id`, `--group` (a
 filter group name) and `--changed` (shapes or stop distances differ), and crop
-to one stretch with `--box X0,Y0,X1,Y1`. It writes
-one JPEG per route and an `index.html` to `--out` (default `scratch/compare`).
+to one stretch with `--box X0,Y0,X1,Y1`. Stretches that moved more than 2 px
+get a halo (red before, green after) and a numbered box drawn in the same place
+on both panels; the title counts them, or says only the stops moved. Stops are
+hidden unless `--stops` is given. It writes one JPEG per route and an
+`index.html`, routes with moved paths first, to `--out` (default
+`scratch/compare`).
 `--group Municipal --changed` gives the review images for a pass over that
 group.
 
