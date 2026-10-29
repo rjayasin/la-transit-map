@@ -486,7 +486,8 @@ file or `git:<rev>`. They default to the committed `schedule.json` and the
 working copy, so nothing has to be copied aside before a rebuild. Routes match
 by (system, route id), so `--after scratch/refit_<feed>.json` compares a refit
 against the full build. Select with labels, `--system`, `--id`, `--group` (a
-filter group name) and `--changed` (shapes or stop distances differ). It writes
+filter group name) and `--changed` (shapes or stop distances differ), and crop
+to one stretch with `--box X0,Y0,X1,Y1`. It writes
 one JPEG per route and an `index.html` to `--out` (default `scratch/compare`).
 `--group Municipal --changed` gives the review images for a pass over that
 group.

@@ -21,7 +21,8 @@ Selecting routes (combine freely; with none given, every route is drawn):
     --group TEXT       substring of a filter group, e.g. Municipal
     --changed          only routes whose shapes or stop distances differ
 
-Writes one JPEG per route and an index.html listing them to --out.
+`--box X0,Y0,X1,Y1` crops to one stretch in map px instead of the whole
+route. Writes one JPEG per route and an index.html listing them to --out.
 
 Usage:
     scripts/compare_paths.py LS --system LADOT
@@ -29,6 +30,7 @@ Usage:
     scripts/compare_paths.py --before git:HEAD~3 --changed --out scratch/cmp
     scripts/compare_paths.py --after scratch/refit_ladot.json --changed
     scripts/compare_paths.py --before old.json --after new.json --id 575,605
+    scripts/compare_paths.py 110 --system Metro --box 1690,2220,1840,2300
 """
 import argparse
 import html
@@ -151,8 +153,8 @@ def compare(before, after, rb, ra, title, a):
         return None
     xs = [p[0] for p in pts]
     ys = [p[1] for p in pts]
-    box = (max(0, int(min(xs)) - PAD), max(0, int(min(ys)) - PAD),
-           min(4096, int(max(xs)) + PAD), min(4139, int(max(ys)) + PAD))
+    box = a.box or (max(0, int(min(xs)) - PAD), max(0, int(min(ys)) - PAD),
+                    min(4096, int(max(xs)) + PAD), min(4139, int(max(ys)) + PAD))
     if box[2] - box[0] < 1 or box[3] - box[1] < 1:
         return None
     left, scale, vb = panel(before, rb, box, a.stops)
@@ -202,6 +204,8 @@ def main():
     ap.add_argument("--group", help="substring of a filter group name")
     ap.add_argument("--changed", action="store_true",
                     help="only routes whose shapes or stop distances differ")
+    ap.add_argument("--box", type=lambda v: tuple(int(float(q)) for q in v.split(",")),
+                    help="crop X0,Y0,X1,Y1 in map px instead of the whole route")
     ap.add_argument("--no-stops", dest="stops", action="store_false",
                     help="omit the stop dots")
     ap.add_argument("--width", type=int, default=1100,
