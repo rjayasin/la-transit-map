@@ -477,7 +477,19 @@ The build is deterministic on one platform: same inputs, byte-identical
 .venv/bin/python scripts/corridor_check.py <feed> <n> --from X,Y --to X,Y
                                            # against one traced stretch of line
 .venv/bin/python scripts/debug_line.py <n> # look at it
+.venv/bin/python scripts/compare_paths.py --changed   # before/after of what moved
 ```
+
+`compare_paths.py` draws each route from two schedules side by side over one
+crop: before on the left, after on the right. `--before` and `--after` take a
+file or `git:<rev>`. They default to the committed `schedule.json` and the
+working copy, so nothing has to be copied aside before a rebuild. Routes match
+by (system, route id), so `--after scratch/refit_<feed>.json` compares a refit
+against the full build. Select with labels, `--system`, `--id`, `--group` (a
+filter group name) and `--changed` (shapes or stop distances differ). It writes
+one JPEG per route and an `index.html` to `--out` (default `scratch/compare`).
+`--group Municipal --changed` gives the review images for a pass over that
+group.
 
 `trips` is the whole week, so the checks rank weekend-only workings alongside
 the rest and their trip counts are a week's, not a day's.
