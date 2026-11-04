@@ -202,9 +202,11 @@ panelCss.textContent = `
                       background: rgba(255,255,255,.12); color: #fff; border: 0;
                       border-radius: 6px; padding: 6px; cursor: pointer; }
   #filters .findbtn:hover { background: rgba(255,255,255,.22); }
-  #filters .line { margin: -2px 0 10px; padding: 6px 10px; border-radius: 8px;
+  /* The highlighted line, between the day picker and the find button. It takes
+     the row's spare width and truncates rather than widening the popover. */
+  #filters .line { flex: 1 1 auto; min-width: 0; padding: 4px 8px; border-radius: 6px;
                    background: rgba(255,255,255,.12); font-weight: 600;
-                   white-space: normal; }
+                   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #filters .line .what { font-weight: 400; opacity: .7; margin-right: 6px; }
   #bar :disabled { opacity: .35; }
   /* Stops iOS Safari double-tap zoom on the controls; taps, drags and pinch still work. */
@@ -280,6 +282,7 @@ function showLine(what, name) {
   lineEl.hidden = !name;
   lineWhat.textContent = what;
   lineName.textContent = name;
+  lineEl.title = name ? `${what} ${name}` : "";   // the row truncates on a narrow screen
 }
 function setLive(on) {
   const was = live;
@@ -326,8 +329,8 @@ function buildPanel(systems, groups) {
   };
   const topRow = document.createElement("div");
   topRow.className = "toprow";
-  topRow.append(daySel, findBtn);
-  filtersEl.append(topRow, lineEl, modes);
+  topRow.append(daySel, lineEl, findBtn);
+  filtersEl.append(topRow, modes);
   buildFilters(systems, groups || []);
   setLive(live);
 }
