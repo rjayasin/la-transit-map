@@ -1645,6 +1645,34 @@ def rail_line_tree():
     return ink_tree(RAIL_INK, dashed=False)
 
 
+# Each Metro rail line's own stroke, keyed by route id. The sheet draws every
+# ribbon as one stroke in the line's colour, so its points are the ribbon's
+# centreline. The colour mask in `rail_trees` covers the whole ribbon width.
+METRO_RAIL_INK = {
+    "801": [(0.0, 0.446, 0.736)],      # A
+    "802": [(0.93, 0.111, 0.141)],     # B
+    "803": [(0.426, 0.752, 0.404)],    # C
+    "804": [(0.993, 0.724, 0.073)],    # E
+    "805": [(0.628, 0.366, 0.649)],    # D
+    "807": [(0.897, 0.44, 0.672)],     # K
+}
+RAIL_CENTRE_STEP = 1.0    # px between stroke samples, so a point snapped to the
+                          # nearest one lands within 0.5 px of the stroke
+
+
+def rail_centre_tree(rid, region="main"):
+    """KD-tree over one Metro rail line's stroke, or None where the sheet
+    draws too little of it. region "inset" reads the Downtown call-out."""
+    if rid not in METRO_RAIL_INK:
+        return None
+    key = ("rail-centre", rid, region)
+    if key not in _INK_TREES:
+        P = pdf_ink(METRO_RAIL_INK[rid], dashed=False, step=RAIL_CENTRE_STEP,
+                    region=region)
+        _INK_TREES[key] = cKDTree(P) if len(P) > 300 else None
+    return _INK_TREES[key]
+
+
 # ---- route-number badge anchors from the source PDF ----------------------
 # The map draws a numbered badge on every route line. All routes of one agency
 # share a drawn color, so mask snapping alone can lock a shape onto a parallel
@@ -10391,7 +10419,170 @@ def rail_dir_tree(tree):
     return _RAIL_DIR[key]
 
 
-def snap_rail(pts, tree, caps=(45.0, 24.0, 12.0), wins=(15, 9, 5), max_gap=45, rnd=2):
+# Terminal loops the sheet draws run one way round. The snap puts both
+# directions on whichever side of the loop the warp lies nearer, so one of them
+# runs it backwards and the stops on the far side land on the near one. Each row
+# is the whole loop in map px, traced off the line's stroke from where it leaves
+# the trunk round to where it rejoins it, with the index of the terminal
+# platform. A shape ending at the terminus runs the loop up to the platform; a
+# shape starting there runs the rest. `passes` are platforms within
+# PLATFORM_NEAR of the leaving half that it does not serve. Left in,
+# `platform_stops` matches the next stop to one and every stop after it shifts
+# by one station.
+RAIL_LOOPS = {
+    "801": {  # A, Downtown Long Beach
+        "path": [(1949.6, 3240.0), (1949.6, 3305.5), (1948.0, 3309.3), (1944.2, 3310.9),
+                 (1923.6, 3310.9), (1919.8, 3309.3), (1918.2, 3305.5), (1918.2, 3302.1),
+                 (1918.2, 3269.8), (1919.8, 3266.0), (1923.6, 3264.4), (1946.5, 3264.4),
+                 (1949.6, 3258.0), (1949.6, 3240.0)],
+        "platform": 7,
+        "passes": [(1949.0, 3272.0)],     # 5th Street
+    },
+}
+RAIL_LOOP_REACH = 60.0    # px a shape's end may stop short of the loop's platform
+
+
+def rail_loop(P, spec):
+    """`P` with its run round a terminal loop replaced by the drawn one.
+
+    Which half applies is read off which end of `P` is at the platform. A shape
+    with neither end within RAIL_LOOP_REACH of it is returned unchanged."""
+    P = np.asarray(P, dtype=float)
+    L = np.asarray(spec["path"], dtype=float)
+    k = spec["platform"]
+    to_end, to_start = (np.hypot(*(P[e] - L[k])) for e in (-1, 0))
+    if min(to_end, to_start) > RAIL_LOOP_REACH:
+        return P
+    arc = cum_arc(P)
+    reach = cum_arc(L)[-1]
+    if to_end <= to_start:
+        near = np.nonzero(arc >= arc[-1] - reach)[0]
+        i = near[np.hypot(*(P[near] - L[0]).T).argmin()]
+        return np.vstack([P[:i], L[:k + 1]])
+    near = np.nonzero(arc <= reach)[0]
+    j = near[np.hypot(*(P[near] - L[-1]).T).argmin()]
+    return np.vstack([L[k:], P[j + 1:]])
+
+
+def loop_passes(rid, P):
+    """Platforms the shape `P` runs past without serving: the `passes` of its
+    route's loop when `P` leaves that loop's terminus, else none."""
+    spec = RAIL_LOOPS.get(rid)
+    if spec is None or np.hypot(*(np.asarray(P[0]) - spec["path"][spec["platform"]])) > 1:
+        return ()
+    return spec["passes"]
+
+
+def rail_pass(P, aimed, cap, win, max_gap, sideways=False):
+    """One coherent snap pass of `snap_rail`, or None where fewer than 4 points
+    are within `cap` of the track. With `sideways`, only the part of each
+    point's move across the line is kept."""
+    n = len(P)
+    idx = np.arange(n)
+    dist, j = aimed.query(P)
+    ok = dist < cap
+    if ok.sum() < 4:
+        return None
+    disp = np.full((n, 2), np.nan)
+    disp[ok] = aimed.data[j[ok]] - P[ok]
+    if sideways:
+        disp = across(P, disp)
+    i = 0                                    # keep the warp through long gaps
+    while i < n:
+        if not ok[i]:
+            k = i
+            while k < n and not ok[k]:
+                k += 1
+            if k - i > max_gap:
+                disp[i:k] = 0.0
+            i = k
+        else:
+            i += 1
+    known = ~np.isnan(disp[:, 0])
+    kern = np.ones(win) / win
+    for c in (0, 1):
+        col = np.interp(idx, idx[known], disp[known, c])
+        disp[:, c] = np.convolve(np.pad(col, win // 2, mode="edge"), kern, "valid")
+    return P + disp
+
+
+# Passes that move a line snapped on its ribbon mask onto the ribbon's stroke.
+# The mask is the ribbon's full width, so the mask snap leaves a line on
+# whichever edge of the ribbon the warp approached from. The first cap reaches
+# a line that cut a corner of the ribbon; the second holds within half a ribbon.
+RAIL_CENTRE_CAPS = (12.0, 5.0)
+RAIL_CENTRE_WINS = (5, 3)
+RAIL_CENTRE_SNAP = 3.0    # px within which a point is moved the whole way across
+                          # onto the stroke, unsmoothed
+RAIL_CENTRE_TOL = 0.4     # px; simplify tolerance on a centred line, so the
+                          # stored shape stays on the stroke
+
+
+def across(P, disp):
+    """The component of each row of `disp` normal to the polyline `P`."""
+    t = np.gradient(P, axis=0)
+    t /= np.maximum(np.hypot(*t.T), 1e-9)[:, None]
+    nrm = np.c_[-t[:, 1], t[:, 0]]
+    return nrm * (disp * nrm).sum(1)[:, None]
+
+
+RAIL_KNOT = 8.0    # px; a run of points that stays this close to where it
+                   # started is a knot, and only its first and last are kept
+
+
+def deknot(P, r=RAIL_KNOT):
+    """`P` with every run of consecutive points that stays within `r` of its
+    first point cut to that run's first and last point.
+
+    Where the warp runs on past the end of a drawn ribbon, as at the edge of the
+    Downtown call-out, the mask snap pins a long stretch of it to the few pixels
+    at the ribbon's end. That leaves dozens of points in a blob a few px across,
+    and a line through them zigzags."""
+    P = np.asarray(P, dtype=float)
+    keep, i, n = [0], 0, len(P)
+    while i < n - 1:
+        j = i + 1
+        while j + 1 < n and np.hypot(*(P[j + 1] - P[i])) < r:
+            j += 1
+        keep.append(j)
+        i = j
+    return P[keep]
+
+
+def centre_rail(P, centre, max_gap=45):
+    """`P` moved sideways onto the line's drawn stroke where it is within reach
+    of it.
+
+    Only the move across the line is applied. The stroke stops at the edge of a
+    terminal platform marker and the line ends at the marker's centre, so the
+    nearest stroke point to an end lies back along the line, and moving onto it
+    would pull the end off the platform. Stretches the sheet does not draw,
+    such as the Downtown call-out, stay where the mask snap left them."""
+    P0 = np.array(densify([tuple(p) for p in deknot(P)], 2.0), dtype=float)
+    # `square_ends` stood each end in its platform marker, where the last
+    # segment need not run along the line, so its normal is no guide. Each end
+    # keeps its place and every move below tapers in over the marker's radius.
+    cum = cum_arc(P0)
+    w = np.clip(np.minimum(cum, cum[-1] - cum) / TAIL_MARKER, 0.0, 1.0)[:, None]
+    # The mask snap folds the line back on itself for a few px where it
+    # crosses a platform marker, which is a hole in the mask. A sideways move
+    # keeps a fold, so the line is averaged first; the passes then put back
+    # the curves the average cut.
+    P = P0 + w * (unjitter(P0) - P0)
+    aimed = rail_dir_tree(centre)
+    for cap, win in zip(RAIL_CENTRE_CAPS, RAIL_CENTRE_WINS):
+        Q = rail_pass(P, aimed, cap, win, max_gap, sideways=True)
+        if Q is None:
+            return P0
+        P = Q
+    dist, j = aimed.query(P)
+    close = dist < RAIL_CENTRE_SNAP
+    P[close] += across(P, aimed.data[j] - P)[close]
+    return P0 + w * (P - P0)
+
+
+def snap_rail(pts, tree, caps=(45.0, 24.0, 12.0), wins=(15, 9, 5), max_gap=45, rnd=2,
+              centre=None):
     """Snap a warped rail polyline onto its drawn-track mask, coherently.
 
     Each pass pins points within `cap` of the track to it, interpolates that
@@ -10407,41 +10598,28 @@ def snap_rail(pts, tree, caps=(45.0, 24.0, 12.0), wins=(15, 9, 5), max_gap=45, r
     with Chaikin so turns read as curves, not right angles.
 
     The mask is read through `rail_dir_tree`, so where the line crosses itself
-    the limb the shape is not running cannot claim it."""
+    the limb the shape is not running cannot claim it.
+
+    The last re-snap puts each point near the mask on its nearest mask pixel,
+    which is the ribbon's edge rather than its middle. `centre`, a tree over the
+    line's drawn stroke (`rail_centre_tree`), moves the finished line onto the
+    stroke with `centre_rail`."""
     P = np.array(densify(pts, 4.0), dtype=float)
-    n = len(P)
-    idx = np.arange(n)
     aimed = rail_dir_tree(tree)          # the ends still read the plain mask
     for pass_i, (cap, win) in enumerate(zip(caps, wins)):
-        dist, j = aimed.query(P)
-        ok = dist < cap
-        if ok.sum() < 4:
+        Q = rail_pass(P, aimed, cap, win, max_gap)
+        if Q is None:
             if pass_i == 0:
                 return [tuple(p) for p in P]    # nothing drawn here: keep the warp
             break
-        disp = np.full((n, 2), np.nan)
-        disp[ok] = aimed.data[j[ok]] - P[ok]
-        i = 0                                    # keep the warp through long gaps
-        while i < n:
-            if not ok[i]:
-                k = i
-                while k < n and not ok[k]:
-                    k += 1
-                if k - i > max_gap:
-                    disp[i:k] = 0.0
-                i = k
-            else:
-                i += 1
-        known = ~np.isnan(disp[:, 0])
-        kern = np.ones(win) / win
-        for c in (0, 1):
-            col = np.interp(idx, idx[known], disp[known, c])
-            disp[:, c] = np.convolve(np.pad(col, win // 2, mode="edge"), kern, "valid")
-        P = P + disp
+        P = Q
     dist, j = aimed.query(P)                     # final tight re-snap on the track
     close = dist < 8
     P[close] = aimed.data[j[close]]
-    return [tuple(p) for p in chaikin(simplify(square_ends(P, tree), 1.0), rnd)]
+    P = square_ends(P, tree)
+    if centre is None:
+        return [tuple(p) for p in chaikin(simplify(P, 1.0), rnd)]
+    return [tuple(p) for p in chaikin(simplify(centre_rail(P, centre), RAIL_CENTRE_TOL), rnd)]
 
 
 def resample(P, n):
@@ -10563,7 +10741,7 @@ PLATFORM_NEAR = 14.0    # px a drawn platform may sit off the line it serves
 PLATFORM_GATE = 120.0   # px along the line a stop may be moved to reach its own
 
 
-def platform_stops(shape_px, cum, stop_px, gate=PLATFORM_GATE):
+def platform_stops(shape_px, cum, stop_px, gate=PLATFORM_GATE, passes=()):
     """Move each rail stop onto the platform the map draws for it.
 
     Rail platforms are drawn: the white shape with the black stroke, a circle
@@ -10580,9 +10758,14 @@ def platform_stops(shape_px, cum, stop_px, gate=PLATFORM_GATE):
     each stop to its own platform however far the warp has slid. Stops whose
     platform the sheet doesn't draw fall in the gaps and keep the warp; that is
     most of downtown, where the call-out panel covers the markers.
+
+    `passes` are platform centres the shape runs past without serving; the
+    markers there are left out.
     """
     P = np.asarray(shape_px, dtype=float)
     M = station_markers()
+    for q in passes:
+        M = M[np.hypot(*(M[:, :2] - q).T) > 3]
     if len(P) < 2 or not len(M):
         return stop_px
     ms, moff = project_onto(P, cum, M[:, :2])
@@ -10911,8 +11094,11 @@ def measured_positions(ll, measures, stops, distances):
 
 
 def inset_runs(ll, snap_tree=None, anchors=None, sole=False,
-               boxes=(), speckled=True, overrides=()):
-    """Inset polylines with entry and exit distances on the geographic shape."""
+               boxes=(), speckled=True, overrides=(), centre=None):
+    """Inset polylines with entry and exit distances on the geographic shape.
+
+    `centre`, a tree over the line's stroke in the call-out, moves each snapped
+    run onto that stroke with `centre_rail`."""
     ll = np.asarray(ll, dtype=float)
     if TR_INSET is None or len(ll) < 2:
         return None
@@ -10975,6 +11161,8 @@ def inset_runs(ll, snap_tree=None, anchors=None, sole=False,
                                region="inset" if speckled else "inset-ink")
             if sc is not None:
                 pts = unjitter(np.asarray(sc), tree=snap_tree)
+        if centre is not None:
+            pts = simplify(centre_rail(pts, centre), RAIL_CENTRE_TOL)
         if overrides:
             pts = inset_override(pts, overrides)
         # drop edge-hugging slivers that never meaningfully enter the frame
@@ -11416,10 +11604,15 @@ def build_schedule(feeds):
             cuts = pins + TRIM_TERMINI.get((feed, (rid or "").split("-")[0]), [])
             if cuts:
                 pts, shape_start[(feed, sid)] = trim_terminus(pts, cuts, with_offset=True)
+            centred = False             # on the drawn stroke, see centre_rail
             if feed == "gtfs_rail":
                 tree = rail_trees.get(rid)
                 if tree is not None:
-                    out_pts = snap_rail(pts, tree)
+                    centre = rail_centre_tree(rid)
+                    out_pts = snap_rail(pts, tree, centre=centre)
+                    centred = centre is not None
+                    if rid in RAIL_LOOPS:
+                        out_pts = [tuple(p) for p in rail_loop(out_pts, RAIL_LOOPS[rid])]
                 if rid in ROUTE_COLORS:
                     shape_isnap[(feed, sid)] = ([ROUTE_COLORS[rid]], TOL, toks)
             elif feed == "gtfs_bus":
@@ -11752,7 +11945,10 @@ def build_schedule(feeds):
             # and a smoothed line reads differently enough there to change
             # which one ships, so it smooths after. An override's path is drawn
             # by hand, so it goes on after this rather than through it.
-            if out_pts is not None:
+            # A centred line was averaged inside `centre_rail`, before it was
+            # put on its stroke. Averaging it again would cut the inside of
+            # each curve and pull its ends off the platforms.
+            if out_pts is not None and not centred:
                 full = unjitter(full, tree=line_ink)
             if (feed in AGENCY_SYMBOLS or feed == "lacounty") and len(full) == len(base):
                 ink = symbol_ink(feed, rmeta[rid][0] if rid in rmeta else None)
@@ -11793,6 +11989,8 @@ def build_schedule(feeds):
                     stored = full[keep]
                 cb = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(base, axis=0).T))])
                 shape_param[(feed, sid)] = (base, cb, cb[keep])
+            elif centred:
+                stored = simplify(full, tol=RAIL_CENTRE_TOL)   # keep it on the stroke
             else:
                 stored = simplify(full)
             shapes_raw[(feed, sid)] = stored
@@ -11910,6 +12108,9 @@ def build_schedule(feeds):
                 # was already sitting on.
                 runs = inset_runs(ll, tree,
                                   sole=key[0] == "gtfs_rail",
+                                  centre=rail_centre_tree(shape_route.get(key),
+                                                          region="inset")
+                                  if key[0] == "gtfs_rail" else None,
                                   speckled=not inks,
                                   boxes=INSET_DIVERSIONS.get(
                                       (key[0], shape_route.get(key)), ()),
@@ -11943,7 +12144,8 @@ def build_schedule(feeds):
         if u is not None:
             stats["measured_patterns"] += 1
         if feed == "gtfs_rail":
-            spx = platform_stops(shapes_raw[key], cums[si], spx)
+            spx = platform_stops(shapes_raw[key], cums[si], spx,
+                                 passes=loop_passes(shape_route.get(key), shapes_raw[key]))
             u = None
         d = main_dist(key, si, spx, u)
         entry = {"s": si, "d": [round(v) for v in d]}
