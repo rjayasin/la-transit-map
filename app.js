@@ -202,6 +202,12 @@ panelCss.textContent = `
                       background: rgba(255,255,255,.12); color: #fff; border: 0;
                       border-radius: 6px; padding: 6px; cursor: pointer; }
   #filters .findbtn:hover { background: rgba(255,255,255,.22); }
+  /* The highlighted line, between the day picker and the find button. It takes
+     the row's spare width and truncates rather than widening the popover. */
+  #filters .line { flex: 1 1 auto; min-width: 0; padding: 4px 8px; border-radius: 6px;
+                   background: rgba(255,255,255,.12); font-weight: 600;
+                   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #filters .line .what { font-weight: 400; opacity: .7; margin-right: 6px; }
   #bar :disabled { opacity: .35; }
   /* Stops iOS Safari double-tap zoom on the controls; taps, drags and pinch still work. */
   #bar, #filters, #bar *, #filters * { touch-action: manipulation; }
@@ -259,6 +265,25 @@ statsCount.className = "cnt";
 stats.append(statsTime, statsCount, statsExtra);
 const countEl = document.createElement("div");
 countEl.className = "count";
+// The highlighted line, tapped or found, is named in the popover rather than
+// in the bar, so the bar keeps its width for the slider.
+const lineEl = document.createElement("div");
+lineEl.className = "line";
+lineEl.hidden = true;
+const lineWhat = document.createElement("span");
+lineWhat.className = "what";
+const lineName = document.createElement("span");
+lineEl.append(lineWhat, lineName);
+let lineShown = "";
+function showLine(what, name) {
+  const key = what + "\n" + name;
+  if (key === lineShown) return;   // written every frame; touch the DOM on change only
+  lineShown = key;
+  lineEl.hidden = !name;
+  lineWhat.textContent = what;
+  lineName.textContent = name;
+  lineEl.title = name ? `${what} ${name}` : "";   // the row truncates on a narrow screen
+}
 function setLive(on) {
   const was = live;
   live = on;
@@ -304,7 +329,7 @@ function buildPanel(systems, groups) {
   };
   const topRow = document.createElement("div");
   topRow.className = "toprow";
-  topRow.append(daySel, findBtn);
+  topRow.append(daySel, lineEl, findBtn);
   filtersEl.append(topRow, modes);
   buildFilters(systems, groups || []);
   setLive(live);
@@ -1331,7 +1356,7 @@ function handleTap(cx, cy) {
 // shape that line runs and flies the view to fit them. The browser's own find
 // has nothing to search on a canvas, so the shortcut is taken over.
 let findShapes = null;   // shape indices of the found line, or null
-let findLabel = "";      // "720 · Metro Bus", for the stats line
+let findLabel = "";      // "720 · Metro Bus", for the popover
 let findName = "";
 let findSy = -1;         // the found line's system
 let flight = null;       // {from, to, t0} view animation, or null
@@ -2644,9 +2669,11 @@ function drawFrame(now) {
   statsTime.textContent = (live ? "live · " : "") + clock;
   statsCount.textContent = ` · ${active} vehicles`;
   countEl.textContent = `${active} vehicles`;
-  statsExtra.textContent =
-    (pathTrip >= 0 && trips[pathTrip]
-      ? ` · ${follow ? "following" : "path"}: ${data.routes[trips[pathTrip].r].n}`
-      : findShapes ? ` · ${findLabel}` : "") +
-    (DEBUG ? ` · tiles:${tilesDrawn}/${tileCache.size}` : "");
+  if (pathTrip >= 0 && trips[pathTrip]) {
+    const rt = data.routes[trips[pathTrip].r];
+    showLine(follow ? "Following" : "Path", `${rt.n} · ${data.systems[rt.sy]}`);
+  } else {
+    showLine("Found", findShapes ? findLabel : "");
+  }
+  statsExtra.textContent = DEBUG ? ` · tiles:${tilesDrawn}/${tileCache.size}` : "";
 }

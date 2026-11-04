@@ -157,12 +157,13 @@ if (!pick.first) {
       path: pathTrip,
       offBy: ip ? Math.hypot((ip[0] - view.x) * view.k - ${sx},
                              (ip[1] - view.y) * view.k - ${sy}) : null,
-      named: tr ? stats.textContent.includes("path: " + data.routes[tr.r].n) : false,
+      named: tr ? !lineEl.hidden && lineName.textContent.startsWith(data.routes[tr.r].n + " · ")
+                && statsExtra.textContent === "" : false,
     };
   })()`);
   check("tapping the mirror selects a vehicle", after.path >= 0, true);
   check("and one that is drawn where the tap was", after.offBy !== null && after.offBy < 20, true);
-  check("the readout names its route", after.named, true);
+  check("the popover names its route, and the bar does not", after.named, true);
   if (after.path !== i) console.log(`  (${label} was the candidate; a nearer mirror won)`);
 
   // and tapping blank panel clears it again, rather than picking whatever the
