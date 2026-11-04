@@ -101,13 +101,13 @@ machinery moves every color-masked feed at once, so diff the two builds' shapes
 per system, score both against the strokes, and look at the largest movers by
 eye. A total that improves can still hide a route that got worse.
 
-## Rail lines have none of the tables
+## Rail lines have one table
 
 Metro rail goes through `snap_rail`, not the machinery above. There are no
 badges, so no anchors and no `PINNED_ANCHORS`. `OVERRIDE_PATHS` cannot reach it
 either: an override needs the snapped and warped shapes index-aligned, and
-`snap_rail` resamples. That leaves the mask and the pass ladder, so a rail line
-off its drawing is one of three things.
+`snap_rail` resamples. That leaves the mask, the pass ladder and
+`RAIL_LOOPS`, so a rail line off its drawing is one of four things.
 
 - **The mask holds something that is not the ribbon.** `drawn_blobs` drops
   blobs too small to be drawn. This matters more than on a colour mask: the
@@ -121,6 +121,26 @@ off its drawing is one of three things.
 - **A corner is rounded wider than the sheet draws it.** The displacement is
   smoothed along the line, so the corner's radius is the smoothing window's.
   The last and tightest pass of the ladder is what fixes that.
+- **A terminal loop drawn one way round.** The snap puts both directions on
+  the side of the loop the warp is nearer, so one runs it backwards and the
+  far side's stops land on the near side. A `RAIL_LOOPS` row is the loop
+  traced off the stroke and the index of the terminal platform; `rail_loop`
+  splices the arriving half onto the shape that ends there and the leaving
+  half onto the one that starts there. A platform the leaving half passes
+  within `PLATFORM_NEAR` without serving goes in `passes`, or
+  `platform_stops` matches the next stop to it and every stop after shifts
+  by one station.
+
+The mask covers the ribbon's full width, so the snap alone leaves a line on
+whichever edge the warp came from. `centre_rail` then moves it sideways onto
+the line's own PDF stroke (`METRO_RAIL_INK`), on the main map and in the
+call-out. It averages the line first (`deknot`, then `unjitter`) to take out
+the folds the mask snap leaves at platform markers and at the ends of drawn
+ribbons, holds the last `TAIL_MARKER` px of each end, which `square_ends`
+stood in its platform marker, and the shape is not averaged again afterwards,
+since that would cut the inside of each curve. Score a rail line against that stroke,
+not against the mask: the stroke is the centreline, and a shape can sit
+inside the mask while running down the ribbon's edge.
 
 Metrolink is not in this. It snaps through `snap_coherent`, anchored by the line
 name the sheet writes along the track, so both tables reach it. Its passes read
