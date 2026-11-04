@@ -56,6 +56,19 @@ agency's streets, registers here. So a clean score means "on some line this
 agency is drawn in", not "on its own line". path_check catches a subset of the
 rest, by the scar the hop leaves.
 
+--rejoin
+--------
+Keeps the strokes apart. The sheet draws each line as its own stroke, so a path
+that rides a stroke, leaves it by more than --leave px (default 7) and comes
+back to the same stroke within 400 px has cut across something on the way: a
+drawn corner, dip or loop, or a stretch on a neighbouring line of the same ink.
+It lists those stretches instead of the drift ranking, for every agency the PDF
+has strokes for, including the ones snapped on a colour mask.
+
+A route whose drawn line genuinely leaves a stroke and returns to it is listed
+too, as is a route the sheet draws round a loop the feed does not drive. Each
+row is a place to look.
+
 Usage:
     scripts/drift_check.py                    # worst 25, all systems
     scripts/drift_check.py --top 60
@@ -64,6 +77,8 @@ Usage:
     scripts/drift_check.py 180                # every drifting run on one route
     scripts/drift_check.py --px 25            # only gross departures
     scripts/drift_check.py --csv
+    scripts/drift_check.py --rejoin           # chords and hops onto a neighbour
+    scripts/drift_check.py --rejoin --system LADOT --leave 10
 """
 import argparse
 import json
@@ -100,6 +115,39 @@ RAIL_LABELS = {"801": "A", "802": "B", "803": "C",
                "804": "E", "805": "D", "807": "K"}
 
 
+def ink_for(system, label):
+    """(colors, dashed) of the PDF strokes a route is drawn in, or None where
+    the sheet draws it in no vector ink of its own."""
+    import build_data as B
+    if system == "Metro Bus":
+        if label in METRO_UNDRAWN:
+            return None
+        if label in METRO_BUSWAY:
+            return B.BUSWAY_INK, None
+        if label in METRO_JLINE:
+            return B.JLINE_INK, None
+        if label in METRO_RAPID:
+            return B.RAPID_RED_INK, None
+        return B.ORANGE_INK, None
+    if system == "LADOT":
+        # Two stroke styles of one olive: DASH solid, Commuter Express dashed,
+        # and a route measured against the wrong one is measured against another
+        # network entirely. schedule.json doesn't carry the distinction, so it is
+        # read back out of the feed the way build_data reads it. Guessing from
+        # the designation is wrong for the one Commuter Express that isn't
+        # numbered.
+        return B.LADOT_INK, not ladot_is_dash().get(label, True)
+    if system == "Metrolink":
+        return B.RAIL_INK, False
+    if system == "Metro Rail":
+        rid = next((k for k, n in RAIL_LABELS.items() if n == label), None)
+        return (B.METRO_RAIL_INK[rid], None) if rid in B.METRO_RAIL_INK else None
+    feed = next((f for f, n in B.FEED_NAMES.items() if n == system), None)
+    if feed in B.LEGEND_INK:
+        return [B.symbol_ink(feed, label)], None
+    return None
+
+
 def tree_for(system, label, cache, rail_trees):
     """(KD-tree, source) for the ink or mask a route is drawn in.
 
@@ -107,49 +155,147 @@ def tree_for(system, label, cache, rail_trees):
     against a different tree than it was fitted to is measuring the difference
     between the two trees."""
     import build_data as B
-    key = (system, label if system in ("Metro Bus", "LADOT") else "")
+    feed = next((f for f, n in B.FEED_NAMES.items() if n == system), None)
+    on_ink = system in ("Metro Bus", "LADOT", "Metrolink") or (
+        feed in B.INK_SNAP or feed in B.SYMBOL_FEEDS)
+    key = (system, label if on_ink or system == "Metro Rail" else "")
     if key in cache:
         return cache[key]
-    out = (None, "-")
-    if system == "Metro Bus":
-        if label in METRO_UNDRAWN:
-            out = (None, "-")
-        elif label in METRO_BUSWAY:
-            out = (B.ink_tree(B.BUSWAY_INK), "ink")
-        elif label in METRO_JLINE:
-            out = (B.ink_tree(B.JLINE_INK), "ink")
-        elif label in METRO_RAPID:
-            out = (B.ink_tree(B.RAPID_RED_INK), "ink")
-        else:
-            out = (B.ink_tree(B.ORANGE_INK), "ink")
-    elif system == "LADOT":
-        # Two stroke styles of one olive: DASH solid, Commuter Express dashed,
-        # and a route measured against the wrong one is measured against another
-        # network entirely. schedule.json doesn't carry the distinction, so it is
-        # read back out of the feed the way build_data reads it. Guessing from
-        # the designation is wrong for the one Commuter Express that isn't
-        # numbered.
-        out = (B.ink_tree(B.LADOT_INK, dashed=not ladot_is_dash().get(label, True)),
-               "ink")
-    elif system == "Metrolink":
-        out = (B.rail_line_tree(), "ink")
-    elif system == "Metro Rail":
+    if system == "Metro Rail":
         rid = next((k for k, n in RAIL_LABELS.items() if n == label), None)
         out = ((rail_trees or {}).get(rid), "mask" if rid else "-")
+    elif on_ink:
+        spec = ink_for(system, label)
+        # Snapped on the sheet's strokes, so measured on them. A mask is no
+        # use for the INK_SNAP and symbol agencies: it misses the thin parts of
+        # the drawing and holds the grey street lettering instead, and the two
+        # agencies the sheet symbolises have seeds refine_color cannot find
+        # enough of along the drawing to return a reading at all, so the tree
+        # came back None and their rows were dropped before they were scored.
+        out = (B.ink_tree(*spec) if spec else None, "ink" if spec else "-")
     else:
-        feed = next((f for f, n in B.FEED_NAMES.items() if n == system), None)
-        if feed in B.INK_SNAP or feed in B.SYMBOL_FEEDS:
-            # Snapped on the sheet's strokes, so measured on them. A mask is no
-            # use for these agencies: it misses the thin parts of the drawing
-            # and holds the grey street lettering instead, and the two agencies
-            # the sheet symbolises have seeds refine_color cannot find enough of
-            # along the drawing to return a reading at all, so the tree came
-            # back None and their rows were dropped before they were scored.
-            out = (B.ink_tree([B.LEGEND_INK[feed]]), "ink")
-        else:
-            cols = agency_mask_colors(system)
-            out = (B.mask_tree(cols, 30.0) if cols else None, "mask")
+        cols = agency_mask_colors(system)
+        out = (B.mask_tree(cols, 30.0) if cols else None, "mask")
     cache[key] = out
+    return out
+
+
+CONTACT = 2.0     # px; a path this near a stroke is riding it
+RIDE = 12.0       # px of contact before a stroke counts as the line the path is on
+LEAVE = 7.0       # px off that stroke before the stretch between counts
+REJOIN = 400.0    # px of path between leaving a stroke and returning to it
+
+
+_STROKES = {}
+
+
+def stroke_ink(colors, dashed=None):
+    """(points, stroke ids, arc along stroke) for every PDF stroke in `colors`,
+    sampled every 1 px, on the main map.
+
+    The same strokes `pdf_ink` reads, with each point keeping the stroke it
+    came from. The sheet draws each line as its own stroke, so the id tells a
+    route's own line from a neighbour's running a few px away in the same ink,
+    which a distance to the ink cannot."""
+    key = (tuple(map(tuple, colors)), dashed)
+    if key in _STROKES:
+        return _STROKES[key]
+    import fitz
+    import build_data as B
+    page = fitz.open(B.PDF)[0]
+    s = B.map_image()[0].shape[1] / page.rect.width
+    P, ids, arcs = [], [], []
+    for sid, it in enumerate(page.get_drawings()):
+        c = it.get("color")
+        if c is None or not any(sum((a - b) ** 2 for a, b in zip(c, k)) < 1e-4
+                                for k in colors):
+            continue
+        if dashed is not None and ((it.get("dashes") or "[] 0") != "[] 0") != dashed:
+            continue
+        pts = []
+        for seg in it["items"]:
+            if seg[0] == "l":
+                a = np.array([seg[1].x * s, seg[1].y * s])
+                b = np.array([seg[2].x * s, seg[2].y * s])
+                n = max(1, int(np.ceil(np.hypot(*(b - a)))))
+                pts += list(a + (b - a) * np.linspace(0, 1, n + 1)[:, None])
+            elif seg[0] == "c":
+                p = [np.array([q.x * s, q.y * s]) for q in seg[1:5]]
+                t = np.linspace(0, 1, 24)[:, None]
+                pts += list((1 - t) ** 3 * p[0] + 3 * (1 - t) ** 2 * t * p[1]
+                            + 3 * (1 - t) * t ** 2 * p[2] + t ** 3 * p[3])
+        if len(pts) < 2:
+            continue
+        Q = np.asarray(pts, dtype=float)
+        P.append(Q)
+        ids.append(np.full(len(Q), sid))
+        arcs.append(np.concatenate([[0], np.cumsum(np.hypot(*np.diff(Q, axis=0).T))]))
+    if P:
+        P, ids, arcs = np.concatenate(P), np.concatenate(ids), np.concatenate(arcs)
+        keep = B.maskable(P) & ~B.inside_callout(P)
+        P, ids, arcs = P[keep], ids[keep], arcs[keep]
+    else:
+        P, ids, arcs = np.zeros((0, 2)), np.zeros(0, int), np.zeros(0)
+    from scipy.spatial import cKDTree
+    _STROKES[key] = (P, ids, arcs, cKDTree(P) if len(P) else None)
+    return _STROKES[key]
+
+
+def rejoins(pts, ink, contact=CONTACT, ride=RIDE, leave=LEAVE, rejoin=REJOIN):
+    """Stretches where a path leaves a stroke it was riding and comes back to
+    the same stroke a short way on, standing off it in between.
+
+    That is a chord across a drawn corner, dip or loop, or a stretch run on a
+    neighbouring line of the same ink. Both sit on the agency's ink, so the
+    drift measure cannot see them. A route whose drawn line really leaves a
+    stroke and comes back to it, such as two routes parting for a block, is
+    flagged too: each row is a place to look, not a verdict.
+
+    Returns (worst px off the stroke, px of path between, leave xy, rejoin xy,
+    worst xy) per stretch."""
+    P, ids, arcs, tree = ink
+    S = densify(pts, STEP)
+    if tree is None or len(S) < 2:
+        return []
+    dist, j = tree.query(S)
+    on = dist < contact
+    need = int(np.ceil(ride / STEP))
+    out = []
+    by_stroke = {}
+    for k in np.nonzero(on)[0]:
+        by_stroke.setdefault(int(ids[j[k]]), []).append(k)
+    for sid, ks in by_stroke.items():
+        # runs of consecutive samples on this stroke, long enough to be riding it
+        runs, cur = [], [ks[0]]
+        for k in ks[1:]:
+            if k == cur[-1] + 1:
+                cur.append(k)
+            else:
+                runs.append(cur)
+                cur = [k]
+        runs.append(cur)
+        runs = [r for r in runs if len(r) >= need]
+        if len(runs) < 2:
+            continue
+        mine = ids == sid
+        from scipy.spatial import cKDTree
+        own = cKDTree(P[mine])
+        own_arc = arcs[mine]
+        for r0, r1 in zip(runs, runs[1:]):
+            k0, k1 = r0[-1], r1[0]
+            gap = (k1 - k0) * STEP
+            if gap > rejoin:
+                continue
+            d_own, i_own = own.query(S[k0:k1 + 1])
+            # a stroke the path meets far apart along its own length is two
+            # visits to one long line, not one stretch cut short
+            if abs(own_arc[i_own[-1]] - own_arc[i_own[0]]) > 3 * gap + 40:
+                continue
+            m = int(np.argmax(d_own))
+            if d_own[m] < leave:
+                continue
+            out.append((float(d_own[m]), gap, tuple(S[k0]), tuple(S[k1]),
+                        tuple(S[k0 + m])))
     return out
 
 
@@ -275,6 +421,12 @@ def main():
     ap.add_argument("--min-trips", type=int, default=1,
                     help="ignore routes with fewer trips than this")
     ap.add_argument("--csv", action="store_true", help="every row as CSV to stdout")
+    ap.add_argument("--rejoin", action="store_true",
+                    help="list stretches that leave a drawn stroke and come back "
+                         "to the same one (chords, and runs on a neighbour's line)")
+    ap.add_argument("--leave", type=float, default=LEAVE,
+                    help=f"with --rejoin, px off the stroke before a stretch is "
+                         f"listed (default {LEAVE:g})")
     a = ap.parse_args()
 
     if not os.path.exists(SCHEDULE):
@@ -298,6 +450,9 @@ def main():
         sysname = d["systems"][d["routes"][ridx]["sy"]]
         _SHAPES_BY_SYSTEM.setdefault(sysname, []).append(
             [tuple(p) for p in pairs(d["shapes"][si])])
+
+    if a.rejoin:
+        return rejoin_report(d, route_of_shape, trips_per_shape, a)
 
     rail_trees = quietly(load_masks)
     cache, rows, undrawn = {}, [], []
@@ -388,9 +543,55 @@ def main():
           f"Detail: drift_check.py <route>.")
 
 
-# The sheet letters its rail lines; the feed numbers them.
-RAIL_LABELS = {"801": ("A",), "802": ("B",), "803": ("C",),
-               "804": ("E",), "805": ("D",), "807": ("K",)}
+def rejoin_report(d, route_of_shape, trips_per_shape, a):
+    """Print `rejoins` for every selected shape, sharpest first. One row per
+    route and place: the variants of a route usually share a fault, and the
+    row names the variant that stands furthest off."""
+    rows = []
+    for si, ridx in route_of_shape.items():
+        route = d["routes"][ridx]
+        sysname = d["systems"][route["sy"]]
+        if a.system and a.system.lower() not in sysname.lower():
+            continue
+        if a.route and route["n"].lower() != a.route.lower():
+            continue
+        if trips_per_shape.get(si, 0) < a.min_trips:
+            continue
+        spec = ink_for(sysname, route["n"])
+        if spec is None:
+            continue
+        ink = stroke_ink(*spec)
+        pts = np.asarray(d["shapes"][si], dtype=float).reshape(-1, 2)
+        for dev, gap, p0, p1, worst in rejoins(pts, ink, leave=a.leave):
+            rows.append((dev, gap, route["n"], sysname, si, p0, p1, worst))
+    rows.sort(key=lambda r: -r[0])
+    seen, out = set(), []
+    for r in rows:
+        place = (r[2], r[3], round(r[7][0] / 20), round(r[7][1] / 20))
+        if place not in seen:
+            seen.add(place)
+            out.append(r)
+    if a.csv:
+        import csv
+        w = csv.writer(sys.stdout)
+        w.writerow(["route", "system", "shape", "off_px", "gap_px", "leave_x",
+                    "leave_y", "rejoin_x", "rejoin_y", "worst_x", "worst_y"])
+        for dev, gap, n, sy, si, p0, p1, wst in out:
+            w.writerow([n, sy, si, round(dev, 1), round(gap), *(round(v, 1) for v in
+                                                                 (*p0, *p1, *wst))])
+        return
+    print(f"{'rank':>4}  {'route':<7} {'system':<22} {'shape':>5} {'off':>6} "
+          f"{'gap':>5}  leaves -> rejoins            worst")
+    for i, (dev, gap, n, sy, si, p0, p1, wst) in enumerate(out[:a.top], 1):
+        print(f"{i:>4}  {n:<7} {sy[:22]:<22} {si:>5} {dev:>6.1f} {gap:>5.0f}  "
+              f"({p0[0]:.0f},{p0[1]:.0f}) -> ({p1[0]:.0f},{p1[1]:.0f})"
+              f"{'':<8}({wst[0]:.0f},{wst[1]:.0f})")
+    print(f"\n{len(out)} stretches leave a drawn stroke by over {a.leave:g} px and "
+          f"come back to it within {REJOIN:g} px.")
+    print("Most are routes whose drawn line does part from that stroke; look at "
+          "each before fixing it. `shape` indexes schedule.json's shapes, which "
+          "debug_line.py <route> lists beside each variant.")
+
 
 if __name__ == "__main__":
     main()
