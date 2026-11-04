@@ -563,7 +563,11 @@ Four blind spots to know about, since a fix can look like a no-op:
 - `drift_check` scores distance to a colour, so a route sitting on a sibling's
   ink of the same colour scores clean, and so does one covering only part of
   its own drawn line. `cover` against a traced corridor is the measure for
-  both; see "Chasing a divergent path".
+  both; see "Chasing a divergent path". `drift_check --rejoin` finds the
+  first kind where it is local: it keeps each PDF stroke apart and lists
+  stretches that leave a stroke and return to the same one, which is a chord
+  or a hop onto a neighbour. Most rows are routes whose drawing does that, so
+  review each over the tiles before fixing it.
 - `path_check` scores by straightness, so a smoothly cut corner scores zero,
   and putting a shape back onto a corner it was cutting scores worse. An
   out-and-back whose legs both sit on one drawn line is a true fold where the
