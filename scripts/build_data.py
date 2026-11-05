@@ -8794,9 +8794,10 @@ OVERRIDE_PATHS = {
         "exact": True,
         "box": (2853, 1822, 2992, 1916),
         "path": [
-            (2880.4, 1934.5), (2918.5, 1868.6), (2955.6, 1868.8), (2955.8, 1892.2),
-            (2956.2, 1894.3), (2957.5, 1896.2), (2959.4, 1897.4), (2961.2, 1897.7),
-            (2988.7, 1897.7),
+            (2880.4, 1934.5), (2918.7, 1868.3), (2921.0, 1864.5), (2922.2, 1863.2),
+            (2923.7, 1862.1), (2926.2, 1860.9), (2927.9, 1860.5), (2953.5, 1860.5),
+            (2955.0, 1861.5), (2955.6, 1863.5), (2955.8, 1892.2), (2956.2, 1894.3),
+            (2957.5, 1896.2), (2959.4, 1897.4), (2961.2, 1897.7), (2988.7, 1897.7),
         ],
     }],
     ("ladot", "572"): {
@@ -11612,6 +11613,147 @@ def square_ends(P, tree):
 
 HAND_TOL = 0.4    # px; simplify tolerance inside an `exact` override path
 
+# Feeds whose fitted shapes are moved onto their own PDF strokes as the last
+# step. The sheet rounds each corner on a radius of about 5 px, and the fit
+# cuts across it on a chord, so the vehicle turns early and the line shows a
+# corner the drawing does not have. Seating puts the corner back on the curve.
+SEAT_FEEDS = {"foothill"}
+SEAT_REACH = 6.0      # px a point may move onto a stroke. Under the ~10 px
+                      # between neighbouring drawn lines, so a point is never
+                      # carried onto the next street.
+SEAT_ALIGN = 0.6      # |cos| between the shape's heading and the stroke's
+                      # below which the stroke is not the shape's own line.
+                      # Rejects a street crossing at a junction.
+SEAT_SWITCH = 4.0     # px of nearness a change of stroke costs, so a run
+                      # between two drawn lines a few px apart can't alternate.
+SEAT_HEAD = 3.0       # px of line either side a point's heading is read over.
+                      # Points bunched at a terminal have no heading of their own.
+SEAT_STEP = 2.0       # px between points before seating. The fit can turn a
+                      # corner in one step of 10 px or more, which leaves no
+                      # point inside the curve to put on it.
+_SEAT_INK = {}
+
+
+def densify_pair(full, base, flags, step):
+    """`full` and `base` with points added where `full` steps further than
+    `step`, at the same fractions of the step on both, so they stay index for
+    index. `flags` (None for all False) is carried to the added points from
+    the step's start."""
+    F = np.asarray(full, dtype=float)
+    Bs = np.asarray(base, dtype=float)
+    fl = np.zeros(len(F), bool) if flags is None else np.asarray(flags, bool)
+    n = np.maximum(1, np.ceil(np.hypot(*np.diff(F, axis=0).T) / step).astype(int))
+    t = np.concatenate([np.arange(k) / k for k in n] + [[0.0]])
+    i = np.concatenate([np.full(k, a) for a, k in enumerate(n)] + [[len(F) - 1]])
+    nxt = np.minimum(i + 1, len(F) - 1)
+    w = t[:, None]
+    return (F[i] * (1 - w) + F[nxt] * w, Bs[i] * (1 - w) + Bs[nxt] * w, fl[i].copy())
+
+
+def stroke_tangents(color, step=0.5):
+    """(points, unit tangents, stroke ids) along every PDF stroke of `color`,
+    in map px, less the regions the masks skip."""
+    key = tuple(color)
+    if key in _SEAT_INK:
+        return _SEAT_INK[key]
+    import fitz
+    page = fitz.open(PDF)[0]
+    s = map_image()[0].shape[1] / page.rect.width
+    P, T, S = [], [], []
+    for sid, it in enumerate(page.get_drawings()):
+        c = it.get("color")
+        if c is None or sum((a - b) ** 2 for a, b in zip(c, color)) >= 1e-4:
+            continue
+        for seg in it["items"]:
+            if seg[0] == "l":
+                q = np.array([(seg[1].x * s, seg[1].y * s), (seg[2].x * s, seg[2].y * s)])
+            elif seg[0] == "c":
+                b = [np.array([v.x * s, v.y * s]) for v in seg[1:5]]
+                t = np.linspace(0, 1, 24)[:, None]
+                q = ((1 - t) ** 3 * b[0] + 3 * (1 - t) ** 2 * t * b[1]
+                     + 3 * (1 - t) * t ** 2 * b[2] + t ** 3 * b[3])
+            else:
+                continue
+            d = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(q, axis=0).T))])
+            if d[-1] < 1e-6:
+                continue
+            u = np.linspace(0, d[-1], max(2, int(d[-1] / step) + 1))
+            pts = np.c_[np.interp(u, d, q[:, 0]), np.interp(u, d, q[:, 1])]
+            tg = np.gradient(pts, axis=0)
+            tg /= np.maximum(np.hypot(*tg.T), 1e-9)[:, None]
+            P.append(pts)
+            T.append(tg)
+            S.append(np.full(len(pts), sid))
+    P, T, S = np.vstack(P), np.vstack(T), np.concatenate(S)
+    keep = maskable(P) & ~inside_callout(P)
+    _SEAT_INK[key] = (P[keep], T[keep], S[keep], cKDTree(P[keep]))
+    return _SEAT_INK[key]
+
+
+def seat_on_strokes(full, color, skip=None):
+    """`full` with each point moved onto a stroke of `color` that runs the way
+    the shape does there, index for index. The stroke for each run of points
+    is chosen by Viterbi, nearness against SEAT_SWITCH per change of stroke,
+    so a run between two drawn lines a few px apart keeps to one of them.
+    Points further than SEAT_REACH from any such stroke, and points in `skip`,
+    stay put and end the run."""
+    P, T, S, tree = stroke_tangents(color)
+    F = np.asarray(full, dtype=float)
+    n = len(F)
+    arc = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(F, axis=0).T))])
+    ahead = np.c_[np.interp(np.minimum(arc + SEAT_HEAD, arc[-1]), arc, F[:, 0]),
+                  np.interp(np.minimum(arc + SEAT_HEAD, arc[-1]), arc, F[:, 1])]
+    behind = np.c_[np.interp(np.maximum(arc - SEAT_HEAD, 0), arc, F[:, 0]),
+                   np.interp(np.maximum(arc - SEAT_HEAD, 0), arc, F[:, 1])]
+    head = ahead - behind
+    head /= np.maximum(np.hypot(*head.T), 1e-9)[:, None]
+    d, j = tree.query(F, k=32, distance_upper_bound=SEAT_REACH)
+    cands = []
+    for i in range(n):
+        best = {}
+        if skip is None or not skip[i]:
+            for dd, jj in zip(d[i], j[i]):
+                if not np.isfinite(dd):
+                    break
+                if abs(T[jj] @ head[i]) >= SEAT_ALIGN and S[jj] not in best:
+                    best[S[jj]] = (dd, jj)
+        cands.append(best)
+    out = F.copy()
+    i = 0
+    while i < n:
+        if not cands[i]:
+            i += 1
+            continue
+        e = i
+        while e + 1 < n and cands[e + 1]:
+            e += 1
+        cost = {s: c[0] for s, c in cands[i].items()}
+        back = [{}]
+        for k in range(i + 1, e + 1):
+            low = min(cost, key=cost.get)
+            new, frm = {}, {}
+            for s, (dd, _) in cands[k].items():
+                stay = cost.get(s, np.inf)
+                if stay <= cost[low] + SEAT_SWITCH:
+                    new[s], frm[s] = stay + dd, s
+                else:
+                    new[s], frm[s] = cost[low] + SEAT_SWITCH + dd, low
+            cost = new
+            back.append(frm)
+        s = min(cost, key=cost.get)
+        for k in range(e, i - 1, -1):
+            out[k] = P[cands[k][s][1]]
+            if k > i:
+                s = back[k - i][s]
+        # The nearest point on a stroke can lie behind the previous one where
+        # the fit bunches points or two stroke pieces overlap at a join. A
+        # point that would step back holds where the last one is instead.
+        for k in range(i + 1, e + 1):
+            if (out[k] - out[k - 1]) @ head[k] < 0:
+                out[k] = out[k - 1]
+        i = e + 1
+    return out
+
 
 def simplify(pts, tol=1.2, mask=False):
     """Douglas-Peucker. With mask=True also returns which points survived, so
@@ -12941,6 +13083,11 @@ def build_schedule(feeds):
                     full = np.asarray(apply_override(full, base, spec, sid), dtype=float)
                     if spec.get("exact"):
                         hand |= np.any(full != before, axis=1)
+            if feed in SEAT_FEEDS and len(full) == len(base):
+                full, base, hand = densify_pair(full, base, hand, SEAT_STEP)
+                prior = full.copy()
+                full = seat_on_strokes(full, LEGEND_INK[feed], skip=hand)
+                hand |= np.hypot(*(full - prior).T) > 0.3
             if len(full) == len(base):
                 stored, keep = simplify(full, mask=True)
                 if hand is not None and hand.any():

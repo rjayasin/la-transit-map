@@ -223,6 +223,17 @@ place. Check it before rebuilding rather than after.
 Snapping strategy per agency is set by the `STREET_SNAP` / `INK_SNAP` /
 `SYMBOL_FEEDS` sets and `DRAWN_COLORS`.
 
+A feed in `SEAT_FEEDS` gets one more step after its overrides:
+`seat_on_strokes` moves each point onto the nearest stroke of the feed's
+`LEGEND_INK` that runs the same way, within `SEAT_REACH`, so corners follow
+the sheet's curves instead of the fit's chords. The shape and warp are first
+densified together to `SEAT_STEP`, since the fit can cross a corner in one
+step. A Viterbi pass picks the stroke for each run so a shape between two
+lines a few px apart doesn't alternate, and points on an `exact` override are
+left alone. It can't move a stretch further than `SEAT_REACH` off the drawing.
+That stays a case for an override, and seating the points on either side of
+it makes the stretch show up in `drift_check --rejoin`.
+
 A route's drawn line is not one stroke. The PDF splits it at corners and where
 another line crosses, and the pieces stop a few px short of each other, so
 chaining strokes end to end reads the line far shorter than it is. A loop can
