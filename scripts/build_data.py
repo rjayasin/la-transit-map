@@ -11626,19 +11626,27 @@ SEAT_ALIGN = 0.6      # |cos| between the shape's heading and the stroke's
                       # Rejects a street crossing at a junction.
 SEAT_SWITCH = 4.0     # px of nearness a change of stroke costs, so a run
                       # between two drawn lines a few px apart can't alternate.
+SEAT_FOLD = 24.0      # px of line, out and back, within which a retrace is
+                      # dropped. The drawn spurs routes run out and back
+                      # along are 40 px and longer.
 SEAT_HEAD = 3.0       # px of line either side a point's heading is read over.
                       # Points bunched at a terminal have no heading of their own.
-SEAT_STEP = 2.0       # px between points before seating. The fit can turn a
+SEAT_STEP = 1.0       # px between points before seating. The fit can turn a
                       # corner in one step of 10 px or more, which leaves no
-                      # point inside the curve to put on it.
+                      # point inside the curve to put on it, and a 5 px
+                      # radius needs about 8 points to read as a curve.
+SEAT_TOL = 0.1        # px; simplify tolerance for points seated on a stroke.
+                      # Straight strokes still reduce to their ends, and a
+                      # 5 px corner keeps a vertex every 15 degrees or so.
+                      # At 1.2 px a corner stores as one diagonal.
 _SEAT_INK = {}
 
 
 def densify_pair(full, base, flags, step):
     """`full` and `base` with points added where `full` steps further than
     `step`, at the same fractions of the step on both, so they stay index for
-    index. `flags` (None for all False) is carried to the added points from
-    the step's start."""
+    index. `flags` (None for all False; one column or several) is carried to
+    the added points from the step's start."""
     F = np.asarray(full, dtype=float)
     Bs = np.asarray(base, dtype=float)
     fl = np.zeros(len(F), bool) if flags is None else np.asarray(flags, bool)
@@ -11690,13 +11698,14 @@ def stroke_tangents(color, step=0.5):
     return _SEAT_INK[key]
 
 
-def seat_on_strokes(full, color, skip=None):
-    """`full` with each point moved onto a stroke of `color` that runs the way
-    the shape does there, index for index. The stroke for each run of points
+def seat_on_strokes(full, color, skip=None, drawn=None):
+    """(`full` with each point moved onto a stroke of `color` that runs the
+    way the shape does there, index for index; which points were placed). The stroke for each run of points
     is chosen by Viterbi, nearness against SEAT_SWITCH per change of stroke,
     so a run between two drawn lines a few px apart keeps to one of them.
     Points further than SEAT_REACH from any such stroke, and points in `skip`,
-    stay put and end the run."""
+    stay put and end the run. A retrace through a point in `drawn` (an
+    override's path) is the sheet's own spur and is kept."""
     P, T, S, tree = stroke_tangents(color)
     F = np.asarray(full, dtype=float)
     n = len(F)
@@ -11719,6 +11728,7 @@ def seat_on_strokes(full, color, skip=None):
                     best[S[jj]] = (dd, jj)
         cands.append(best)
     out = F.copy()
+    placed = np.array([bool(c) for c in cands])
     i = 0
     while i < n:
         if not cands[i]:
@@ -11745,14 +11755,38 @@ def seat_on_strokes(full, color, skip=None):
             out[k] = P[cands[k][s][1]]
             if k > i:
                 s = back[k - i][s]
-        # The nearest point on a stroke can lie behind the previous one where
-        # the fit bunches points or two stroke pieces overlap at a join. A
-        # point that would step back holds where the last one is instead.
-        for k in range(i + 1, e + 1):
-            if (out[k] - out[k - 1]) @ head[k] < 0:
-                out[k] = out[k - 1]
         i = e + 1
-    return out
+    # The nearest point on a stroke can lie behind the previous one where the
+    # fit bunches points or two stroke pieces overlap at a join, and a point
+    # left where the fit put it can lie behind a seated neighbour. A point
+    # that would step back next to a seated one holds where the last one is.
+    for k in range(1, n):
+        if (placed[k] or placed[k - 1]) and (out[k] - out[k - 1]) @ head[k] < 0:
+            out[k] = out[k - 1]
+    # The fit sometimes runs a few px along a drawn line and straight back, as
+    # where a feed loops through a parking lot the sheet draws as one point.
+    # Seated, that is an exact retrace and the vehicle visibly reverses. An
+    # excursion that leaves a seated point and returns to it within SEAT_FOLD
+    # px of line holds at that point instead.
+    step = np.concatenate([[0], np.hypot(*np.diff(out, axis=0).T)])
+    i = 0
+    while i < n:
+        j, arc, far, end = i, 0.0, 0.0, -1
+        while j + 1 < n and arc + step[j + 1] <= SEAT_FOLD:
+            j += 1
+            arc += step[j]
+            gap = math.dist(out[i], out[j])
+            far = max(far, gap)
+            if drawn is not None and drawn[j]:
+                break
+            if placed[i] and placed[j] and gap <= 0.75 and far >= 2.0:
+                end = j
+        if end > i:
+            out[i + 1:end + 1] = out[i]
+            i = end
+        else:
+            i += 1
+    return out, placed
 
 
 def simplify(pts, tol=1.2, mask=False):
@@ -13076,23 +13110,33 @@ def build_schedule(feeds):
                 full, base = follow_stroke_network(
                     full, base, pdf_ink([LEGEND_INK[feed]], step=0.5))
                 hand = np.ones(len(full), bool)
+            drawn = None
             if override is not None and len(full) == len(base):
                 hand = np.zeros(len(full), bool)
+                drawn = np.zeros(len(full), bool)
                 for spec in (override if isinstance(override, list) else [override]):
                     before = np.array(full, dtype=float)
                     full = np.asarray(apply_override(full, base, spec, sid), dtype=float)
+                    moved = np.any(full != before, axis=1)
+                    drawn |= moved
                     if spec.get("exact"):
-                        hand |= np.any(full != before, axis=1)
+                        hand |= moved
+            seated = None
             if feed in SEAT_FEEDS and len(full) == len(base):
-                full, base, hand = densify_pair(full, base, hand, SEAT_STEP)
-                prior = full.copy()
-                full = seat_on_strokes(full, LEGEND_INK[feed], skip=hand)
-                hand |= np.hypot(*(full - prior).T) > 0.3
+                n0 = len(full)
+                flags = np.c_[np.zeros(n0, bool) if hand is None else hand,
+                              np.zeros(n0, bool) if drawn is None else drawn]
+                full, base, flags = densify_pair(full, base, flags, SEAT_STEP)
+                hand = flags[:, 0]
+                full, seated = seat_on_strokes(full, LEGEND_INK[feed], skip=hand,
+                                               drawn=flags[:, 1])
             if len(full) == len(base):
                 stored, keep = simplify(full, mask=True)
                 if hand is not None and hand.any():
                     keep |= simplify(full, tol=HAND_TOL, mask=True)[1] & hand
-                    stored = full[keep]
+                if seated is not None and seated.any():
+                    keep |= simplify(full, tol=SEAT_TOL, mask=True)[1] & seated
+                stored = full[keep]
                 cb = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(base, axis=0).T))])
                 shape_param[(feed, sid)] = (base, cb, cb[keep])
             elif centred:
