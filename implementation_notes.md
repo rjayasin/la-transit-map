@@ -431,13 +431,31 @@ directly: build it for every shape of the route, take the indices inside the
 box, and split them into contiguous runs. One run per shape and the box is
 clean; two runs mean a second pass, and everything between them goes.
 
-The other is what the splice meets, which nothing prints. Wrap `apply_override`
-before calling `main(["--only", feed, "--no-cache"])`, and have the wrapper report `lo`,
-`hi`, `full[lo-1]` and `path[0]` for each shape. `full[lo-1]` is the snapped
-point the hand-drawn path has to continue from: a few px and the edge holds,
-tens of px and it is in the wrong place. Read both shapes' `lo` in the same
-run. Where they disagree by more than a few px the edge is not in a straight
-stretch yet.
+The other is what the splice meets: `full[lo-1]`, the snapped point the
+hand-drawn path has to continue from. A few px and the edge holds, tens of px
+and it is in the wrong place. Read every shape's in the same run. Where they
+disagree by more than a few px the edge is not in a straight stretch yet.
+
+`scripts/override_probe.py` takes both measurements. `fit FEED` refits the feed
+with `apply_override` wrapped and records each GTFS shape's warp and snapped
+points, before and after the feed's overrides, to `scratch/probe_FEED.pkl`;
+the other subcommands read it and refit when `build_data.py` is newer.
+
+```sh
+P=".venv/bin/python scripts/override_probe.py"
+$P shapes foothill 488                        # variants: shape id, schedule index, ends
+$P where foothill 488 3080,1780,3200,1830     # snapped runs in a map box, and the warp under them
+$P box foothill 488 3060,1640,3200,1830       # warp runs in a box, and the points either side
+$P strokes foothill 3080,1780,3200,1830       # the agency's PDF strokes in a box
+$P trace foothill 3175.4,1636 3175.4,1798 3033,1805.2   # a path walked along those strokes
+$P crop out.jpg 3060,1680,3220,1850 --shapes 1001       # bare artwork beside the path drawn on it
+```
+
+`where` turns a fault seen on the map into a box, since the box is matched
+against the warp and not against the snapped shape. `trace` takes a point at
+each end and one wherever the walk could turn onto a crossing stroke. It hops
+gaps between stroke pieces up to `--gap` px, so keep that near 2 where another
+line passes close by.
 
 The two directions of a route can disagree by several px of *along-line*
 position at the same box edge, because each snap distributes the sheet's
