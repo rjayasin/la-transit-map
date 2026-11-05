@@ -45,6 +45,21 @@ function fitView(mw, mh) {
   view.x = (mw - W / view.k) / 2;
   view.y = (mh - H / view.k) / 2;
 }
+// Keep the map on screen. Zoomed in, a map edge may come at most PAN_MARGIN of
+// the viewport inside the screen edge. Zoomed out far enough that the map fits
+// with that margin, the whole map stays on screen. Without this, a pan can
+// leave only empty background in view.
+const PAN_MARGIN = 0.25;
+function clampAxis(v, span, size) {
+  const m = PAN_MARGIN * span;
+  const lo = Math.min(-m, size - span), hi = Math.max(size - span + m, 0);
+  return Math.min(hi, Math.max(lo, v));
+}
+function clampView() {
+  if (!map) return;
+  view.x = clampAxis(view.x, W / view.k, map.width);
+  view.y = clampAxis(view.y, H / view.k, map.height);
+}
 
 // ---- state ----
 let map = null, data = null;
@@ -2514,6 +2529,7 @@ function drawFrame(now) {
   stepFlight(now);
   stepFling(now);
   stepFollow(now);
+  clampView();
   // Whether tiles may be fetched this frame; see getTile. Decided once, here,
   // so every lookup in the frame agrees, and so the moment the view lands can be
   // seen: nothing has changed at that instant, so composeBackground would skip,
