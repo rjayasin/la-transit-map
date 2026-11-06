@@ -233,9 +233,13 @@ step, and seated points are stored at `SEAT_TOL` so a corner keeps its curve
 instead of reducing to one diagonal. A retrace shorter than `SEAT_FOLD` is
 dropped unless an override drew both its start and its turn. A Viterbi pass picks the stroke for each run so a shape between two
 lines a few px apart doesn't alternate, and points on an `exact` override are
-left alone. It can't move a stretch further than `SEAT_REACH` off the drawing.
-That stays a case for an override, and seating the points on either side of
-it makes the stretch show up in `drift_check --rejoin`.
+left alone. A stretch further than `SEAT_REACH` off the drawing but seated at
+both ends is replaced by the walk along the strokes between those ends
+(`seat_gaps`), if the walk is no longer than `WALK_STRETCH` times the stretch
+plus `WALK_SLACK` and stays within `WALK_NEAR` px of it. A stretch with no such
+walk, or one at a route's end, stays a case for an override, and shows up in
+`drift_check --rejoin`. The walk's constants are named `WALK_*` because
+`SEAT_SPAN`, `SEAT_CAP` and `SEAT_PASSES` already belong to `unjitter`.
 
 A route's drawn line is not one stroke. The PDF splits it at corners and where
 another line crosses, and the pieces stop a few px short of each other, so

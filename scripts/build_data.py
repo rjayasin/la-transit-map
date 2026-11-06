@@ -8902,6 +8902,18 @@ OVERRIDE_PATHS = {
             (958.5, 2032.5), (959.3, 2029.9),
         ],
     },
+    ("bigbluebus", "4105"): {           # Big Blue Bus 8
+        "box": (946.0, 1896.0, 1064.0, 2068.0),
+        "exact": True,
+        "path": [
+            (963.7, 2092.3), (966.7, 2090.7), (977.6, 2071.7), (979.3, 2068.1),
+            (980.1, 2065.2), (980.4, 2062.1), (980.5, 2047.4), (980.7, 2046.5),
+            (981.6, 2045.7), (982.9, 2045.6), (983.9, 2046.5), (1005.0, 2082.9),
+            (1007.0, 2084.5), (1008.5, 2085.0), (1010.2, 2085.1), (1012.8, 2084.3),
+            (1085.5, 2042.2), (1087.4, 2040.4), (1088.3, 2038.1), (1088.4, 2036.4),
+            (1088.0, 2034.8), (1084.6, 2028.7), (1001.9, 1884.2),
+        ],
+    },
     ("foothill", "20281"): [{
         "shape_ids": ("22804_shp-v4E-a2", "22822_shp-v4E-a2"),
         "forward": True,
@@ -11787,7 +11799,30 @@ SEAT_TOL = 0.1        # px; simplify tolerance for points seated on a stroke.
                       # Straight strokes still reduce to their ends, and a
                       # 5 px corner keeps a vertex every 15 degrees or so.
                       # At 1.2 px a corner stores as one diagonal.
+WALK_BRIDGE = 6.0     # px a stroke end is joined across to the next stroke in
+                      # the walk between seated runs. The PDF stops a line's
+                      # pieces a few px short of each other at corners and
+                      # crossings; neighbouring drawn lines stand ~10 px apart.
+WALK_STRETCH = 2.2    # a walk along the strokes up to this many times the
+WALK_SLACK = 20.0     # unseated run's length, plus this many px, replaces it.
+WALK_NEAR = 40.0      # px the walk may stand from the run it replaces. Keeps a
+                      # walk on a shared ink from taking another line's street.
+WALK_SPAN = 400.0     # px of run the walk may replace; longer is a stretch the
+                      # sheet draws elsewhere or not at all.
+WALK_OFF = 3.0        # px off the strokes a run must reach before it is walked.
+                      # A run nearer than that is a seated corner the alignment
+                      # test broke up, and the walk would cut across it.
+WALK_FOLD = 60.0      # px of line, out and back, within which a retrace that
+                      # a walk took part in is dropped. A walk can visit a
+                      # point the fit seated on a crossing stroke and come
+                      # back; drawn spurs run 40 px out and further.
+WALK_BACK = 2.0       # px; see the hold after the walk in seat_on_strokes.
+WALK_ISLAND = 6.0     # px; a seated run shorter than this with unseated points
+                      # either side is where the fit crossed another stroke,
+                      # and is walked over. As an end, the walk would visit it
+                      # and come back, a spur the drawing does not have.
 _SEAT_INK = {}
+_SEAT_GRAPH = {}
 
 
 def densify_pair(full, base, flags, step):
@@ -11848,6 +11883,67 @@ def stroke_tangents(colors, dashed=None, step=0.5):
     keep = maskable(P) & ~inside_callout(P)
     _SEAT_INK[key] = (P[keep], T[keep], S[keep], cKDTree(P[keep]))
     return _SEAT_INK[key]
+
+
+def seat_graph(ink):
+    """(nodes, KD-tree, graph) over the strokes of `ink`, as stroke_graph."""
+    key = (tuple(map(tuple, ink[0])), ink[1])
+    if key not in _SEAT_GRAPH:
+        _SEAT_GRAPH[key] = stroke_graph(stroke_tangents(*ink)[0], cell=0.5, r=0.75,
+                                        bridge=WALK_BRIDGE)
+    return _SEAT_GRAPH[key]
+
+
+def seat_gaps(out, placed, hold, ink):
+    """Each run of unseated points between two seated ones, replaced by the
+    walk along the strokes between them where that walk is no longer than
+    WALK_STRETCH times the run plus WALK_SLACK and stays within WALK_NEAR px
+    of it. The fit cuts across a drawn corner or dip further than SEAT_REACH
+    on a chord, and seating alone leaves the chord between two seated ends.
+    A run holding a point in `hold` is kept. Returns which points were walked."""
+    walked = np.zeros(len(out), bool)
+    end = placed.copy()
+    k = 0
+    while k < len(out):
+        if not placed[k]:
+            k += 1
+            continue
+        j = k
+        while j + 1 < len(out) and placed[j + 1]:
+            j += 1
+        if (k > 0 and j + 1 < len(out)
+                and np.hypot(*np.diff(out[k:j + 1], axis=0).T).sum() < WALK_ISLAND):
+            end[k:j + 1] = False
+        k = j + 1
+    idx = np.where(end)[0]
+    nodes = tree = G = None
+    for a, b in zip(idx, idx[1:]):
+        if b - a < 2 or hold[a + 1:b].any():
+            continue
+        run = out[a:b + 1]
+        arc = np.hypot(*np.diff(run, axis=0).T).sum()
+        if arc > WALK_SPAN:
+            continue
+        if nodes is None:
+            nodes, tree, G = seat_graph(ink)
+        if tree.query(run)[0].max() <= WALK_OFF:
+            continue
+        na, nb = tree.query(out[a])[1], tree.query(out[b])[1]
+        D, pred = dijkstra(G, indices=[na], limit=WALK_STRETCH * arc + WALK_SLACK,
+                           return_predecessors=True)
+        if not np.isfinite(D[0][nb]):
+            continue
+        path = [nb]
+        while path[-1] != na:
+            path.append(pred[0][path[-1]])
+        pl = np.vstack([out[a][None], nodes[path[::-1]], out[b][None]])
+        if cKDTree(densify([tuple(q) for q in run], 1.0)).query(pl)[0].max() > WALK_NEAR:
+            continue
+        cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(pl, axis=0).T))])
+        t = np.linspace(0, cum[-1], b - a + 1)
+        out[a:b + 1] = np.c_[np.interp(t, cum, pl[:, 0]), np.interp(t, cum, pl[:, 1])]
+        walked[a + 1:b] = True
+    return walked
 
 
 def seat_on_strokes(full, ink, skip=None, drawn=None):
@@ -11911,13 +12007,36 @@ def seat_on_strokes(full, ink, skip=None, drawn=None):
             if k > i:
                 s = back[k - i][s]
         i = e + 1
+    hold = np.zeros(n, bool)
+    for h in (skip, drawn):
+        if h is not None:
+            hold |= np.asarray(h, bool)
+    walked = seat_gaps(out, placed, hold, ink)
     # The nearest point on a stroke can lie behind the previous one where the
     # fit bunches points or two stroke pieces overlap at a join, and a point
     # left where the fit put it can lie behind a seated neighbour. A point
     # that would step back next to a seated one holds where the last one is.
+    # A walk follows the strokes, not the fit's heading, and is left alone.
     for k in range(1, n):
-        if (placed[k] or placed[k - 1]) and (out[k] - out[k - 1]) @ head[k] < 0:
+        if (not walked[k] and (placed[k] or placed[k - 1])
+                and (out[k] - out[k - 1]) @ head[k] < 0):
             out[k] = out[k - 1]
+    # Where a walk meets the seated points at its ends, the nearest stroke
+    # node can lie a fraction of a px behind them, and the path steps back.
+    # Near a walk, a step under WALK_BACK px against the last direction of
+    # travel holds where the last point is.
+    near = ndi.binary_dilation(walked, iterations=3)
+    last = None
+    for k in range(1, n):
+        d = out[k] - out[k - 1]
+        L = math.hypot(*d)
+        if L < 1e-9:
+            continue
+        if near[k] and last is not None and d @ last < 0 and L < WALK_BACK:
+            out[k] = out[k - 1]
+            continue
+        last = d
+    placed |= walked
     # The fit sometimes runs a few px along a drawn line and straight back, as
     # where a feed loops through a parking lot the sheet draws as one point.
     # Seated, that is an exact retrace and the vehicle visibly reverses. An
@@ -11927,14 +12046,15 @@ def seat_on_strokes(full, ink, skip=None, drawn=None):
     i = 0
     while i < n:
         j, arc, far, end = i, 0.0, 0.0, -1
-        while j + 1 < n and arc + step[j + 1] <= SEAT_FOLD:
+        while j + 1 < n and arc + step[j + 1] <= WALK_FOLD:
             j += 1
             arc += step[j]
             gap = math.dist(out[i], out[j])
             far = max(far, gap)
             if drawn is not None and drawn[i] and drawn[j]:
                 break
-            if placed[i] and placed[j] and gap <= 0.75 and far >= 2.0:
+            if (placed[i] and placed[j] and gap <= 0.75 and far >= 2.0
+                    and (arc <= SEAT_FOLD or walked[i:j + 1].any())):
                 end = j
         if end > i:
             out[i + 1:end + 1] = out[i]
