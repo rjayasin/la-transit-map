@@ -11764,7 +11764,7 @@ HAND_TOL = 0.4    # px; simplify tolerance inside an `exact` override path
 # step. The sheet rounds each corner on a radius of about 5 px, and the fit
 # cuts across it on a chord, so the vehicle turns early and the line shows a
 # corner the drawing does not have. Seating puts the corner back on the curve.
-SEAT_FEEDS = {"foothill"}
+SEAT_FEEDS = {"foothill", "gtfs_bus"}
 SEAT_REACH = 6.0      # px a point may move onto a stroke. Under the ~10 px
                       # between neighbouring drawn lines, so a point is never
                       # carried onto the next street.
@@ -11805,10 +11805,11 @@ def densify_pair(full, base, flags, step):
     return (F[i] * (1 - w) + F[nxt] * w, Bs[i] * (1 - w) + Bs[nxt] * w, fl[i].copy())
 
 
-def stroke_tangents(color, step=0.5):
-    """(points, unit tangents, stroke ids) along every PDF stroke of `color`,
-    in map px, less the regions the masks skip."""
-    key = tuple(color)
+def stroke_tangents(colors, dashed=None, step=0.5):
+    """(points, unit tangents, stroke ids) along every PDF stroke in one of
+    `colors`, in map px, less the regions the masks skip. `dashed` picks the
+    stroke style as in pdf_ink."""
+    key = (tuple(map(tuple, colors)), dashed)
     if key in _SEAT_INK:
         return _SEAT_INK[key]
     import fitz
@@ -11817,7 +11818,10 @@ def stroke_tangents(color, step=0.5):
     P, T, S = [], [], []
     for sid, it in enumerate(page.get_drawings()):
         c = it.get("color")
-        if c is None or sum((a - b) ** 2 for a, b in zip(c, color)) >= 1e-4:
+        if c is None or not any(sum((a - b) ** 2 for a, b in zip(c, k)) < 1e-4
+                                for k in colors):
+            continue
+        if dashed is not None and ((it.get("dashes") or "[] 0") != "[] 0") != dashed:
             continue
         for seg in it["items"]:
             if seg[0] == "l":
@@ -11845,15 +11849,16 @@ def stroke_tangents(color, step=0.5):
     return _SEAT_INK[key]
 
 
-def seat_on_strokes(full, color, skip=None, drawn=None):
-    """(`full` with each point moved onto a stroke of `color` that runs the
+def seat_on_strokes(full, ink, skip=None, drawn=None):
+    """(`full` with each point moved onto a stroke of `ink`, (colors, dashed),
+    that runs the
     way the shape does there, index for index; which points were placed). The stroke for each run of points
     is chosen by Viterbi, nearness against SEAT_SWITCH per change of stroke,
     so a run between two drawn lines a few px apart keeps to one of them.
     Points further than SEAT_REACH from any such stroke, and points in `skip`,
     stay put and end the run. A retrace through a point in `drawn` (an
     override's path) is the sheet's own spur and is kept."""
-    P, T, S, tree = stroke_tangents(color)
+    P, T, S, tree = stroke_tangents(*ink)
     F = np.asarray(full, dtype=float)
     n = len(F)
     arc = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(F, axis=0).T))])
@@ -12878,6 +12883,7 @@ def build_schedule(feeds):
             # _ink_vouches, which reads it far enough out along the run that a
             # mask's label-shaped holes cannot answer for the whole of it.
             line_ink = None
+            seat_ink = None             # (colors, dashed) seat_on_strokes uses
             rid = route_by_shape.get(sid)
             shape_route[(feed, sid)] = (rid or "").split("-")[0]
             toks = badge_tokens.get(rid, set())
@@ -12918,9 +12924,10 @@ def build_schedule(feeds):
                     # Snap on the strokes, anchor on the pixels. The badges are
                     # chips filled with the line color, not strokes of it, so
                     # they stand on the mask and not on the ink.
-                    ink = ink_tree(JLINE_INK if rid0 == "910" else
-                                   BUSWAY_INK if busway else
-                                   RAPID_RED_INK if cols == [RAPID_RED] else ORANGE_INK)
+                    seat_ink = (JLINE_INK if rid0 == "910" else
+                                BUSWAY_INK if busway else
+                                RAPID_RED_INK if cols == [RAPID_RED] else ORANGE_INK, None)
+                    ink = ink_tree(seat_ink[0])
                     # The busway is pinned by station names beside the ribbon
                     # rather than by badges on it, so it has no use for a mask
                     # and every use for being rid of one: on the raster its
@@ -13129,6 +13136,7 @@ def build_schedule(feeds):
                 shape_isnap[(feed, sid)] = (good, 30.0, toks)
                 if feed in LEGEND_INK:
                     shape_iink[(feed, sid)] = [([LEGEND_INK[feed]], None)]
+                    seat_ink = ([LEGEND_INK[feed]], None)
             elif feed in STREET_SNAP:
                 # No livery, so no anchors either: the sheet prints "PT" beside
                 # the street, never a route number, so there is nothing to tell
@@ -13269,13 +13277,13 @@ def build_schedule(feeds):
                     if spec.get("exact"):
                         hand |= moved
             seated = None
-            if feed in SEAT_FEEDS and len(full) == len(base):
+            if feed in SEAT_FEEDS and seat_ink and len(full) == len(base):
                 n0 = len(full)
                 flags = np.c_[np.zeros(n0, bool) if hand is None else hand,
                               np.zeros(n0, bool) if drawn is None else drawn]
                 full, base, flags = densify_pair(full, base, flags, SEAT_STEP)
                 hand = flags[:, 0]
-                full, seated = seat_on_strokes(full, LEGEND_INK[feed], skip=hand,
+                full, seated = seat_on_strokes(full, seat_ink, skip=hand,
                                                drawn=flags[:, 1])
             if len(full) == len(base):
                 stored, keep = simplify(full, mask=True)

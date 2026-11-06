@@ -224,8 +224,9 @@ Snapping strategy per agency is set by the `STREET_SNAP` / `INK_SNAP` /
 `SYMBOL_FEEDS` sets and `DRAWN_COLORS`.
 
 A feed in `SEAT_FEEDS` gets one more step after its overrides:
-`seat_on_strokes` moves each point onto the nearest stroke of the feed's
-`LEGEND_INK` that runs the same way, within `SEAT_REACH`, so corners follow
+`seat_on_strokes` moves each point onto the nearest stroke of the ink its
+shape was snapped on (`seat_ink`, set in each snap branch) that runs the same
+way, within `SEAT_REACH`, so corners follow
 the sheet's curves instead of the fit's chords. The shape and warp are first
 densified together to `SEAT_STEP`, since the fit can cross a corner in one
 step, and seated points are stored at `SEAT_TOL` so a corner keeps its curve
