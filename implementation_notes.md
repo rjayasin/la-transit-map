@@ -231,7 +231,7 @@ the sheet's curves instead of the fit's chords. The shape and warp are first
 densified together to `SEAT_STEP`, since the fit can cross a corner in one
 step, and seated points are stored at `SEAT_TOL` so a corner keeps its curve
 instead of reducing to one diagonal. A retrace shorter than `SEAT_FOLD` is
-dropped unless an override drew it. A Viterbi pass picks the stroke for each run so a shape between two
+dropped unless an override drew both its start and its turn. A Viterbi pass picks the stroke for each run so a shape between two
 lines a few px apart doesn't alternate, and points on an `exact` override are
 left alone. It can't move a stretch further than `SEAT_REACH` off the drawing.
 That stays a case for an override, and seating the points on either side of

@@ -11761,10 +11761,11 @@ def square_ends(P, tree):
 HAND_TOL = 0.4    # px; simplify tolerance inside an `exact` override path
 
 # Feeds whose fitted shapes are moved onto their own PDF strokes as the last
-# step. The sheet rounds each corner on a radius of about 5 px, and the fit
-# cuts across it on a chord, so the vehicle turns early and the line shows a
-# corner the drawing does not have. Seating puts the corner back on the curve.
-SEAT_FEEDS = {"foothill", "gtfs_bus"}
+# step: every bus feed. The sheet rounds each corner on a radius of about 5 px,
+# and the fit cuts across it on a chord, so the vehicle turns early and the
+# line shows a corner the drawing does not have. Seating puts the corner back
+# on the curve. A shape whose branch set no `seat_ink` is left as fitted.
+SEAT_FEEDS = set(FEEDS) - {"gtfs_rail", "metrolink"}
 SEAT_REACH = 6.0      # px a point may move onto a stroke. Under the ~10 px
                       # between neighbouring drawn lines, so a point is never
                       # carried onto the next street.
@@ -11856,8 +11857,10 @@ def seat_on_strokes(full, ink, skip=None, drawn=None):
     is chosen by Viterbi, nearness against SEAT_SWITCH per change of stroke,
     so a run between two drawn lines a few px apart keeps to one of them.
     Points further than SEAT_REACH from any such stroke, and points in `skip`,
-    stay put and end the run. A retrace through a point in `drawn` (an
-    override's path) is the sheet's own spur and is kept."""
+    stay put and end the run. A retrace that starts and turns on points in
+    `drawn` (an override's path) is the sheet's own spur and is kept. One
+    that starts on the fit and comes back on an override is the overlap at a
+    splice, and is folded."""
     P, T, S, tree = stroke_tangents(*ink)
     F = np.asarray(full, dtype=float)
     n = len(F)
@@ -11929,7 +11932,7 @@ def seat_on_strokes(full, ink, skip=None, drawn=None):
             arc += step[j]
             gap = math.dist(out[i], out[j])
             far = max(far, gap)
-            if drawn is not None and drawn[j]:
+            if drawn is not None and drawn[i] and drawn[j]:
                 break
             if placed[i] and placed[j] and gap <= 0.75 and far >= 2.0:
                 end = j
@@ -13063,6 +13066,7 @@ def build_schedule(feeds):
                 dashed = tree is ink_tree(LADOT_INK, dashed=True)
                 shape_iink[(feed, sid)] = [(LADOT_INK, dashed)] + (
                     [(JLINE_INK, False)] if dashed else [])
+                seat_ink = (LADOT_INK, dashed) if tree is not None else None
             elif feed in SYMBOL_FEEDS:
                 # Snapped and anchored on the sheet's own strokes; see
                 # SYMBOL_FEEDS for why the mask can hold neither. Beach Cities
@@ -13095,6 +13099,7 @@ def build_schedule(feeds):
                                              caps=INK_CAPS, win=61, speckled=False)
                 shape_isnap[(feed, sid)] = (good, 30.0, toks)
                 shape_iink[(feed, sid)] = [([sym_ink], None)]
+                seat_ink = ([sym_ink], None)
             elif agency_tree is not None:
                 anchor_tree = agency_tree
                 anchor_cols = list(good)
@@ -13277,7 +13282,8 @@ def build_schedule(feeds):
                     if spec.get("exact"):
                         hand |= moved
             seated = None
-            if feed in SEAT_FEEDS and seat_ink and len(full) == len(base):
+            if (feed in SEAT_FEEDS and seat_ink and len(full) == len(base)
+                    and not (hand is not None and hand.all())):
                 n0 = len(full)
                 flags = np.c_[np.zeros(n0, bool) if hand is None else hand,
                               np.zeros(n0, bool) if drawn is None else drawn]
