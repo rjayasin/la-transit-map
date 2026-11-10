@@ -170,7 +170,8 @@ fix. Try them in this order, least invasive first.
 | `TRIM_TERMINI` | A pin can't both anchor and trim; give the terminus in *warp* px for the trim alone |
 | `OVERRIDE_PATHS` | Nothing above can reach it. A corridor drawn by hand, spliced into the snapped shape. Last resort |
 | `INSET_DIVERSIONS` | The feed routes some workings off the line the sheet draws, and only the call-out is magnified enough to show it. A box in inset px; the run inside it is flattened onto its chord |
-| `INSET_OVERRIDE_PATHS` | A call-out run leaves the panel's drawn line. A box and a path in inset px, traced off the panel's strokes, replace the run inside the box. `pass` picks one pass through the box; `paths` offers side-by-side lines and the one whose ends meet the run is used |
+| `INSET_OVERRIDE_PATHS` | A call-out run leaves the panel's drawn line. A box and a path in inset px, traced off the panel's strokes, replace the run inside the box. `pass` picks one pass through the box; `paths` offers side-by-side lines and the one whose ends meet the run outside the box is used |
+| `INSET_PINS` | The panel draws a street corner off its square grid, so runs and stops near it land tens of px out. A ground position and the inset px the panel draws it at |
 
 A DASH is a special case of the first row. It is named rather than numbered, so
 the designation its name yields is one the sheet never prints, and
@@ -714,11 +715,24 @@ everything, without either leg moving a street.
 - **The call-out has a transform of its own shape.** It redraws the rotated
   downtown grid square and spaces the streets to suit the page, which no
   polynomial in lon/lat fits. `georef_inset` calibrates one monotone table per
-  grid axis instead, on the streets the sheet names, and `to_inset_px` reads
-  them. Every named street lands on its own ink. The model says nothing about
-  the corner by Union Station, where the panel gives the square grid up; that
-  corner is extrapolated off the last breakpoint and is the one part of the
-  panel the warp is still tens of px out in.
+  grid axis instead, on the streets the sheet names, and `inset_grid_px` reads
+  them. Every named street lands on its own ink. North of Cesar Chavez the
+  panel slants the streets, and east of Los Angeles St it closes them up.
+  `INSET_PINS` corrects the grid there: `to_inset_px` adds a displacement
+  interpolated through the pins and held at zero on the grid's own corners
+  from 1st south. After adding a pin, check the corrected lattice for folds
+  (a non-positive Jacobian) and plot the feeds' stops through `to_inset_px`
+  over the panel.
+- **The frame decides what is in the call-out.** A run is the stretch of a
+  shape whose inset px fall inside `INSET_RECT`. A lon/lat box cannot bound a
+  rotated panel: it cut the south-west corner off.
+- **The PDF keeps main-map strokes under the panel.** `panel_floor` finds the
+  drawing that fills the panel's background, and region "inset" keeps only
+  the strokes drawn after it.
+- **Inset runs are seated like the main map's shapes.** After the snap,
+  `seat_on_strokes(..., region="inset")` moves each bus run onto the strokes
+  of the inks it was snapped on. Override paths are spliced in afterwards and
+  kept vertex for vertex.
 - **A diversion in the feed is not a snapping fault, and nothing catches it.**
   Where a route is sent round a closure for some of its workings, the shape
   really does leave the line the sheet draws. `undetour` sees nothing, since it

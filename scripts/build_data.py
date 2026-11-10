@@ -159,15 +159,97 @@ def _grid_axis(v, table):
     return out
 
 
-def to_inset_px(lon, lat):
-    """The call-out is a rectified drawing of a rotated grid, so the transform
-    is separable in that grid's own axes rather than a polynomial in lon/lat.
+def inset_grid_px(lon, lat):
+    """The call-out's square grid alone: separable in the grid's own axes.
     See georef_inset."""
     e = np.asarray(TR_INSET["along"])
     g = np.c_[(np.asarray(lon) - TR_INSET["lon0"]) * TR_INSET["lon_scale"],
               np.asarray(lat) - TR_INSET["lat0"]]
     return (_grid_axis(g @ e, TR_INSET["x"]),
             _grid_axis(g @ np.array([-e[1], e[0]]), TR_INSET["y"]))
+
+
+# Corners the call-out draws off its square grid: (lon, lat, x, y), the ground
+# position of a street corner and the inset px the panel draws it at. North of
+# Cesar Chavez the panel slants the streets, and east of Los Angeles St it
+# closes them up, so the grid transform is 30 to 80 px out there. The lon/lat
+# is the mean of the feeds' stops named for the corner. The px is read off the
+# panel's strokes.
+INSET_PINS = [
+    (-118.23874, 34.06448, 3462.5, 2608.0),    # Hill / College
+    (-118.23741, 34.06406, 3500.0, 2601.0),    # Broadway / College
+    (-118.23805, 34.06577, 3443.0, 2567.0),    # Hill / Gin Ling
+    (-118.23681, 34.06530, 3479.5, 2560.0),    # Broadway / Gin Ling
+    (-118.23586, 34.06676, 3460.0, 2521.0),    # Broadway / Bernard
+    (-118.23332, 34.06883, 3425.0, 2451.0),    # Broadway / Bishops
+    (-118.23955, 34.06273, 3493.5, 2672.6),    # Hill / Alpine
+    (-118.23836, 34.06223, 3528.8, 2656.0),    # Broadway / Alpine
+    (-118.24043, 34.06086, 3515.3, 2718.2),    # Hill / Ord
+    (-118.23919, 34.06032, 3550.0, 2702.5),    # Broadway / Ord
+    (-118.23885, 34.06014, 3579.0, 2689.0),    # New High / Ord
+    (-118.24047, 34.05867, 3587.5, 2773.0),    # Broadway / Cesar Chavez
+    (-118.23970, 34.05818, 3619.0, 2759.0),    # New High / Cesar Chavez
+    (-118.23934, 34.05816, 3670.0, 2734.0),    # Spring / Cesar Chavez
+    (-118.23742, 34.05868, 3702.0, 2718.0),    # Main / Cesar Chavez
+    (-118.23689, 34.05790, 3708.8, 2716.3),    # Alameda / Cesar Chavez
+    (-118.23580, 34.06326, 3626.0, 2554.0),    # Alameda / College
+    (-118.23193, 34.05675, 3827.5, 2665.0),    # Vignes / Cesar Chavez
+    (-118.23402, 34.06282, 3699.5, 2548.0),    # Main / College
+    (-118.23122, 34.06485, 3699.5, 2512.0),    # Main / Ann
+    (-118.24399, 34.06627, 3400.0, 2617.0),    # College / Figueroa Terrace
+    (-118.24601, 34.06241, 3379.7, 2772.8),    # Figueroa / Cesar Chavez
+    (-118.24410, 34.06079, 3498.8, 2772.8),    # Grand / Cesar Chavez
+    (-118.24221, 34.05694, 3617.4, 2791.0),    # Broadway / Arcadia
+    (-118.23896, 34.05523, 3717.4, 2792.0),    # Los Angeles / Arcadia
+    (-118.23975, 34.05490, 3717.4, 2826.0),    # Los Angeles / Aliso
+    (-118.23774, 34.05464, 3745.0, 2790.0),    # Alameda / Arcadia
+    (-118.23275, 34.05399, 3813.8, 2761.0),    # Patsaouras busway station
+    (-118.23330, 34.05510, 3812.0, 2755.0),    # Patsaouras Transit Plaza
+    (-118.24050, 34.05370, 3717.4, 2861.0),    # Los Angeles / Temple
+    (-118.23817, 34.05120, 3783.0, 2855.5),    # Alameda / Temple
+    (-118.23365, 34.05032, 3845.0, 2826.0),    # Vignes / Temple
+    (-118.24110, 34.05062, 3752.0, 2925.0),    # San Pedro / 1st
+    (-118.23924, 34.04896, 3794.0, 2904.0),    # Central / 1st
+    (-118.23782, 34.04910, 3803.8, 2896.0),    # Alameda / 1st
+    (-118.23407, 34.04846, 3850.0, 2876.0),    # Vignes / 1st
+    (-118.24185, 34.04903, 3762.5, 2972.0),    # San Pedro / 2nd
+    (-118.24242, 34.04753, 3772.5, 2999.0),    # San Pedro / 3rd
+]
+_INSET_WARP = []
+
+
+def inset_warp():
+    """The displacement INSET_PINS gives a point of the grid transform, as a
+    function of grid px. Linear radial basis through the pins and through
+    zero at the grid's own corners, held constant outside their bounding box."""
+    if not _INSET_WARP:
+        from scipy.interpolate import RBFInterpolator
+        xs = [r[1] for r in TR_INSET["x"]]
+        ys = sorted(r[1] for r in TR_INSET["y"])
+        pin = np.array(INSET_PINS)
+        gx, gy = inset_grid_px(pin[:, 0], pin[:, 1])
+        src = [np.c_[gx, gy]]
+        dst = [pin[:, 2:] - np.c_[gx, gy]]
+        # held at zero: Temple west of Los Angeles St, 1st as far east as it,
+        # every fitted corner from 5th south, and the frame's east edge from 6th
+        hold = ([(x, ys[1]) for x in xs[:8]] + [(x, ys[2]) for x in xs[:9]]
+                + [(x, y) for y in ys[3:] for x in xs]
+                + [(INSET_RECT[2], y) for y in ys[4:]])
+        src.append(np.array(hold))
+        dst.append(np.zeros((len(hold), 2)))
+        src, dst = np.vstack(src), np.vstack(dst)
+        _INSET_WARP.append((RBFInterpolator(src, dst, kernel="linear"),
+                            src.min(0), src.max(0)))
+    return _INSET_WARP[0]
+
+
+def to_inset_px(lon, lat):
+    """Ground position to the call-out's px: the square grid, then the
+    correction for the corners the panel draws off it."""
+    x, y = inset_grid_px(lon, lat)
+    f, lo, hi = inset_warp()
+    d = f(np.clip(np.c_[x, y], lo, hi))
+    return x + d[:, 0], y + d[:, 1]
 
 
 def read_csv(feed, name):
@@ -1573,9 +1655,26 @@ def pdf_ink(colors, dashed=None, step=INK_STEP, region="main"):
     if key not in _INK:
         _INK[key] = cached_pixels(
             ("pdf-ink", key, art_stamp(PDF), EXCLUDE, CALLOUT, INSET_RECT, INSET_LEGEND,
-             code_stamp(pdf_ink, _ink_build, inside_callout, maskable)),
+             code_stamp(pdf_ink, _ink_build, panel_floor, inside_callout, maskable)),
             lambda: _ink_build(colors, dashed, step, region))
     return _INK[key]
+
+
+_PANEL_FLOOR = []
+
+
+def panel_floor(drawings, s):
+    """Index of the drawing that fills the Downtown call-out's background.
+    The PDF keeps the main map's strokes under the panel, and every stroke
+    drawn before this fill is one of them."""
+    if not _PANEL_FLOOR:
+        x0, y0, x1, y1 = INSET_RECT
+        _PANEL_FLOOR.append(max(
+            (i for i, it in enumerate(drawings)
+             if it.get("fill") and it["rect"].x0 * s <= x0 and it["rect"].y0 * s <= y0
+             and it["rect"].x1 * s >= x1 and it["rect"].y1 * s >= y1
+             and (it["rect"].x1 - it["rect"].x0) * s < 2 * (x1 - x0)), default=-1))
+    return _PANEL_FLOOR[0]
 
 
 def _ink_build(colors, dashed, step, region="main"):
@@ -1588,7 +1687,9 @@ def _ink_build(colors, dashed, step, region="main"):
     page = doc[0]
     s = map_image()[0].shape[1] / page.rect.width
     runs = []
-    for it in page.get_drawings():
+    drawings = page.get_drawings()
+    floor = panel_floor(drawings, s) if region == "inset" else -1
+    for it in drawings[floor + 1:]:
         c = it.get("color")
         if c is None or not any(sum((a - b) ** 2 for a, b in zip(c, k)) < 1e-4
                                 for k in colors):
@@ -1630,13 +1731,13 @@ def ink_tree(colors, dashed=None, region="main"):
     return _INK_TREES[key]
 
 
-def inset_ink_tree(parts):
+def inset_ink_tree(parts, least=300):
     """KD-tree over the call-out's strokes in several inks, each (colors,
-    dashed), or None where the panel draws too few."""
-    key = ("inset",) + tuple((tuple(map(tuple, c)), d) for c, d in parts)
+    dashed), or None where the panel draws `least` points or fewer."""
+    key = ("inset", least) + tuple((tuple(map(tuple, c)), d) for c, d in parts)
     if key not in _INK_TREES:
         P = np.concatenate([pdf_ink(c, d, region="inset") for c, d in parts])
-        _INK_TREES[key] = cKDTree(P) if len(P) > 300 else None
+        _INK_TREES[key] = cKDTree(P) if len(P) > least else None
     return _INK_TREES[key]
 
 
@@ -11895,18 +11996,23 @@ def densify_pair(full, base, flags, step):
     return (F[i] * (1 - w) + F[nxt] * w, Bs[i] * (1 - w) + Bs[nxt] * w, fl[i].copy())
 
 
-def stroke_tangents(colors, dashed=None, step=0.5):
+def stroke_tangents(colors, dashed=None, step=0.5, region="main"):
     """(points, unit tangents, stroke ids) along every PDF stroke in one of
     `colors`, in map px, less the regions the masks skip. `dashed` picks the
-    stroke style as in pdf_ink."""
-    key = (tuple(map(tuple, colors)), dashed)
+    stroke style as in pdf_ink. region "inset" keeps the strokes inside the
+    Downtown call-out instead."""
+    key = (tuple(map(tuple, colors)), dashed) + ((region,) if region != "main" else ())
     if key in _SEAT_INK:
         return _SEAT_INK[key]
     import fitz
     page = fitz.open(PDF)[0]
     s = map_image()[0].shape[1] / page.rect.width
     P, T, S = [], [], []
-    for sid, it in enumerate(page.get_drawings()):
+    drawings = page.get_drawings()
+    floor = panel_floor(drawings, s) if region == "inset" else -1
+    for sid, it in enumerate(drawings):
+        if sid <= floor:
+            continue
         c = it.get("color")
         if c is None or not any(sum((a - b) ** 2 for a, b in zip(c, k)) < 1e-4
                                 for k in colors):
@@ -11934,21 +12040,39 @@ def stroke_tangents(colors, dashed=None, step=0.5):
             T.append(tg)
             S.append(np.full(len(pts), sid))
     P, T, S = np.vstack(P), np.vstack(T), np.concatenate(S)
-    keep = maskable(P) & ~inside_callout(P)
+    keep = (maskable(P, "inset-ink") if region == "inset"
+            else maskable(P) & ~inside_callout(P))
     _SEAT_INK[key] = (P[keep], T[keep], S[keep], cKDTree(P[keep]))
     return _SEAT_INK[key]
 
 
-def seat_graph(ink):
+def seat_strokes(ink, region="main"):
+    """stroke_tangents for `ink`: one (colors, dashed), or a list of them
+    whose strokes are pooled."""
+    if isinstance(ink, tuple):
+        return stroke_tangents(*ink, region=region)
+    key = (tuple((tuple(map(tuple, c)), d) for c, d in ink), region)
+    if key not in _SEAT_INK:
+        parts = [stroke_tangents(c, d, region=region) for c, d in ink]
+        P = np.vstack([q[0] for q in parts])
+        _SEAT_INK[key] = (P, np.vstack([q[1] for q in parts]),
+                          np.concatenate([q[2] for q in parts]), cKDTree(P))
+    return _SEAT_INK[key]
+
+
+def seat_graph(ink, region="main"):
     """(nodes, KD-tree, graph) over the strokes of `ink`, as stroke_graph."""
-    key = (tuple(map(tuple, ink[0])), ink[1])
+    key = ((tuple(map(tuple, ink[0])), ink[1]) if isinstance(ink, tuple)
+           else tuple((tuple(map(tuple, c)), d) for c, d in ink))
+    if region != "main":
+        key = (key, region)
     if key not in _SEAT_GRAPH:
-        _SEAT_GRAPH[key] = stroke_graph(stroke_tangents(*ink)[0], cell=0.5, r=0.75,
+        _SEAT_GRAPH[key] = stroke_graph(seat_strokes(ink, region)[0], cell=0.5, r=0.75,
                                         bridge=WALK_BRIDGE)
     return _SEAT_GRAPH[key]
 
 
-def seat_gaps(out, placed, hold, ink):
+def seat_gaps(out, placed, hold, ink, region="main"):
     """Each run of unseated points between two seated ones, replaced by the
     walk along the strokes between them where that walk is no longer than
     WALK_STRETCH times the run plus WALK_SLACK and stays within WALK_NEAR px
@@ -11979,7 +12103,7 @@ def seat_gaps(out, placed, hold, ink):
         if arc > WALK_SPAN:
             continue
         if nodes is None:
-            nodes, tree, G = seat_graph(ink)
+            nodes, tree, G = seat_graph(ink, region)
         if tree.query(run)[0].max() <= WALK_OFF:
             continue
         na, nb = tree.query(out[a])[1], tree.query(out[b])[1]
@@ -12000,7 +12124,7 @@ def seat_gaps(out, placed, hold, ink):
     return walked
 
 
-def seat_on_strokes(full, ink, skip=None, drawn=None):
+def seat_on_strokes(full, ink, skip=None, drawn=None, region="main"):
     """(`full` with each point moved onto a stroke of `ink`, (colors, dashed),
     that runs the
     way the shape does there, index for index; which points were placed). The stroke for each run of points
@@ -12011,7 +12135,7 @@ def seat_on_strokes(full, ink, skip=None, drawn=None):
     `drawn` (an override's path) is the sheet's own spur and is kept. One
     that starts on the fit and comes back on an override is the overlap at a
     splice, and is folded."""
-    P, T, S, tree = stroke_tangents(*ink)
+    P, T, S, tree = seat_strokes(ink, region)
     F = np.asarray(full, dtype=float)
     n = len(F)
     arc = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(F, axis=0).T))])
@@ -12065,7 +12189,7 @@ def seat_on_strokes(full, ink, skip=None, drawn=None):
     for h in (skip, drawn):
         if h is not None:
             hold |= np.asarray(h, bool)
-    walked = seat_gaps(out, placed, hold, ink)
+    walked = seat_gaps(out, placed, hold, ink, region)
     # The nearest point on a stroke can lie behind the previous one where the
     # fit bunches points or two stroke pieces overlap at a join, and a point
     # left where the fit put it can lie behind a seated neighbour. A point
@@ -12279,18 +12403,11 @@ INSET_SLACK = 25.0   # inset px a shape may stray outside the frame and still
                      # count as inside: ~4x the inset fit's median residual
 
 
-def outside_inset(ix, iy, ll):
-    """How far each point falls outside what the inset depicts, in inset px:
-    past the frame rect, or past the geographic bounds converted at the
-    inset's own scale."""
+def outside_inset(ix, iy):
+    """How far each point falls outside the inset's frame, in inset px."""
     x0, y0, x1, y1 = INSET_RECT
-    sx = (x1 - x0) / (INSET_GEO[2] - INSET_GEO[0])
-    sy = (y1 - y0) / (INSET_GEO[3] - INSET_GEO[1])
-    return np.maximum.reduce([
-        x0 - ix, ix - x1, y0 - iy, iy - y1,
-        (INSET_GEO[0] - ll[:, 0]) * sx, (ll[:, 0] - INSET_GEO[2]) * sx,
-        (INSET_GEO[1] - ll[:, 1]) * sy, (ll[:, 1] - INSET_GEO[3]) * sy,
-        np.zeros(len(ix))])
+    return np.maximum.reduce([x0 - ix, ix - x1, y0 - iy, iy - y1,
+                              np.zeros(len(ix))])
 
 
 # The cap ladder and smoothing window the call-out snaps on. A mask of one
@@ -12350,7 +12467,8 @@ def undivert(pts, boxes):
 # both directions. `pass` picks one of several passes through the box (0 the
 # first, -1 the last), for a run that crosses it twice with the stretch between
 # outside it. `paths` in place of `path` offers alternatives, for two drawn
-# lines side by side, and the one whose ends meet the run best is used.
+# lines side by side, and the one whose ends meet the run outside the box best
+# is used.
 # `shape_ids` limits an entry to some variants. Stops are
 # projected onto the run afterwards, so nothing needs to stay index-aligned.
 # A path shorter than 10 px drops the run, for a stub the warp re-enters by.
@@ -12369,31 +12487,14 @@ INSET_OVERRIDE_PATHS = {
          "path": [(3438.4, 3375.0), (3438.4, 3400.3)],
          "shape_ids": {"22814_shp-v4E-a2", "22819_shp-v4E-a2", "22841_shp-v4E-a2"}},
     ],
-    ("ladot", "567"): [        # DASH Lincoln Heights/Chinatown, clockwise
-        {"box": (3292, 2600, 3425, 2718),
-         "path": [(3376.1, 2718.3), (3306.8, 2690.5), (3302.5, 2687.6), (3300.0, 2680.5),
-                  (3305.3, 2639.6), (3309.4, 2636.2), (3315.2, 2635.0), (3425.0, 2616.2)]},
-        {"box": (3428, 2570, 3592, 2665),
-         "path": [(3429.9, 2615.4), (3495.0, 2604.0), (3517.0, 2601.3), (3590.1, 2566.4)]},
-        {"box": (3622, 2495, 3720, 2716),
-         "path": [(3709.1, 2714.1), (3703.1, 2711.6), (3698.2, 2704.1), (3678.3, 2662.1),
-                  (3673.5, 2643.9), (3652.2, 2599.7), (3629.5, 2552.3), (3629.6, 2549.8),
-                  (3632.6, 2546.4), (3648.8, 2539.8), (3662.2, 2537.6), (3690.1, 2537.5),
-                  (3694.3, 2536.5), (3696.9, 2532.4), (3697.0, 2499.6)]},
-    ],
-    ("ladot", "568"): [        # DASH Lincoln Heights/Chinatown, counterclockwise
-        {"box": (3292, 2600, 3425, 2718),
-         "path": [(3376.1, 2718.3), (3306.8, 2690.5), (3302.5, 2687.6), (3300.0, 2680.5),
-                  (3305.3, 2639.6), (3309.4, 2636.2), (3315.2, 2635.0), (3425.0, 2616.2)]},
-        {"box": (3428, 2570, 3592, 2665),
-         "path": [(3429.9, 2615.4), (3495.0, 2604.0), (3517.0, 2601.3), (3590.1, 2566.4)]},
-        {"box": (3622, 2495, 3720, 2716),
-         "path": [(3709.1, 2714.1), (3703.1, 2711.6), (3698.2, 2704.1), (3678.3, 2662.1),
-                  (3673.5, 2643.9), (3652.2, 2599.7), (3629.5, 2552.3), (3629.6, 2549.8),
-                  (3632.6, 2546.4), (3648.8, 2539.8), (3662.2, 2537.6), (3690.1, 2537.5),
-                  (3694.3, 2536.5), (3696.9, 2532.4), (3697.0, 2499.6)]},
+    ("ladot", "29"): [         # Commuter Express 409
+        {"box": (3380, 2490, 3520, 2610),
+         "path": [(3460.9, 2611.7), (3474.5, 2608.2), (3493.1, 2604.9), (3496.4, 2599.5),
+                  (3492.3, 2589.6), (3452.2, 2506.1)]},
     ],
     ("ladot", "867"): [        # Commuter Express 419
+        {"box": (3380, 2490, 3520, 2610),
+         "path": [(3460.9, 2611.7), (3410.1, 2506.0)]},
         {"box": (3355, 3480, 3480, 3706),
          "paths": [[(3372.4, 3480.0), (3372.4, 3706.0)], [(3417.8, 3480.0), (3417.8, 3706.0)]]},
     ],
@@ -12492,9 +12593,6 @@ INSET_OVERRIDE_PATHS = {
                   (3481.4, 2607.1), (3466.7, 2609.0), (3459.2, 2606.2), (3456.1, 2601.8),
                   (3412.7, 2511.5)]},
     ],
-    ("ladot", "4445"): [       # DASH F
-        {"box": (3365, 3480, 3425, 3610), "path": [(3377.1, 3479.6), (3377.1, 3700.1)]},
-    ],
     ("foothill", "10490"): [{"box": (3450, 3270, 3500, 3335), "path": [(3460.8, 3270.0), (3460.8, 3286.8)]}],
     ("foothill", "10495"): [{"box": (3450, 3270, 3500, 3335), "path": [(3460.8, 3270.0), (3460.8, 3286.8)]}],
     ("foothill", "10499"): [{"box": (3450, 3270, 3500, 3335), "path": [(3460.8, 3270.0), (3460.8, 3286.8)]}],
@@ -12504,9 +12602,12 @@ INSET_OVERRIDE_PATHS = {
 }
 
 
-def inset_override(pts, specs):
-    """`pts` with the run inside each spec's box replaced by its path."""
+def inset_override(pts, specs, flags=None):
+    """(`pts` with the run inside each spec's box replaced by its path, a
+    per-point flag). The flag is `flags` carried over the points kept, and
+    True on every point of a path."""
     P = np.asarray(pts, dtype=float)
+    hand = np.zeros(len(P), bool) if flags is None else np.asarray(flags, bool)
     for spec in specs:
         x0, y0, x1, y1 = spec["box"]
         k = np.nonzero((P[:, 0] >= x0) & (P[:, 0] <= x1)
@@ -12516,11 +12617,19 @@ def inset_override(pts, specs):
         if "pass" in spec:
             k = np.split(k, np.nonzero(np.diff(k) > 1)[0] + 1)[spec["pass"]]
         lo, hi = int(k[0]), int(k[-1])
-        ends = lambda p: (np.hypot(*(P[lo] - p[0])) + np.hypot(*(P[hi] - p[-1])))
+        # Judged against the points either side of the run. A run that ends
+        # inside the box has one such point, and its own end is not on a line.
+        a = P[lo - 1] if lo > 0 else None
+        b = P[hi + 1] if hi + 1 < len(P) else None
+        if a is None and b is None:
+            a, b = P[lo], P[hi]
+        ends = lambda p: ((0 if a is None else np.hypot(*(a - p[0])))
+                          + (0 if b is None else np.hypot(*(b - p[-1]))))
         paths = [np.asarray(p, dtype=float) for p in spec.get("paths", [spec.get("path")])]
         path = min((q for p in paths for q in (p, p[::-1])), key=ends)
         P = np.vstack([P[:lo], path, P[hi + 1:]])
-    return P
+        hand = np.r_[hand[:lo], np.ones(len(path), bool), hand[hi + 1:]]
+    return P, hand
 
 
 def source_curve(ll):
@@ -12576,20 +12685,19 @@ def measured_positions(ll, measures, stops, distances):
 
 
 def inset_runs(ll, snap_tree=None, anchors=None, sole=False,
-               boxes=(), speckled=True, overrides=(), centre=None):
+               boxes=(), speckled=True, overrides=(), centre=None, seat=None):
     """Inset polylines with entry and exit distances on the geographic shape.
 
     `centre`, a tree over the line's stroke in the call-out, moves each snapped
-    run onto that stroke with `centre_rail`."""
+    run onto that stroke with `centre_rail`. `seat`, the inks the run was
+    snapped on, moves it onto their strokes with `seat_on_strokes`."""
     ll = np.asarray(ll, dtype=float)
     if TR_INSET is None or len(ll) < 2:
         return None
     _, u = source_curve(ll)
     ix, iy = to_inset_px(ll[:, 0], ll[:, 1])
     x0, y0, x1, y1 = INSET_RECT
-    inside = ((ix > x0) & (ix < x1) & (iy > y0) & (iy < y1) &
-              (ll[:, 0] > INSET_GEO[0]) & (ll[:, 0] < INSET_GEO[2]) &
-              (ll[:, 1] > INSET_GEO[1]) & (ll[:, 1] < INSET_GEO[3]))
+    inside = (ix > x0) & (ix < x1) & (iy > y0) & (iy < y1)
     if not inside.any():
         return None
     # Both tests above read the raw warp, which is only good to a few pixels,
@@ -12601,7 +12709,7 @@ def inset_runs(ll, snap_tree=None, anchors=None, sole=False,
     # So fill in gaps the route never really left
     # through. A genuine exit from downtown misses by hundreds of px, not tens,
     # and still splits the runs, which is what should happen.
-    slack = outside_inset(ix, iy, ll)
+    slack = outside_inset(ix, iy)
     known = np.nonzero(inside)[0]
     i = known[0]
     while i < known[-1]:
@@ -12645,8 +12753,19 @@ def inset_runs(ll, snap_tree=None, anchors=None, sole=False,
                 pts = unjitter(np.asarray(sc), tree=snap_tree)
         if centre is not None:
             pts = simplify(centre_rail(pts, centre), RAIL_CENTRE_TOL)
+        pts = np.asarray(pts, dtype=float)
+        seated = None
+        if seat and snap_tree is not None:
+            pts = densify_pair(pts, pts, None, SEAT_STEP)[0]
+            pts, seated = seat_on_strokes(pts, seat, region="inset")
         if overrides:
-            pts = inset_override(pts, overrides)
+            pts, seated = inset_override(pts, overrides, seated)
+            if not seat:
+                seated = None
+        if seated is not None:
+            keep = simplify(pts, mask=True)[1]
+            keep |= simplify(pts, tol=SEAT_TOL, mask=True)[1] & seated
+            pts = pts[keep]
         # drop edge-hugging slivers that never meaningfully enter the frame
         vis = ((pts[:, 0] > x0 + 8) & (pts[:, 0] < x1 - 8) &
                (pts[:, 1] > y0 + 8) & (pts[:, 1] < y1 - 8))
@@ -13194,15 +13313,13 @@ def build_schedule(feeds):
                         out_pts = resample(
                             square_ends(np.asarray(out_pts, dtype=float), snap_tree),
                             len(out_pts))
-                    # Not the J Line: the call-out redraws every Metro bus line
-                    # in orange (see runs_for), and this one is not a Metro bus
-                    # line down there: it is the gray transitway, drawn in the
-                    # panel the same as it is drawn outside it. Registering it
-                    # here would snap its downtown run onto the orange of every
-                    # other route in the panel. It stays unsnapped there,
-                    # exactly as it was.
+                    # The call-out redraws every Metro bus line in orange (see
+                    # runs_for) except the J Line, which stays the gray
+                    # transitway there and snaps on that ink.
                     if rid0 != "910":
                         shape_isnap[(feed, sid)] = (cols, 38.0, toks)
+                    else:
+                        shape_iink[(feed, sid)] = [(JLINE_INK, False)]
             elif feed == "metrolink":
                 # The railroad ink holds railroads and nothing else, which is
                 # enough to put a line on track but not to say *which* track
@@ -13222,6 +13339,7 @@ def build_schedule(feeds):
                     out_pts = snap_recording(pts, tree, anchors=anc, caps=RAIL_CAPS,
                                             win=RAIL_WIN, speckled=False,
                                             aim=rail_dir_tree(tree))
+                    shape_iink[(feed, sid)] = [(RAIL_INK, False)]
             elif feed == "ladot":
                 # LADOT's two liveries are two stroke styles of one olive ink,
                 # DASH solid and Commuter Express dashed, so each snaps to its
@@ -13601,7 +13719,9 @@ def build_schedule(feeds):
                 # else keeps the mask of the colour it was refined to.
                 inks = [(ORANGE_INK, False)] if key[0] == "gtfs_bus" and cols \
                     else shape_iink.get(key)
-                tree = (inset_ink_tree(inks) if inks
+                # The panel draws one railroad, a single stroke.
+                tree = (inset_ink_tree(inks, 50 if key[0] == "metrolink" else 300)
+                        if inks
                         else inset_tile_tree(cols) if cols and key[0] == "gtfs_rail"
                         else mask_tree(cols, tol, region="inset") if cols else None)
                 # No badge anchors down here. They exist to pull a shape onto
@@ -13615,6 +13735,7 @@ def build_schedule(feeds):
                                                           region="inset")
                                   if key[0] == "gtfs_rail" else None,
                                   speckled=not inks,
+                                  seat=inks if key[0] in SEAT_FEEDS else None,
                                   boxes=INSET_DIVERSIONS.get(
                                       (key[0], shape_route.get(key)), ()),
                                   overrides=[
