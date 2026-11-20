@@ -156,8 +156,10 @@ for the portions of a stop interval that fall inside the panel.
 
 On each push, `scripts/geometry_check.py` checks fixed artwork corridors
 and a rail platform, `scripts/build_test.py` checks caching and stop assignment,
-and `scripts/motion_test.mjs` checks path interpolation and inset transitions.
-The geometry check also validates the complete schedule structure.
+`scripts/table_check.py` checks that every hand-tuned table row names a route
+and shape the feeds still have, and `scripts/motion_test.mjs` checks path
+interpolation and inset transitions. The geometry check also validates the
+complete schedule structure.
 
 ## Checking a line against the artwork
 

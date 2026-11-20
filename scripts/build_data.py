@@ -446,6 +446,14 @@ def chain_block_trips(stop_times, trip_info, trip_block):
     return chained
 
 
+def route_key(feed, route_id):
+    """The key every per-route table is read with: the feed and the route id
+    up to its first "-". That drops the timetable number a feed appends to its
+    route ids ("2-13201"), which changes when the feed is refreshed. Ids that
+    differ only after a dash share a key, so one row covers all of them."""
+    return (feed, (route_id or "").split("-")[0])
+
+
 # Designations the sheet prints that the feed never says. Getting this wrong
 # costs twice over: a rider sees a designation the map never prints, *and* the
 # badges are the anchors, so the shape has nothing pinning it to its own drawn
@@ -546,10 +554,10 @@ FILTER_GROUPS = {
 # 14 at one end and 37 at the other. Add a row only where no working is badged
 # as both.
 SPLIT_LABELS = {
-    ("gtfs_bus", "236-13201"): ("235", "236"),   # Balboa north / Rinaldi
-    ("gtfs_bus", "242-13201"): ("242", "243"),   # Tampa / Winnetka
-    ("gtfs_bus", "260-13201"): ("260", "261"),   # Imperial / Atlantic south
-    ("gtfs_bus", "487-13201"): ("487", "489"),   # San Gabriel / Rosemead
+    ("gtfs_bus", "236"): ("235", "236"),   # Balboa north / Rinaldi
+    ("gtfs_bus", "242"): ("242", "243"),   # Tampa / Winnetka
+    ("gtfs_bus", "260"): ("260", "261"),   # Imperial / Atlantic south
+    ("gtfs_bus", "487"): ("487", "489"),   # San Gabriel / Rosemead
 }
 SPLIT_NEAR = 25.0   # px a badge may stand from a fitted shape and speak for it
 
@@ -817,12 +825,64 @@ def art_stamp(*paths):
     return out
 
 
+_SCRIPTS = os.path.dirname(os.path.abspath(__file__))
+
+
 def code_stamp(*fns):
     """Identity for the code that produces a mask, so editing any of it
     invalidates the cache by itself. Beats a version constant nobody remembers
-    to bump, and unrelated edits elsewhere in this file don't disturb it."""
-    src = "".join(inspect.getsource(f) for f in fns)
-    return hashlib.blake2b(src.encode(), digest_size=8).hexdigest()
+    to bump, and unrelated edits elsewhere in this file don't disturb it.
+
+    The code is `fns` and everything they reach: the source of every function
+    or class in scripts/ they name, followed through what those name in turn,
+    and the value of every upper-case module constant read along the way. A
+    mask whose builder reads a constant or a table, such as FADE_MIN or
+    LEGEND_SEEDS, is rebuilt when that value changes. Upper-case names that
+    start with "_" are memo caches and are left out."""
+    from build_cache import canonical
+    parts, seen, todo = {}, set(), list(fns)
+    while todo:
+        f = inspect.unwrap(todo.pop())
+        if id(f) in seen:
+            continue
+        seen.add(id(f))
+        where = os.path.basename(inspect.getsourcefile(f))
+        parts[(where, f.__qualname__)] = inspect.getsource(f)
+        for fn in [f] if inspect.isfunction(f) else [
+                m for m in vars(f).values() if inspect.isfunction(m)]:
+            # A default bound to a constant is evaluated when the def runs,
+            # so its name is not among those the function's code looks up.
+            parts[(where, fn.__qualname__ + "()")] = canonical(
+                (fn.__defaults__, fn.__kwdefaults__))
+            g = fn.__globals__
+            for name in _global_names(fn.__code__) & g.keys():
+                if _in_scripts(g[name]):
+                    todo.append(g[name])
+                elif name.isupper() and not name.startswith("_"):
+                    parts[(where, name)] = canonical(g[name])
+    text = "".join(f"{where} {name}\n{part}\n" for (where, name), part in sorted(parts.items()))
+    return hashlib.blake2b(text.encode(), digest_size=8).hexdigest()
+
+
+def _global_names(code):
+    """The names a code object looks up, including those of its nested
+    functions and lambdas."""
+    names = set(code.co_names)
+    for c in code.co_consts:
+        if inspect.iscode(c):
+            names |= _global_names(c)
+    return names
+
+
+def _in_scripts(v):
+    """Whether `v` is a function or class defined in scripts/."""
+    v = inspect.unwrap(v)
+    if not (inspect.isfunction(v) or inspect.isclass(v)):
+        return False
+    try:
+        return os.path.dirname(os.path.abspath(inspect.getsourcefile(v))) == _SCRIPTS
+    except TypeError:               # built in, so no source file
+        return False
 
 
 def cached_pixels(key, build):
@@ -6964,7 +7024,7 @@ OVERRIDE_PATHS = {
             (378.0, 1316.3), (400.0, 1316.5),
         ],
     }, {
-        "shape_ids": ("35", "54", "55", "59", "186", "207"),
+        "shape_ids": ("35", "54", "55", "59"),
         "box": (832, 795, 872, 870),
         "path": [
             (795.0, 960.5), (813.9, 972.2), (823.9, 976.7),
@@ -6982,7 +7042,7 @@ OVERRIDE_PATHS = {
             (376.0, 1029.8), (375.2, 1037.1), (375.2, 1253.1),
         ],
     }, {
-        "shape_ids": ("35", "54", "55", "59", "186", "207"),
+        "shape_ids": ("186", "207"),
         "box": (832, 795, 872, 870),
         "path": [
             (795.0, 960.5), (813.9, 972.2), (823.9, 976.7),
@@ -12485,7 +12545,7 @@ INSET_OVERRIDE_PATHS = {
     ("foothill", "20707"): [   # Silver Streak, westbound
         {"box": (3375, 3375, 3455, 3460),
          "path": [(3438.4, 3375.0), (3438.4, 3400.3)],
-         "shape_ids": {"22814_shp-v4E-a2", "22819_shp-v4E-a2", "22841_shp-v4E-a2"}},
+         "shape_ids": ("22814_shp-v4E-a2", "22819_shp-v4E-a2", "22841_shp-v4E-a2")},
     ],
     ("ladot", "29"): [         # Commuter Express 409
         {"box": (3380, 2490, 3520, 2610),
@@ -12551,11 +12611,11 @@ INSET_OVERRIDE_PATHS = {
          "paths": [[(3372.4, 3480.0), (3372.4, 3706.0)], [(3417.8, 3480.0), (3417.8, 3706.0)]]},
     ],
     ("ladot", "871"): [        # Commuter Express 534
-        {"box": (3705, 2745, 3885, 2850), "shape_ids": {"11606"},
+        {"box": (3705, 2745, 3885, 2850), "shape_ids": ("11606",),
          "path": CE534_PATSAOURAS},
-        {"box": (3705, 2764.5, 3885, 2850), "shape_ids": {"2972"},
+        {"box": (3705, 2764.5, 3885, 2850), "shape_ids": ("2972",),
          "path": CE534_PATSAOURAS},
-        {"box": (3825, 2740, 3852, 2764), "shape_ids": {"2972"},
+        {"box": (3825, 2740, 3852, 2764), "shape_ids": ("2972",),
          "path": [(3812.0, 2773.3), (3812.0, 2773.3)]},
     ],
     ("ladot", "4291"): [       # Commuter Express 439
@@ -12914,7 +12974,7 @@ def build_schedule(feeds):
 
         rmeta, badge_tokens, sheet_tokens, is_dash = {}, {}, {}, {}
         for row in read_csv(feed, "routes.txt"):
-            sheet_label = (MAP_LABELS.get((feed, row["route_id"]))
+            sheet_label = (MAP_LABELS.get(route_key(feed, row["route_id"]))
                            or AGENCY_SYMBOLS.get(feed))
             label = sheet_label or route_label(
                 row.get("route_short_name", ""), row.get("route_long_name", ""))
@@ -13199,11 +13259,12 @@ def build_schedule(feeds):
             line_ink = None
             seat_ink = None             # (colors, dashed) seat_on_strokes uses
             rid = route_by_shape.get(sid)
-            shape_route[(feed, sid)] = (rid or "").split("-")[0]
+            rkey = route_key(feed, rid)
+            shape_route[(feed, sid)] = rkey[1]
             toks = badge_tokens.get(rid, set())
-            pins = PINNED_ANCHORS.get((feed, (rid or "").split("-")[0]), [])
-            skips = SKIP_ANCHORS.get((feed, (rid or "").split("-")[0]), ())
-            cuts = pins + TRIM_TERMINI.get((feed, (rid or "").split("-")[0]), [])
+            pins = PINNED_ANCHORS.get(rkey, [])
+            skips = SKIP_ANCHORS.get(rkey, ())
+            cuts = pins + TRIM_TERMINI.get(rkey, [])
             if cuts:
                 pts, shape_start[(feed, sid)] = trim_terminus(pts, cuts, with_offset=True)
             centred = False             # on the drawn stroke, see centre_rail
@@ -13389,7 +13450,7 @@ def build_schedule(feeds):
                 # A pinned warp is already on the grid. One symbol for every
                 # route anchors each on whichever line its badges sit by.
                 anc = [] if feed in GRID_PINS else route_anchors(toks, tree, near=BADGE_NEAR_INK)
-                owned = SYMBOL_OWNERS.get((feed, rid))
+                owned = SYMBOL_OWNERS.get(rkey)
                 if owned is None:
                     anc = branch_anchors(
                         anc, sid,
@@ -13565,7 +13626,7 @@ def build_schedule(feeds):
                 if (on_ink_share(cand, t_own) >= on_ink_share(full, t_own) + HMM_GAIN
                         and arc(cand) <= HMM_STRETCH * arc(full)):
                     full = cand
-            override = OVERRIDE_PATHS.get((feed, (rid or "").split("-")[0]))
+            override = OVERRIDE_PATHS.get(rkey)
             hand = None
             if feed in STROKE_MATCH and len(full) == len(base):
                 full, base = match_stroke_network(
@@ -13621,14 +13682,14 @@ def build_schedule(feeds):
         # Here rather than where the routes are registered: the badges are read
         # against the fitted shapes, which do not exist until now.
         split_route = {}                 # shape id -> the route it moved to
-        for rid in [r for r in route_sids if (feed, r) in SPLIT_LABELS]:
+        for rid in [r for r in route_sids if route_key(feed, r) in SPLIT_LABELS]:
             base = route_idx.get((feed, rid))
             drawn = {s: shapes_raw[(feed, s)] for s in route_sids[rid]
                      if (feed, s) in shapes_raw}
             if base is None or len(drawn) < 2:
                 continue
             label = routes[base]["n"]
-            won = split_variants(SPLIT_LABELS[(feed, rid)], drawn)
+            won = split_variants(SPLIT_LABELS[route_key(feed, rid)], drawn)
             moved = {s: t for s, t in won.items() if t and t != label}
             # every variant moving is one line under the other designation,
             # which is MAP_LABELS' question rather than the badges' answer

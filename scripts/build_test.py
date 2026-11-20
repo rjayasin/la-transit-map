@@ -3,14 +3,19 @@ import copy
 import json
 import contextlib
 import io
+import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+import zipfile
 
 import numpy as np
 
 import build_data as B
+import table_check
 from build_cache import FeedCache, atomic_json
 from geometry_check import corridor_error
 from schedule_check import validate
@@ -47,6 +52,29 @@ class CacheTests(unittest.TestCase):
         before = changed.key("b", [self.inputs])
         self.inputs.write_text("other shape")
         self.assertNotEqual(before, changed.key("b", [self.inputs]))
+
+    def test_table_keys_are_the_same_in_every_process(self):
+        # A set iterates in an order set by the per-process string hash seed.
+        code = ("import sys; sys.path.insert(0, sys.argv[1]); from build_cache import FeedCache; "
+                "rows = {('a', '1'): {'shape_ids': {f's{i}' for i in range(20)}}}; "
+                "print(FeedCache('.', [], [], {}, {'OVERRIDE_PATHS': rows}).key('a', []))")
+        keys = {subprocess.run([sys.executable, "-c", code, str(Path(__file__).resolve().parent)],
+                               env={**os.environ, "PYTHONHASHSEED": str(seed)},
+                               capture_output=True, text=True, check=True).stdout
+                for seed in (1, 2)}
+        self.assertEqual(len(keys), 1)
+
+    def test_mask_stamp_covers_what_the_mask_build_reads(self):
+        # unfade reads FADE_MIN and calls glyphs; rival_palette reads LEGEND_SEEDS.
+        # Both are called from below mask_pixels.
+        stamp = B.code_stamp(B.mask_pixels)
+        with patch.object(B, "FADE_MIN", B.FADE_MIN + 0.01):
+            self.assertNotEqual(B.code_stamp(B.mask_pixels), stamp)
+        with patch.dict(B.LEGEND_SEEDS, {"probe": [(1, 2, 3)]}):
+            self.assertNotEqual(B.code_stamp(B.mask_pixels), stamp)
+        with patch.object(B, "glyphs", lambda sub: sub):
+            self.assertNotEqual(B.code_stamp(B.mask_pixels), stamp)
+        self.assertEqual(B.code_stamp(B.mask_pixels), stamp)
 
     def test_corruption_and_stale_keys_are_cache_misses(self):
         c = self.cache()
@@ -173,6 +201,30 @@ class GeometryTests(unittest.TestCase):
             with self.assertRaises(SystemExit) as e:
                 B.main(["--only", "gtfs_bus:76", "--out", "schedule.json"])
         self.assertEqual(e.exception.code, 2)
+
+
+class TableCheckTests(unittest.TestCase):
+    def test_rows_the_build_would_pass_over_are_reported(self):
+        spec = {"box": (0, 0, 1, 1), "path": [(0, 0), (1, 1)]}
+        T = {"FEEDS": ["f", "gone"], "FEED_NAMES": {"f": "F", "gone": "G"},
+             "OVERRIDE_PATHS": {
+                 ("f", "1"): {**spec, "shape_ids": ("a",)},
+                 ("f", "1-7"): spec,
+                 ("f", "3"): spec,
+                 ("f", "2"): [{**spec, "exat": True},
+                              {**spec, "shape_ids": ("a", "z")},
+                              {**spec, "shape_ids": "b"}]}}
+        with tempfile.TemporaryDirectory() as td, patch.object(B, "GTFS", td):
+            with zipfile.ZipFile(f"{td}/f.zip", "w") as z:
+                z.writestr("routes.txt", "route_id\n1-7\n2\n")
+                z.writestr("trips.txt", "route_id,shape_id\n1-7,a\n2,b\n")
+            problems = table_check.check(T, table_check.load(T))
+        expected = ["no archive", "('f', '1-7'): never read", "has no route '3'",
+                    "unknown field 'exat'", "shape 'a' belongs to another route",
+                    "shape 'z' is not in the feed", "is a string"]
+        self.assertEqual(len(problems), len(expected), problems)
+        for text in expected:
+            self.assertTrue(any(text in p for p in problems), text)
 
 
 class StrokeNetworkTests(unittest.TestCase):

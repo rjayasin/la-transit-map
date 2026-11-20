@@ -152,6 +152,13 @@ Everything the artwork can't settle on its own is named in a table near the code
 that reads it. When a route is on the wrong line, one of these is usually the
 fix. Try them in this order, least invasive first.
 
+Rows are keyed by `route_key(feed, route_id)`: the route id up to its first
+`-`, which drops the timetable number some feeds append (`2-13201`). Ids that
+differ only after a dash share a key, so one row covers all of them. The build
+gives no warning for a row whose route or shape ids match nothing, or for a spec
+field it doesn't read. `table_check.py` lists them. Run it after refreshing a
+feed, since a refresh can rename shape ids.
+
 | Table | Use it when |
 |---|---|
 | `MAP_LABELS` | The sheet badges a route differently from the feed's `route_short_name` (or the name is prose, as for a DASH). Also fixes `orphan_check` rows |
@@ -322,7 +329,9 @@ since siblings share badge ownership and color calibration.
 `--out` and byte equality. Cache keys hash feed inputs and shared artwork,
 algorithm code, settings, and library versions. The tables listed in
 `build_cache.FEED_TABLES` are keyed per feed; other code or constants invalidate
-all feeds. Add a table there only if it cannot affect another feed's fit.
+all feeds. Add a table there only if it cannot affect another feed's fit. Rows
+are hashed through `canonical`, which sorts sets, since a set's order changes
+between processes. `--no-cache` refits feeds but reuses masks.
 `build_schedule(feeds)` returns an uncached schedule for integration checks;
 `merge_schedules` preserves the full build's native-before-pseudo shape order.
 
@@ -648,9 +657,13 @@ everything, without either leg moving a street.
   mask, and cutting a corner smoothly costs `path_check` nothing. Use
   `LEGEND_INK` and `INK_SNAP` where the PDF carries the agency's strokes, and
   `ink_gap_check.py` to see the holes.
-- **Mask cache keys include source and library versions.** Editing mask-building
-  functions, including comments, invalidates `scratch/mask-cache/`. Feed cache
-  keys use the parsed code, so comment edits alone do not invalidate fitted feeds.
+- **Mask cache keys cover a builder's source, the values it reads, and library versions.**
+  `code_stamp` follows a mask builder through every function in `scripts/` it
+  calls and hashes their source, comments included, with the value of every
+  upper-case constant they read. Editing `FADE_MIN` or `LEGEND_SEEDS` rebuilds
+  the masks that read it. Anything else a builder reads, such as a file, goes in
+  its key by hand, as `art_stamp` does. Feed cache keys use the parsed code, so
+  comment edits alone do not invalidate fitted feeds.
 - **Build inputs are checked before caches are read.** Missing feeds, calendars,
   inset calibration, or PDF support fail without replacing the schedule. A
   subset cannot target `schedule.json`. Both schedule and cache writes are atomic.
