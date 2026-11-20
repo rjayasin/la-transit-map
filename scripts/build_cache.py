@@ -17,6 +17,31 @@ FEED_TABLES = {
 }
 
 
+def canonical(value):
+    """repr(value), but the same in every process. A set iterates in an order
+    set by the per-process string hash seed, so its repr can differ between two
+    runs of the same build; here it is sorted. A callable is named rather than
+    printed, since its repr carries an address, and an array is digested, since
+    its repr elides the middle."""
+    if isinstance(value, (set, frozenset)):
+        items = sorted(map(canonical, value))
+        return "{" + ", ".join(items) + "}" if items else "set()"
+    if isinstance(value, dict):
+        return "{" + ", ".join(f"{canonical(k)}: {canonical(v)}"
+                               for k, v in value.items()) + "}"
+    if isinstance(value, list):
+        return "[" + ", ".join(map(canonical, value)) + "]"
+    if isinstance(value, tuple):
+        inner = ", ".join(map(canonical, value))
+        return f"({inner},)" if len(value) == 1 else f"({inner})"
+    if hasattr(value, "dtype") and hasattr(value, "tobytes"):
+        digest = hashlib.sha256(value.tobytes()).hexdigest()
+        return f"array({value.dtype}, {getattr(value, 'shape', ())}, {digest})"
+    if callable(value):
+        return f"{getattr(value, '__module__', '')}.{getattr(value, '__qualname__', '')}"
+    return repr(value)
+
+
 def digest_files(paths):
     h = hashlib.sha256()
     for path in sorted(map(Path, paths)):
@@ -76,8 +101,8 @@ class FeedCache:
         self.tables = tables
 
     def key(self, feed, inputs):
-        local = {name: repr(sorted((key, value) for key, value in table.items()
-                                  if key[0] == feed))
+        local = {name: canonical(sorted((key, value) for key, value in table.items()
+                                       if key[0] == feed))
                  for name, table in self.tables.items()}
         value = {**self.shared, "feed": feed, "inputs": digest_files(inputs),
                  "tables": local}

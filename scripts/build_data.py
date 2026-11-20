@@ -12485,7 +12485,7 @@ INSET_OVERRIDE_PATHS = {
     ("foothill", "20707"): [   # Silver Streak, westbound
         {"box": (3375, 3375, 3455, 3460),
          "path": [(3438.4, 3375.0), (3438.4, 3400.3)],
-         "shape_ids": {"22814_shp-v4E-a2", "22819_shp-v4E-a2", "22841_shp-v4E-a2"}},
+         "shape_ids": ("22814_shp-v4E-a2", "22819_shp-v4E-a2", "22841_shp-v4E-a2")},
     ],
     ("ladot", "29"): [         # Commuter Express 409
         {"box": (3380, 2490, 3520, 2610),
@@ -12551,11 +12551,11 @@ INSET_OVERRIDE_PATHS = {
          "paths": [[(3372.4, 3480.0), (3372.4, 3706.0)], [(3417.8, 3480.0), (3417.8, 3706.0)]]},
     ],
     ("ladot", "871"): [        # Commuter Express 534
-        {"box": (3705, 2745, 3885, 2850), "shape_ids": {"11606"},
+        {"box": (3705, 2745, 3885, 2850), "shape_ids": ("11606",),
          "path": CE534_PATSAOURAS},
-        {"box": (3705, 2764.5, 3885, 2850), "shape_ids": {"2972"},
+        {"box": (3705, 2764.5, 3885, 2850), "shape_ids": ("2972",),
          "path": CE534_PATSAOURAS},
-        {"box": (3825, 2740, 3852, 2764), "shape_ids": {"2972"},
+        {"box": (3825, 2740, 3852, 2764), "shape_ids": ("2972",),
          "path": [(3812.0, 2773.3), (3812.0, 2773.3)]},
     ],
     ("ladot", "4291"): [       # Commuter Express 439

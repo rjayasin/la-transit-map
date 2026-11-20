@@ -322,7 +322,9 @@ since siblings share badge ownership and color calibration.
 `--out` and byte equality. Cache keys hash feed inputs and shared artwork,
 algorithm code, settings, and library versions. The tables listed in
 `build_cache.FEED_TABLES` are keyed per feed; other code or constants invalidate
-all feeds. Add a table there only if it cannot affect another feed's fit.
+all feeds. Add a table there only if it cannot affect another feed's fit. Rows
+are hashed through `canonical`, which sorts sets, since a set's order changes
+between processes.
 `build_schedule(feeds)` returns an uncached schedule for integration checks;
 `merge_schedules` preserves the full build's native-before-pseudo shape order.
 

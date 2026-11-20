@@ -3,7 +3,10 @@ import copy
 import json
 import contextlib
 import io
+import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -47,6 +50,17 @@ class CacheTests(unittest.TestCase):
         before = changed.key("b", [self.inputs])
         self.inputs.write_text("other shape")
         self.assertNotEqual(before, changed.key("b", [self.inputs]))
+
+    def test_table_keys_are_the_same_in_every_process(self):
+        # A set iterates in an order set by the per-process string hash seed.
+        code = ("import sys; sys.path.insert(0, sys.argv[1]); from build_cache import FeedCache; "
+                "rows = {('a', '1'): {'shape_ids': {f's{i}' for i in range(20)}}}; "
+                "print(FeedCache('.', [], [], {}, {'OVERRIDE_PATHS': rows}).key('a', []))")
+        keys = {subprocess.run([sys.executable, "-c", code, str(Path(__file__).resolve().parent)],
+                               env={**os.environ, "PYTHONHASHSEED": str(seed)},
+                               capture_output=True, text=True, check=True).stdout
+                for seed in (1, 2)}
+        self.assertEqual(len(keys), 1)
 
     def test_corruption_and_stale_keys_are_cache_misses(self):
         c = self.cache()
