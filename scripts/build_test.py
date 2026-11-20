@@ -10,10 +10,12 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+import zipfile
 
 import numpy as np
 
 import build_data as B
+import table_check
 from build_cache import FeedCache, atomic_json
 from geometry_check import corridor_error
 from schedule_check import validate
@@ -199,6 +201,30 @@ class GeometryTests(unittest.TestCase):
             with self.assertRaises(SystemExit) as e:
                 B.main(["--only", "gtfs_bus:76", "--out", "schedule.json"])
         self.assertEqual(e.exception.code, 2)
+
+
+class TableCheckTests(unittest.TestCase):
+    def test_rows_the_build_would_pass_over_are_reported(self):
+        spec = {"box": (0, 0, 1, 1), "path": [(0, 0), (1, 1)]}
+        T = {"FEEDS": ["f", "gone"], "FEED_NAMES": {"f": "F", "gone": "G"},
+             "OVERRIDE_PATHS": {
+                 ("f", "1"): {**spec, "shape_ids": ("a",)},
+                 ("f", "1-7"): spec,
+                 ("f", "3"): spec,
+                 ("f", "2"): [{**spec, "exat": True},
+                              {**spec, "shape_ids": ("a", "z")},
+                              {**spec, "shape_ids": "b"}]}}
+        with tempfile.TemporaryDirectory() as td, patch.object(B, "GTFS", td):
+            with zipfile.ZipFile(f"{td}/f.zip", "w") as z:
+                z.writestr("routes.txt", "route_id\n1-7\n2\n")
+                z.writestr("trips.txt", "route_id,shape_id\n1-7,a\n2,b\n")
+            problems = table_check.check(T, table_check.load(T))
+        expected = ["no archive", "('f', '1-7'): never read", "has no route '3'",
+                    "unknown field 'exat'", "shape 'a' belongs to another route",
+                    "shape 'z' is not in the feed", "is a string"]
+        self.assertEqual(len(problems), len(expected), problems)
+        for text in expected:
+            self.assertTrue(any(text in p for p in problems), text)
 
 
 class StrokeNetworkTests(unittest.TestCase):

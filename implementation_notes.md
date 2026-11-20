@@ -152,6 +152,13 @@ Everything the artwork can't settle on its own is named in a table near the code
 that reads it. When a route is on the wrong line, one of these is usually the
 fix. Try them in this order, least invasive first.
 
+Rows are keyed by `route_key(feed, route_id)`: the route id up to its first
+`-`, which drops the timetable number some feeds append (`2-13201`). Ids that
+differ only after a dash share a key, so one row covers all of them. The build
+gives no warning for a row whose route or shape ids match nothing, or for a spec
+field it doesn't read. `table_check.py` lists them. Run it after refreshing a
+feed, since a refresh can rename shape ids.
+
 | Table | Use it when |
 |---|---|
 | `MAP_LABELS` | The sheet badges a route differently from the feed's `route_short_name` (or the name is prose, as for a DASH). Also fixes `orphan_check` rows |
