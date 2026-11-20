@@ -324,7 +324,7 @@ algorithm code, settings, and library versions. The tables listed in
 `build_cache.FEED_TABLES` are keyed per feed; other code or constants invalidate
 all feeds. Add a table there only if it cannot affect another feed's fit. Rows
 are hashed through `canonical`, which sorts sets, since a set's order changes
-between processes.
+between processes. `--no-cache` refits feeds but reuses masks.
 `build_schedule(feeds)` returns an uncached schedule for integration checks;
 `merge_schedules` preserves the full build's native-before-pseudo shape order.
 
@@ -650,9 +650,13 @@ everything, without either leg moving a street.
   mask, and cutting a corner smoothly costs `path_check` nothing. Use
   `LEGEND_INK` and `INK_SNAP` where the PDF carries the agency's strokes, and
   `ink_gap_check.py` to see the holes.
-- **Mask cache keys include source and library versions.** Editing mask-building
-  functions, including comments, invalidates `scratch/mask-cache/`. Feed cache
-  keys use the parsed code, so comment edits alone do not invalidate fitted feeds.
+- **Mask cache keys cover a builder's source, the values it reads, and library versions.**
+  `code_stamp` follows a mask builder through every function in `scripts/` it
+  calls and hashes their source, comments included, with the value of every
+  upper-case constant they read. Editing `FADE_MIN` or `LEGEND_SEEDS` rebuilds
+  the masks that read it. Anything else a builder reads, such as a file, goes in
+  its key by hand, as `art_stamp` does. Feed cache keys use the parsed code, so
+  comment edits alone do not invalidate fitted feeds.
 - **Build inputs are checked before caches are read.** Missing feeds, calendars,
   inset calibration, or PDF support fail without replacing the schedule. A
   subset cannot target `schedule.json`. Both schedule and cache writes are atomic.

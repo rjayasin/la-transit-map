@@ -817,12 +817,64 @@ def art_stamp(*paths):
     return out
 
 
+_SCRIPTS = os.path.dirname(os.path.abspath(__file__))
+
+
 def code_stamp(*fns):
     """Identity for the code that produces a mask, so editing any of it
     invalidates the cache by itself. Beats a version constant nobody remembers
-    to bump, and unrelated edits elsewhere in this file don't disturb it."""
-    src = "".join(inspect.getsource(f) for f in fns)
-    return hashlib.blake2b(src.encode(), digest_size=8).hexdigest()
+    to bump, and unrelated edits elsewhere in this file don't disturb it.
+
+    The code is `fns` and everything they reach: the source of every function
+    or class in scripts/ they name, followed through what those name in turn,
+    and the value of every upper-case module constant read along the way. A
+    mask whose builder reads a constant or a table, such as FADE_MIN or
+    LEGEND_SEEDS, is rebuilt when that value changes. Upper-case names that
+    start with "_" are memo caches and are left out."""
+    from build_cache import canonical
+    parts, seen, todo = {}, set(), list(fns)
+    while todo:
+        f = inspect.unwrap(todo.pop())
+        if id(f) in seen:
+            continue
+        seen.add(id(f))
+        where = os.path.basename(inspect.getsourcefile(f))
+        parts[(where, f.__qualname__)] = inspect.getsource(f)
+        for fn in [f] if inspect.isfunction(f) else [
+                m for m in vars(f).values() if inspect.isfunction(m)]:
+            # A default bound to a constant is evaluated when the def runs,
+            # so its name is not among those the function's code looks up.
+            parts[(where, fn.__qualname__ + "()")] = canonical(
+                (fn.__defaults__, fn.__kwdefaults__))
+            g = fn.__globals__
+            for name in _global_names(fn.__code__) & g.keys():
+                if _in_scripts(g[name]):
+                    todo.append(g[name])
+                elif name.isupper() and not name.startswith("_"):
+                    parts[(where, name)] = canonical(g[name])
+    text = "".join(f"{where} {name}\n{part}\n" for (where, name), part in sorted(parts.items()))
+    return hashlib.blake2b(text.encode(), digest_size=8).hexdigest()
+
+
+def _global_names(code):
+    """The names a code object looks up, including those of its nested
+    functions and lambdas."""
+    names = set(code.co_names)
+    for c in code.co_consts:
+        if inspect.iscode(c):
+            names |= _global_names(c)
+    return names
+
+
+def _in_scripts(v):
+    """Whether `v` is a function or class defined in scripts/."""
+    v = inspect.unwrap(v)
+    if not (inspect.isfunction(v) or inspect.isclass(v)):
+        return False
+    try:
+        return os.path.dirname(os.path.abspath(inspect.getsourcefile(v))) == _SCRIPTS
+    except TypeError:               # built in, so no source file
+        return False
 
 
 def cached_pixels(key, build):

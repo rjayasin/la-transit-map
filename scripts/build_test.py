@@ -62,6 +62,18 @@ class CacheTests(unittest.TestCase):
                 for seed in (1, 2)}
         self.assertEqual(len(keys), 1)
 
+    def test_mask_stamp_covers_what_the_mask_build_reads(self):
+        # unfade reads FADE_MIN and calls glyphs; rival_palette reads LEGEND_SEEDS.
+        # Both are called from below mask_pixels.
+        stamp = B.code_stamp(B.mask_pixels)
+        with patch.object(B, "FADE_MIN", B.FADE_MIN + 0.01):
+            self.assertNotEqual(B.code_stamp(B.mask_pixels), stamp)
+        with patch.dict(B.LEGEND_SEEDS, {"probe": [(1, 2, 3)]}):
+            self.assertNotEqual(B.code_stamp(B.mask_pixels), stamp)
+        with patch.object(B, "glyphs", lambda sub: sub):
+            self.assertNotEqual(B.code_stamp(B.mask_pixels), stamp)
+        self.assertEqual(B.code_stamp(B.mask_pixels), stamp)
+
     def test_corruption_and_stale_keys_are_cache_misses(self):
         c = self.cache()
         c.write("a", "key", {"x": [1,2,3]})
